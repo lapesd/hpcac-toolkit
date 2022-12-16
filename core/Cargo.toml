@@ -1,12 +1,12 @@
 [package]
-name = "hpcc_core"
+name = "hpcac-core"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
-name = "hpcc_core"
+name = "hpcac_core"
 bench = false
 test = true
 doctest = false

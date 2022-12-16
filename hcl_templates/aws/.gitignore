@@ -1,0 +1,10 @@
+terraform.tfvars
+terraform.tfstate
+terraform.tfstate.backup
+.terraform.tfstate.lock.info
+.terraform.lock.hcl
+/.terraform
+/keys/id_rsa
+/keys/id_rsa.pub
+aws-plan
+hosts

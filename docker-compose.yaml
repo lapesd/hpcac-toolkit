@@ -1,0 +1,14 @@
+---
+version: '3.3'
+services:
+  postgres:
+    image: postgres:alpine
+    container_name: hpcac-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: local
+      POSTGRES_PASSWORD: local
+      POSTGRES_DB: postgres
+    volumes:
+      - /var/lib/postgresql:/var/lib/postgresql

@@ -1,3 +1,8 @@
 /target
 /.cluster
+/.hcl_files/.terraform
+/.hcl_files/.terraform.lock.hcl
+/.hcl_files/plan
+/.hcl_files/terraform.tfstate
+/.hcl_files/terraform.tfstate.backup
 .env

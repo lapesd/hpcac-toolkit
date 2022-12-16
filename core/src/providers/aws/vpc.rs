@@ -4,8 +4,8 @@ use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 
-use crate::providers::common::TransportProtocol;
 use super::plugin::AwsPluginOptions;
+use crate::providers::common::TransportProtocol;
 
 pub enum SecurityRuleType {
     Ingress,
@@ -169,30 +169,32 @@ impl VPC {
 
         let route = TerraformBlock::builder("resource")
             .add_labels(["aws_route", "cluster_r"])
-            .add_attribute(("route_table_id", RawExpression::new("aws_route_table.cluster_rt.id")))
+            .add_attribute((
+                "route_table_id",
+                RawExpression::new("aws_route_table.cluster_rt.id"),
+            ))
             .add_attribute(("destination_cidr_block", "0.0.0.0/0"))
-            .add_attribute(("gateway_id", RawExpression::new("aws_internet_gateway.cluster_ig.id")));
+            .add_attribute((
+                "gateway_id",
+                RawExpression::new("aws_internet_gateway.cluster_ig.id"),
+            ));
 
         let route_table_association = TerraformBlock::builder("resource")
             .add_labels(["aws_route_table_association", "cluster_rta"])
-            .add_attribute(("subnet_id", RawExpression::new("aws_subnet.cluster_subnet.id")))
-            .add_attribute(("route_table_id", RawExpression::new("aws_route_table.cluster_rt.id")));
+            .add_attribute((
+                "subnet_id",
+                RawExpression::new("aws_subnet.cluster_subnet.id"),
+            ))
+            .add_attribute((
+                "route_table_id",
+                RawExpression::new("aws_route_table.cluster_rt.id"),
+            ));
 
         let ssh_sg = SecurityGroup::new(
             "allow_ssh",
             "Allow SSH traffic",
-            SecurityRule::new(
-                SecurityRuleType::Ingress, 
-                22, 
-                22, 
-                TransportProtocol::TCP
-            ),
-            SecurityRule::new(
-                SecurityRuleType::Egress, 
-                0, 
-                0, 
-                TransportProtocol::ANY
-            ),
+            SecurityRule::new(SecurityRuleType::Ingress, 22, 22, TransportProtocol::TCP),
+            SecurityRule::new(SecurityRuleType::Egress, 0, 0, TransportProtocol::ANY),
         );
 
         let nfs_sg = SecurityGroup::new(
@@ -204,29 +206,14 @@ impl VPC {
                 2049,
                 TransportProtocol::TCP,
             ),
-            SecurityRule::new(
-                SecurityRuleType::Egress, 
-                0, 
-                0, 
-                TransportProtocol::ANY
-            ),
+            SecurityRule::new(SecurityRuleType::Egress, 0, 0, TransportProtocol::ANY),
         );
 
         let mpi_sg = SecurityGroup::new(
             "allow_mpi",
             "Allow MPI traffic",
-            SecurityRule::new(
-                SecurityRuleType::Ingress, 
-                0, 
-                65535, 
-                TransportProtocol::TCP
-            ),
-            SecurityRule::new(
-                SecurityRuleType::Egress, 
-                0, 
-                65535, 
-                TransportProtocol::TCP
-            ),
+            SecurityRule::new(SecurityRuleType::Ingress, 0, 65535, TransportProtocol::TCP),
+            SecurityRule::new(SecurityRuleType::Egress, 0, 65535, TransportProtocol::TCP),
         );
 
         TerraformBody::builder()
