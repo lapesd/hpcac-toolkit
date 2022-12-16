@@ -1,5 +1,5 @@
 /target
-/.cluster
+/.hcl_files/provider.tf
 /.hcl_files/.terraform
 /.hcl_files/.terraform.lock.hcl
 /.hcl_files/plan
