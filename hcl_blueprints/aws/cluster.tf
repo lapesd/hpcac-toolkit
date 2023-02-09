@@ -158,11 +158,11 @@ resource "null_resource" "setup_entrypoint_node" {
     ]
   }
   provisioner "file" {
-    source      = "./keys/id_rsa"
+    source      = var.private_rsa_key_path
     destination = "/home/ec2-user/.ssh/id_rsa"
   }
   provisioner "file" {
-    source      = "./keys/id_rsa.pub"
+    source      = var.public_rsa_key_path
     destination = "/home/ec2-user/.ssh/id_rsa.pub"
   }
   provisioner "remote-exec" {
@@ -230,11 +230,11 @@ resource "null_resource" "setup_worker_nodes" {
     ]
   }
   provisioner "file" {
-    source      = "./keys/id_rsa"
+    source      = var.private_rsa_key_path
     destination = "/home/ec2-user/.ssh/id_rsa"
   }
   provisioner "file" {
-    source      = "./keys/id_rsa.pub"
+    source      = var.public_rsa_key_path
     destination = "/home/ec2-user/.ssh/id_rsa.pub"
   }
   provisioner "remote-exec" {
