@@ -1,0 +1,21 @@
+aws_secret_key = ""
+aws_access_key = ""
+
+region            = "us-east-1"
+availability_zone = "us-east-1a"
+
+private_rsa_key_path = "/home/{user_folder}/id_rsa"
+public_rsa_key_path  = "/home/{user_folder}/id_rsa.pub"
+public_key_name      = "youremail@domain.com"
+
+entrypoint_ami           = "ami-08e4e35cccc6189f4"
+entrypoint_ebs           = 10
+entrypoint_rbs           = 10
+entrypoint_instance_type = "t2.micro"
+
+worker_count         = 1
+worker_ami           = "ami-08e4e35cccc6189f4"
+worker_ebs           = 10
+worker_rbs           = 10
+worker_instance_type = "t2.micro"
+worker_spot_price    = 0.0035
