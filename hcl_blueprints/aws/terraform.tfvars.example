@@ -4,8 +4,8 @@ aws_access_key = ""
 region            = "us-east-1"
 availability_zone = "us-east-1a"
 
-private_rsa_key_path = "/home/{user_folder}/id_rsa"
-public_rsa_key_path  = "/home/{user_folder}/id_rsa.pub"
+private_rsa_key_path = "/home/{user_folder}/.ssh/id_rsa"
+public_rsa_key_path  = "/home/{user_folder}/.ssh/id_rsa.pub"
 public_key_name      = "youremail@domain.com"
 
 entrypoint_ami           = "ami-08e4e35cccc6189f4"
