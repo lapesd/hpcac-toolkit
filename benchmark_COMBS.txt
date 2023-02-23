@@ -1,0 +1,106 @@
+                        Benchmark MPI
+_________________________________________________________________________
+
+
+git clone https://github.com/fxswiatowicz/clarkson-reu-benchmarks.git
+cd clarkson-reu-benchmarks
+cd benchmarks
+
+
+####   2d-heat
+
+*Only make mpi work
+In /src directory:
+1) make mpi
+2) mpirun -np [ x ] ./mpi-2dheat.x -t -w [ x ] -h [ x ] -m 3 -e 3.0
+-w: Widths = 64 128 256 512
+-h: Heights = 64 128 256 512
+-np: Procs = 1 2 4 8 16 28
+-m: Method = 3
+-e: Epsilon = 3.0
+
+Example: 
+- mpirun -np 2 ./mpi-2dheat.x -t -w 64 -h 64 -m 3 -e 3.0
+- mpirun -np 4 ./mpi-2dheat.x -t -w 64 -h 64 -m 3 -e 3.0
+
+
+####   fidibench
+
+* Only MPI test is working 
+1) sudo yum install cmake -y
+2) mkdir build
+3) cd build
+4) cmake ..
+5) make
+6) ctest
+7) cd Testing/Temporary
+8) cat LastTest.log
+
+
+####   hpcg
+
+1) mkdir build
+2) cd build
+3) ../configure Linux_MPI
+4) make                         
+5) cd bin
+6) mpirun -np [ x ] ./xhpcg 32 24 16
+7) Results in HPCG-Benchmark....txt - search for Benchmark Time Summary - Total
+
+
+####   matrix-mpi
+
+1) sudo yum install cmake
+2) cmake .
+3) make
+5) mpirun -np [ x ] ./main [ N ]
+-np: 2, 4, 8, 16…
+N: 2, 4, 8, 16…
+
+
+####   phase-retrieval-benchmarks
+
+1) sudo yum update 
+2) sudo yum install fftw-devel fftw-doc -y
+3) mpicc -O2 RRR.c -lm -L/usr/lib -lfftw3 -o RRR
+4) mpirun ./RRR [datafile] [supp] [powgoal] [beta] [iterlimit] [trials] [resultfile] &
+
+- datafile:	one of the benchmark datafiles (data/data100E, data/data140E, ...)
+- supp:		support size = 8*N, N = 100, 140, ... is the number of atoms
+- powgoal:	fractional power in support
+- beta:		RRR parameter
+- iterlimit:	RRR iteration limit (long int)
+- trials:		number of random starts
+- resultfile:	ASCII file of the iteration counts for each trial
+
+Example: 
+  mpirun ./RRR data/data100E 800 .95 .5 1000 5 results100E &
+5) cat results100E
+
+
+####   sombrero 
+
+1) cd sombrero-master
+2) nano Make/MkFlags
+white in file:
+"
+MPICC = mpicc
+CFLAGS = -std=c99 -O3
+"
+3) make
+4) mpirun ./sombrero.sh -n <num-cores>  [ -w ] [ -s small | medium | large | very_large ]
+-w: use in weak scale
+
+Example:
+./sombrero.sh -n 1 -w -s small
+
+
+####   quanSimBench
+
+1) mpicc -Ofast -DMAXQUBITS=20 quansimbench.c -o quansimbench -lm
+It's defining max amount of QUBITS = 20
+2) mpirun -np [ x ] ./quansimbench
+
+Example:
+mpirun -np 2 ./quansimbench
+
