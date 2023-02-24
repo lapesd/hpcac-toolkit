@@ -3,7 +3,7 @@
 # Apply OS packages updates
 sudo yum -y update
 
-# Install dependencies
+# Install system dependencies
 sudo yum install -y \
   wget \
   perl \
@@ -15,20 +15,29 @@ sudo yum install -y \
   autoconf \
   automake \
   m4 \
+  make \
   libtool \
   flex \
-  openssl-devel
+  openssl-devel \
+  glibc-devel \
+  patch \
+  libuuid-devel \
+  libseccomp-devel \
+  pkg-config \
+  cryptsetup \
+  libibverbs-core \
+  libibverbs-devel \
+  libfabric-devel \
+  openmpi-devel
 
-# Install singularity
-sudo yum -y update   
-sudo yum -y install make glibc-devel gcc patch openssl-devel libuuid-devel libseccomp-devel wget git pkg-config cryptsetup
-
+# Install GO Language support (required for SingularityCE)
 wget https://dl.google.com/go/go1.13.linux-amd64.tar.gz
 sudo tar --directory=/usr/local -xzvf go1.13.linux-amd64.tar.gz
 export PATH=/usr/local/go/bin:$PATH
+
+# Compile SingularityCE from sources
 wget https://github.com/singularityware/singularity/releases/download/v3.5.3/singularity-3.5.3.tar.gz
 tar -xzvf singularity-3.5.3.tar.gz
-
 cd singularity
 ./mconfig
 cd builddir
@@ -71,17 +80,17 @@ int main(int argc, char** argv) {
 }
 EOF
 
-# INSTALL MVAPICH
-sudo yum clean all
-sudo yum clean metadata
-sudo yum -y update
-sudo yum install -y gcc-gfortran
-sudo yum install -y libibverbs-core
-sudo yum install -y libfabric-devel libibverbs-devel openmpi-devel
-   
+# Install MVAPICH with AWS support from RPM package release
 wget http://mvapich.cse.ohio-state.edu/download/mvapich/mv2x/2.3/mvapich2-x-aws-mofed-gnu7.3.1-2.3x-1.amzn2.x86_64.rpm
 sudo rpm -Uvh --nodeps mvapich2-x-aws-mofed-gnu7.3.1-2.3x-1.amzn2.x86_64.rpm
 rm mvapich2-x-aws-mofed-gnu7.3.1-2.3x-1.amzn2.x86_64.rpm
+
+# # Build and install OpenMPI with ULFM (User-Level Failure Mitigation) support from source
+# git clone --recursive https://github.com/open-mpi/ompi.git
+# cd ompi || exit
+# sudo ./autogen.pl --no-oshmem
+# sudo ./configure --disable-io-romio --enable-debug CFLAGS='-O0 -g' --disable-man-pages
+# sudo make install && git clean -fdx && rm -rf 3rd-party
 
 singularity pull --arch amd64 library://livia_ferrao/image/mvapich4:latest
 
@@ -106,7 +115,6 @@ make IS CLASS=A NPROCS=1
 make IS CLASS=A NPROCS=2
 make DT CLASS=A NPROCS=1
 
-
 # EXPORTS
 cat <<EOF > ~/.bash_profile
 # .bash_profile
@@ -125,17 +133,6 @@ EOF
 
 source ~/.bash_profile
 
-
-
-
-# Build and install OpenMPI with ULFM (User-Level Failure Mitigation) support from source
-git clone --recursive https://github.com/open-mpi/ompi.git
-cd ompi || exit
-sudo ./autogen.pl --no-oshmem
-sudo ./configure --disable-io-romio --enable-debug CFLAGS='-O0 -g' --disable-man-pages
-sudo make install && git clean -fdx && rm -rf 3rd-party
-
-# - DO NOT REMOVE ANYTHING BEYOND THIS LINE
 # Mount the Elastic Block Storage
 sudo mkfs -t ext4 /dev/xvdh
 sudo mkdir /var/nfs_dir

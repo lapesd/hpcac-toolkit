@@ -138,13 +138,13 @@ resource "null_resource" "setup_entrypoint_node" {
     private_key = file(var.private_rsa_key_path)
   }
   provisioner "file" {
-    source      = "./scripts/base_ompi_setup.sh"
-    destination = "/tmp/base_ompi_setup.sh"
+    source      = "./scripts/base_setup.sh"
+    destination = "/tmp/base_setup.sh"
   }
   provisioner "remote-exec" {
     inline = [
-      "chmod +x /tmp/base_ompi_setup.sh",
-      "/tmp/base_ompi_setup.sh"
+      "chmod +x /tmp/base_setup.sh",
+      "/tmp/base_setup.sh"
     ]
   }
   provisioner "file" {
@@ -210,13 +210,13 @@ resource "null_resource" "setup_worker_nodes" {
     private_key = file(var.private_rsa_key_path)
   }
   provisioner "file" {
-    source      = "./scripts/base_ompi_setup.sh"
-    destination = "/tmp/base_ompi_setup.sh"
+    source      = "./scripts/base_setup.sh"
+    destination = "/tmp/base_setup.sh"
   }
   provisioner "remote-exec" {
     inline = [
-      "chmod +x /tmp/base_ompi_setup.sh ${aws_key_pair.deployer_key.public_key}",
-      "/tmp/base_ompi_setup.sh"
+      "chmod +x /tmp/base_setup.sh ${aws_key_pair.deployer_key.public_key}",
+      "/tmp/base_setup.sh"
     ]
   }
   provisioner "file" {
