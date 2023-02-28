@@ -8,10 +8,10 @@ private_rsa_key_path = "/home/{user_folder}/.ssh/id_rsa"
 public_rsa_key_path  = "/home/{user_folder}/.ssh/id_rsa.pub"
 public_key_name      = "youremail@domain.com"
 
-entrypoint_ami           = "ami-08e4e35cccc6189f4"
-entrypoint_ebs           = 10
-entrypoint_rbs           = 10
-entrypoint_instance_type = "t2.micro"
+master_ami           = "ami-08e4e35cccc6189f4"
+master_ebs           = 10
+master_rbs           = 10
+master_instance_type = "t2.micro"
 
 worker_count         = 1
 worker_ami           = "ami-08e4e35cccc6189f4"

@@ -4,10 +4,10 @@ variable "private_rsa_key_path" {}
 variable "public_rsa_key_path" {}
 variable "public_key_name" {}
 
-variable "entrypoint_ami" {}
-variable "entrypoint_ebs" {}
-variable "entrypoint_rbs" {}
-variable "entrypoint_instance_type" {}
+variable "master_ami" {}
+variable "master_ebs" {}
+variable "master_rbs" {}
+variable "master_instance_type" {}
 
 variable "worker_count" {}
 variable "worker_ami" {}
@@ -108,55 +108,37 @@ resource "aws_key_pair" "deployer_key" {
   public_key = file(var.public_rsa_key_path)
 }
 
-resource "aws_instance" "entrypoint_node" {
-  ami             = var.entrypoint_ami
-  instance_type   = var.entrypoint_instance_type
+resource "aws_instance" "master_node" {
+  ami             = var.master_ami
+  instance_type   = var.master_instance_type
   security_groups = [aws_security_group.allow_ssh.id, aws_security_group.allow_nfs.id, aws_security_group.allow_mpi.id]
   subnet_id       = aws_subnet.cluster_subnet.id
   key_name        = aws_key_pair.deployer_key.key_name
   root_block_device {
     delete_on_termination = "true"
-    volume_size           = var.entrypoint_rbs
+    volume_size           = var.master_rbs
   }
   ebs_block_device {
     delete_on_termination = "true"
     device_name           = "/dev/sdh"
-    volume_size           = var.entrypoint_ebs
+    volume_size           = var.master_ebs
   }
   private_ip = "10.0.0.10"
   depends_on = [aws_internet_gateway.cluster_ig]
   tags = {
-    Name = "Entrypoint Node"
+    Name = "Master Node"
   }
 }
 
-resource "null_resource" "setup_entrypoint_node" {
+resource "null_resource" "setup_master_node" {
   connection {
     type        = "ssh"
-    host        = aws_instance.entrypoint_node.public_ip
+    host        = aws_instance.master_node.public_ip
     user        = "ec2-user"
     private_key = file(var.private_rsa_key_path)
   }
-  provisioner "file" {
-    source      = "./scripts/base_setup.sh"
-    destination = "/tmp/base_setup.sh"
-  }
-  provisioner "remote-exec" {
-    inline = [
-      "chmod +x /tmp/base_setup.sh",
-      "/tmp/base_setup.sh"
-    ]
-  }
-  provisioner "file" {
-    source      = "./scripts/entrypoint_nfs_setup.sh"
-    destination = "/tmp/entrypoint_nfs_setup.sh"
-  }
-  provisioner "remote-exec" {
-    inline = [
-      "chmod +x /tmp/entrypoint_nfs_setup.sh",
-      "/tmp/entrypoint_nfs_setup.sh"
-    ]
-  }
+
+  # Copy SSH keys
   provisioner "file" {
     source      = var.private_rsa_key_path
     destination = "/home/ec2-user/.ssh/id_rsa"
@@ -168,6 +150,54 @@ resource "null_resource" "setup_entrypoint_node" {
   provisioner "remote-exec" {
     inline = [
       "chmod 600 /home/ec2-user/.ssh/id_rsa"
+    ]
+  }
+
+  # Basic EC2 configuration
+  provisioner "file" {
+    source      = "./scripts/base_setup.sh"
+    destination = "/tmp/base_setup.sh"
+  }
+  provisioner "remote-exec" {
+    inline = [
+      "chmod +x /tmp/base_setup.sh ${aws_key_pair.deployer_key.public_key}",
+      "/tmp/base_setup.sh"
+    ]
+  }
+
+  # Setup NFS server
+  provisioner "file" {
+    source      = "./scripts/nfs/nfs_server_setup.sh"
+    destination = "/tmp/nfs_server_setup.sh"
+  }
+  provisioner "remote-exec" {
+    inline = [
+      "chmod +x /tmp/nfs_server_setup.sh",
+      "/tmp/nfs_server_setup.sh"
+    ]
+  }
+
+  # Install MVAPICH
+  provisioner "file" {
+    source      = "./scripts/mpi/install_mvapich.sh"
+    destination = "/tmp/install_mvapich.sh"
+  }
+  provisioner "remote-exec" {
+    inline = [
+      "chmod +x /tmp/install_mvapich.sh",
+      "/tmp/install_mvapich.sh"
+    ]
+  }
+
+  # Install Singularity
+  provisioner "file" {
+    source      = "./scripts/singularity/install_singularity.sh"
+    destination = "/tmp/install_singularity.sh"
+  }
+  provisioner "remote-exec" {
+    inline = [
+      "chmod +x /tmp/install_singularity.sh",
+      "/tmp/install_singularity.sh"
     ]
   }
 }
@@ -194,7 +224,7 @@ resource "aws_spot_instance_request" "worker_node" {
   wait_for_fulfillment           = "true"
 
   private_ip = "10.0.0.1${count.index + 1}"
-  depends_on = [aws_internet_gateway.cluster_ig, aws_instance.entrypoint_node, null_resource.setup_entrypoint_node]
+  depends_on = [aws_internet_gateway.cluster_ig, aws_instance.master_node, null_resource.setup_master_node]
   monitoring = true
   tags = {
     Name = "Worker ${count.index + 1}"
@@ -209,26 +239,8 @@ resource "null_resource" "setup_worker_nodes" {
     user        = "ec2-user"
     private_key = file(var.private_rsa_key_path)
   }
-  provisioner "file" {
-    source      = "./scripts/base_setup.sh"
-    destination = "/tmp/base_setup.sh"
-  }
-  provisioner "remote-exec" {
-    inline = [
-      "chmod +x /tmp/base_setup.sh ${aws_key_pair.deployer_key.public_key}",
-      "/tmp/base_setup.sh"
-    ]
-  }
-  provisioner "file" {
-    source      = "./scripts/worker_node_nfs_setup.sh"
-    destination = "/tmp/worker_node_nfs_setup.sh"
-  }
-  provisioner "remote-exec" {
-    inline = [
-      "chmod +x /tmp/worker_node_nfs_setup.sh",
-      "/tmp/worker_node_nfs_setup.sh 10.0.0.10"
-    ]
-  }
+
+  # Copy SSH keys
   provisioner "file" {
     source      = var.private_rsa_key_path
     destination = "/home/ec2-user/.ssh/id_rsa"
@@ -240,6 +252,54 @@ resource "null_resource" "setup_worker_nodes" {
   provisioner "remote-exec" {
     inline = [
       "chmod 600 /home/ec2-user/.ssh/id_rsa"
+    ]
+  }
+
+  # Basic EC2 configuration
+  provisioner "file" {
+    source      = "./scripts/base_setup.sh"
+    destination = "/tmp/base_setup.sh"
+  }
+  provisioner "remote-exec" {
+    inline = [
+      "chmod +x /tmp/base_setup.sh ${aws_key_pair.deployer_key.public_key}",
+      "/tmp/base_setup.sh"
+    ]
+  }
+
+  # Setup NFS client access
+  provisioner "file" {
+    source      = "./scripts/nfs/nfs_client_setup.sh"
+    destination = "/tmp/nfs_client_setup.sh"
+  }
+  provisioner "remote-exec" {
+    inline = [
+      "chmod +x /tmp/nfs_client_setup.sh",
+      "/tmp/nfs_client_setup.sh 10.0.0.10"
+    ]
+  }
+
+  # Install MVAPICH
+  provisioner "file" {
+    source      = "./scripts/mpi/install_mvapich.sh"
+    destination = "/tmp/install_mvapich.sh"
+  }
+  provisioner "remote-exec" {
+    inline = [
+      "chmod +x /tmp/install_mvapich.sh",
+      "/tmp/install_mvapich.sh"
+    ]
+  }
+
+  # Install Singularity
+  provisioner "file" {
+    source      = "./scripts/singularity/install_singularity.sh"
+    destination = "/tmp/install_singularity.sh"
+  }
+  provisioner "remote-exec" {
+    inline = [
+      "chmod +x /tmp/install_singularity.sh",
+      "/tmp/install_singularity.sh"
     ]
   }
 }
