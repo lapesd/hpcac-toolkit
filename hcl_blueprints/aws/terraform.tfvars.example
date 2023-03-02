@@ -8,14 +8,18 @@ private_rsa_key_path = "/home/{user_folder}/.ssh/id_rsa"
 public_rsa_key_path  = "/home/{user_folder}/.ssh/id_rsa.pub"
 public_key_name      = "youremail@domain.com"
 
-master_ami           = "ami-08e4e35cccc6189f4"
+master_ami           = "ami-0eafbf02ca3338472"
 master_ebs           = 10
 master_rbs           = 10
-master_instance_type = "t2.micro"
+master_instance_type = "c5n.2xlarge"
 
 worker_count         = 1
-worker_ami           = "ami-08e4e35cccc6189f4"
+worker_ami           = "ami-0eafbf02ca3338472"
 worker_ebs           = 10
 worker_rbs           = 10
 worker_instance_type = "t2.micro"
-worker_spot_price    = 0.0035
+worker_spot_price    = 0.5
+
+
+# "ami-08e4e35cccc6189f4" - AMAZON LINUX 2 BASE AMI
+# "ami-0eafbf02ca3338472" - MVAPICH2 Only AMI

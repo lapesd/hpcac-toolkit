@@ -154,16 +154,16 @@ resource "null_resource" "setup_master_node" {
   }
 
   # Basic EC2 configuration
-  provisioner "file" {
-    source      = "./scripts/base_setup.sh"
-    destination = "/tmp/base_setup.sh"
-  }
-  provisioner "remote-exec" {
-    inline = [
-      "chmod +x /tmp/base_setup.sh ${aws_key_pair.deployer_key.public_key}",
-      "/tmp/base_setup.sh"
-    ]
-  }
+  #provisioner "file" {
+  #  source      = "./scripts/base_setup.sh"
+  #  destination = "/tmp/base_setup.sh"
+  #}
+  #provisioner "remote-exec" {
+  #  inline = [
+  #    "chmod +x /tmp/base_setup.sh ${aws_key_pair.deployer_key.public_key}",
+  #    "/tmp/base_setup.sh"
+  #  ]
+  #}
 
   # Setup NFS server
   provisioner "file" {
@@ -178,28 +178,28 @@ resource "null_resource" "setup_master_node" {
   }
 
   # Install MVAPICH
-  provisioner "file" {
-    source      = "./scripts/mpi/install_mvapich.sh"
-    destination = "/tmp/install_mvapich.sh"
-  }
-  provisioner "remote-exec" {
-    inline = [
-      "chmod +x /tmp/install_mvapich.sh",
-      "/tmp/install_mvapich.sh"
-    ]
-  }
+  #provisioner "file" {
+  #  source      = "./scripts/mpi/install_mvapich.sh"
+  #  destination = "/tmp/install_mvapich.sh"
+  #}
+  #provisioner "remote-exec" {
+  #  inline = [
+  #    "chmod +x /tmp/install_mvapich.sh",
+  #    "/tmp/install_mvapich.sh"
+  #  ]
+  #}
 
   # Install Singularity
-  provisioner "file" {
-    source      = "./scripts/singularity/install_singularity.sh"
-    destination = "/tmp/install_singularity.sh"
-  }
-  provisioner "remote-exec" {
-    inline = [
-      "chmod +x /tmp/install_singularity.sh",
-      "/tmp/install_singularity.sh"
-    ]
-  }
+  #provisioner "file" {
+  #  source      = "./scripts/singularity/install_singularity.sh"
+  #  destination = "/tmp/install_singularity.sh"
+  #}
+  #provisioner "remote-exec" {
+  #  inline = [
+  #    "chmod +x /tmp/install_singularity.sh",
+  #    "/tmp/install_singularity.sh"
+  #  ]
+  #}
 }
 
 resource "aws_spot_instance_request" "worker_node" {
@@ -256,16 +256,16 @@ resource "null_resource" "setup_worker_nodes" {
   }
 
   # Basic EC2 configuration
-  provisioner "file" {
-    source      = "./scripts/base_setup.sh"
-    destination = "/tmp/base_setup.sh"
-  }
-  provisioner "remote-exec" {
-    inline = [
-      "chmod +x /tmp/base_setup.sh ${aws_key_pair.deployer_key.public_key}",
-      "/tmp/base_setup.sh"
-    ]
-  }
+  #provisioner "file" {
+  #  source      = "./scripts/base_setup.sh"
+  #  destination = "/tmp/base_setup.sh"
+  #}
+  #provisioner "remote-exec" {
+  #  inline = [
+  #    "chmod +x /tmp/base_setup.sh ${aws_key_pair.deployer_key.public_key}",
+  #    "/tmp/base_setup.sh"
+  #  ]
+  #}
 
   # Setup NFS client access
   provisioner "file" {
@@ -280,26 +280,26 @@ resource "null_resource" "setup_worker_nodes" {
   }
 
   # Install MVAPICH
-  provisioner "file" {
-    source      = "./scripts/mpi/install_mvapich.sh"
-    destination = "/tmp/install_mvapich.sh"
-  }
-  provisioner "remote-exec" {
-    inline = [
-      "chmod +x /tmp/install_mvapich.sh",
-      "/tmp/install_mvapich.sh"
-    ]
-  }
+  #provisioner "file" {
+  #  source      = "./scripts/mpi/install_mvapich.sh"
+  #  destination = "/tmp/install_mvapich.sh"
+  #}
+  #provisioner "remote-exec" {
+  #  inline = [
+  #    "chmod +x /tmp/install_mvapich.sh",
+  #    "/tmp/install_mvapich.sh"
+  #  ]
+  #}
 
   # Install Singularity
-  provisioner "file" {
-    source      = "./scripts/singularity/install_singularity.sh"
-    destination = "/tmp/install_singularity.sh"
-  }
-  provisioner "remote-exec" {
-    inline = [
-      "chmod +x /tmp/install_singularity.sh",
-      "/tmp/install_singularity.sh"
-    ]
-  }
+  #provisioner "file" {
+  #  source      = "./scripts/singularity/install_singularity.sh"
+  #  destination = "/tmp/install_singularity.sh"
+  #}
+  #provisioner "remote-exec" {
+  #  inline = [
+  #    "chmod +x /tmp/install_singularity.sh",
+  #    "/tmp/install_singularity.sh"
+  #  ]
+  #}
 }

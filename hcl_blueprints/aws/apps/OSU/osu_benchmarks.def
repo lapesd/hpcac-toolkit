@@ -1,0 +1,17 @@
+Bootstrap: docker
+From: amazonlinux:2022
+
+%files
+    ../scripts/base_setup.sh /root/
+    ../scripts/mpi/install_mvapich.sh /root/
+
+%environment
+    export SINGULARITY_MPICH_DIR=/usr
+    export OSU_DIR=/usr/local/osu/libexec/osu-micro-benchmarks/mpi
+
+%post
+    
+
+%runscript
+    echo "Rank ${PMI_RANK} - About to run: ${OSU_DIR}/$"
+    exec ${OSU_DIR}/$*

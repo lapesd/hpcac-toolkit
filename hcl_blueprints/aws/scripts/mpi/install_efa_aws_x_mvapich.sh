@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# TODO: install EFA support packages
+# https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/efa-start.html#efa-start-security
+
 # Install Linux kernel header files
 sudo yum install -y kernel-devel-$(uname -r)
 
