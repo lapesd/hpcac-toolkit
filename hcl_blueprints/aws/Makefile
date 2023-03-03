@@ -36,3 +36,11 @@ build-singularity-hello-world: ## build the hello_world singularity container
 
 run-singularity-hello-world: ## run the hello_world singularity container
 	ssh ec2-user@$(ip) mpirun -n $(n) --hostfile /var/nfs_dir/hostfile singularity run /var/nfs_dir/hello_world/mvapich_hybrid.sif /opt/mpitest
+
+build-singularity-npb: ## build the NPB singularity container
+	scp -r ./apps/NPB ec2-user@$(ip):/var/nfs_dir
+	ssh ec2-user@$(ip) sudo /usr/local/bin/singularity build /var/nfs_dir/NPB/npb_image.sif /var/nfs_dir/NPB/npb_image.def
+	scp -r ./hostfile ec2-user@$(ip):/var/nfs_dir
+
+run-singularity-npb-IS-2: ## run the NPB singularity container
+	ssh ec2-user@$(ip) mpirun -n $(n) --hostfile /var/nfs_dir/hostfile singularity run /var/nfs_dir/NPB/npb_image.sif /opt/NPB3.3-MPI/bin/is.A.2

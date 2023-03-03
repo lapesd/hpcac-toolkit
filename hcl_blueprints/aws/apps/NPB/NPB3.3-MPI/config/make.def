@@ -1,0 +1,9 @@
+MPICC = cc
+CLINK   = cc
+CMPI_LIB  = -L/usr/local/lib -lmpi
+CMPI_INC = -I/usr/local/include
+CFLAGS  = -O
+CLINKFLAGS = -O
+CC  = cc -g
+BINDIR  = ../bin
+RAND   = randi8
