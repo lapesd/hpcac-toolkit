@@ -21,10 +21,18 @@ cluster-create: ## create a EC2 cluster using terraform
 cluster-destroy: ## destroy all cluster resources
 	terraform destroy -auto-approve
 
-compile-heat-exchange: ## Compile and run the heat_equations sample application
+compile-heat-exchange: ## compile the heat_exchange sample application
 	scp -r ./apps/heat_exchange ec2-user@$(ip):/var/nfs_dir
 	ssh ec2-user@$(ip) make -C /var/nfs_dir/heat_exchange
 	scp -r ./hostfile ec2-user@$(ip):/var/nfs_dir
 
-run-heat-exchange:
+run-heat-exchange: ## execute the heat exchange sample application
 	ssh ec2-user@$(ip) mpirun -np $(n) --hostfile /var/nfs_dir/hostfile /var/nfs_dir/heat_exchange/parallelHeatEq
+
+build-singularity-hello-world: ## build the hello_world singularity container
+	scp -r ./apps/hello_world ec2-user@$(ip):/var/nfs_dir
+	ssh ec2-user@$(ip) sudo /usr/local/bin/singularity build /var/nfs_dir/hello_world/mvapich_hybrid.sif /var/nfs_dir/hello_world/mvapich_hybrid.def
+	scp -r ./hostfile ec2-user@$(ip):/var/nfs_dir
+
+run-singularity-hello-world: ## run the hello_world singularity container
+	ssh ec2-user@$(ip) mpirun -n $(n) --hostfile /var/nfs_dir/hostfile singularity run /var/nfs_dir/hello_world/mvapich_hybrid.sif /opt/mpitest
