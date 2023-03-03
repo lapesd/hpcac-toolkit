@@ -8,6 +8,10 @@ sudo yum install -y \
     cryptsetup \
     runc
 
+# Clean yum cache and metadata:
+sudo yum clean all \
+  && sudo rm -rf /var/cache/yum
+
 # Install GO Language support (required for SingularityCE)
 export VERSION=1.20.1 OS=linux ARCH=amd64 && \
     wget https://dl.google.com/go/go$VERSION.$OS-$ARCH.tar.gz && \
