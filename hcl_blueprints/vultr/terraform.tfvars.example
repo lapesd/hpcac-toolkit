@@ -1,0 +1,42 @@
+/*
+    Vultr regions:
+    dfw: US Dallas
+*/
+region = "dfw"
+
+/*
+    Some cheap Vultr instances:
+    {
+        "id": "vc2-2c-4gb",
+        "vcpu_count": 2,
+        "ram": 4096,
+        "disk": 80,
+        "disk_count": 1,
+        "bandwidth": 3072,
+        "monthly_cost": 20,
+        "type": "vc2"
+    },
+    {
+        "id": "vc2-1c-1gb",
+        "vcpu_count": 1,
+        "ram": 1024,
+        "disk": 25,
+        "disk_count": 1,
+        "bandwidth": 1024,
+        "monthly_cost": 5,
+        "type": "vc2"
+    }
+*/
+master_instance_type = "vc2-2c-4gb"
+master_node_os_id    = "167"  # id: 167 -> CentOS 7 x64
+
+worker_instance_type = "vc2-1c-1gb"
+worker_os_id         = "167"  # id: 167 -> CentOS 7 x64
+worker_count         = 1
+
+private_rsa_key_path = "/Users/vanderlei/.ssh/id_rsa"
+public_rsa_key_path  = "/Users/vanderlei/.ssh/id_rsa.pub"
+public_key_name      = "vanderlei@MY-PK"
+
+password             = ""
+vultr_api_key        = ""
