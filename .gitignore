@@ -3,3 +3,4 @@
 /schematics/
 **terraform.tfvars
 /.dev
+**.DS_Store
