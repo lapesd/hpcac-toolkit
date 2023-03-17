@@ -18,7 +18,6 @@ worker_ami           = "ami-0eafbf02ca3338472"
 worker_ebs           = 10
 worker_rbs           = 10
 worker_instance_type = "t2.micro"
-worker_spot_price    = 0.5
 
 
 # "ami-08e4e35cccc6189f4" - AMAZON LINUX 2 BASE AMI

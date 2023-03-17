@@ -14,7 +14,6 @@ variable "worker_ami" {}
 variable "worker_ebs" {}
 variable "worker_rbs" {}
 variable "worker_instance_type" {}
-variable "worker_spot_price" {}
 
 
 resource "aws_vpc" "cluster_vpc" {
@@ -202,30 +201,24 @@ resource "null_resource" "setup_master_node" {
   #}
 }
 
-resource "aws_spot_instance_request" "worker_node" {
+resource "aws_instance" "worker_node" {
   count           = var.worker_count
   ami             = var.worker_ami
   instance_type   = var.worker_instance_type
-  spot_price      = var.worker_spot_price
   security_groups = [aws_security_group.allow_ssh.id, aws_security_group.allow_nfs.id, aws_security_group.allow_mpi.id]
   subnet_id       = aws_subnet.cluster_subnet.id
   key_name        = aws_key_pair.deployer_key.key_name
   root_block_device {
     delete_on_termination = "true"
-    volume_size           = "10"
+    volume_size           = var.worker_rbs
   }
   ebs_block_device {
     delete_on_termination = "true"
     device_name           = "/dev/sdh"
-    volume_size           = "10"
+    volume_size           = var.worker_ebs
   }
-  spot_type                      = "one-time"
-  instance_interruption_behavior = "terminate"
-  wait_for_fulfillment           = "true"
-
   private_ip = "10.0.0.1${count.index + 1}"
   depends_on = [aws_internet_gateway.cluster_ig, aws_instance.master_node, null_resource.setup_master_node]
-  monitoring = true
   tags = {
     Name = "Worker ${count.index + 1}"
   }
@@ -235,7 +228,7 @@ resource "null_resource" "setup_worker_nodes" {
   count = var.worker_count
   connection {
     type        = "ssh"
-    host        = aws_spot_instance_request.worker_node[count.index].public_ip
+    host        = aws_instance.worker_node[count.index].public_ip
     user        = "ec2-user"
     private_key = file(var.private_rsa_key_path)
   }
