@@ -37,3 +37,11 @@ build-singularity-NPB: ## build the NPB IS singularity container
 
 run-singularity-NPB-IS: ## run the NPB IS singularity container
 	ssh ec2-user@$(ip) mpirun -n $(n) --hostfile /var/nfs_dir/hostfile singularity run /var/nfs_dir/NPB/npb_image.sif /opt/is.A.2
+
+build-ulfm-is: ## build the ULFM version of the IS NBS benchmark
+	scp -r ./../sample_apps/hello_world ec2-user@$(ip):/var/nfs_dir
+	ssh ec2-user@$(ip) sudo /usr/local/bin/singularity build /var/nfs_dir/hello_world/mvapich_hybrid.sif /var/nfs_dir/hello_world/mvapich_hybrid.def
+	scp -r ./hostfile ec2-user@$(ip):/var/nfs_dir
+
+run-ulfm-is: ## run the ULFM version of the IS NBS benchmark
+	ssh ec2-user@$(ip) mpirun -n $(n) --hostfile /var/nfs_dir/hostfile singularity run /var/nfs_dir/hello_world/mvapich_hybrid.sif /opt/mpitest

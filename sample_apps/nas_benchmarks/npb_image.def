@@ -1,0 +1,50 @@
+Bootstrap: docker
+From: amazonlinux:latest
+
+%files
+    /var/nfs_dir/NPB/NPB3.3-MPI /opt
+
+%environment
+    export PATH="$MPICH_DIR/bin:$PATH"
+
+%post
+    echo "Installing OS packages and MVAPICH..."
+    # Update OS packages with yum:
+    yum -y update
+
+    # Install general system dependencies:
+    yum groupinstall -y 'Development Tools'
+    yum install -y \
+        git \
+        wget \
+        nfs-utils \
+        kernel-devel-$(uname -r) \
+        libibverbs \
+        libibverbs-devel
+
+    # Clean yum cache and metadata:
+    yum clean all \
+        && rm -rf /var/cache/yum
+
+    wget https://mvapich.cse.ohio-state.edu/download/mvapich/mv2/mvapich2-2.3.7-1.tar.gz \
+        && tar -xzf mvapich2-2.3.7-1.tar.gz \
+        && cd mvapich2-2.3.7-1 \
+        && ./configure --with-device=ch3:sock --disable-shared --enable-ckpt \
+        && make -j4 \
+        && make install
+    
+    cd /opt/NPB3.3-MPI
+    make clean
+
+    echo "Compiling the MPI application..."
+    make IS CLASS=C NPROCS=1
+    make IS CLASS=C NPROCS=2
+    make IS CLASS=C NPROCS=4
+    make IS CLASS=C NPROCS=8
+    make IS CLASS=C NPROCS=16
+    
+    make EP CLASS=C NPROCS=1
+    make EP CLASS=C NPROCS=2
+    make EP CLASS=C NPROCS=4
+    make EP CLASS=C NPROCS=8
+    make EP CLASS=C NPROCS=16
