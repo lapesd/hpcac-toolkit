@@ -4,3 +4,4 @@
 **terraform.tfvars
 /.dev
 **.DS_Store
+/.vscode/

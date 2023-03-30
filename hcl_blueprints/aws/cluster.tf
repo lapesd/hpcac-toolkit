@@ -179,18 +179,34 @@ resource "null_resource" "setup_master_node" {
   }
 
   /*
-  # Install MVAPICH
+  # Install OpenMPI with ULFM support
   provisioner "file" {
-    source      = "./scripts/mpi/install_mvapich.sh"
-    destination = "/tmp/install_mvapich.sh"
+    source      = "./scripts/mpi/install_ulfm_ompi.sh"
+    destination = "/tmp/install_ulfm_ompi.sh"
   }
   provisioner "remote-exec" {
     inline = [
-      "chmod +x /tmp/install_mvapich.sh",
-      "/tmp/install_mvapich.sh"
+      "chmod +x /tmp/install_ulfm_ompi.sh",
+      "/tmp/install_ulfm_ompi.sh"
     ]
   }
+  */
 
+  /*
+  # Install MVAPICH
+  provisioner "file" {
+    source      = "./scripts/mpi/install_tcp_mvapich.sh"
+    destination = "/tmp/install_tcp_mvapich.sh"
+  }
+  provisioner "remote-exec" {
+    inline = [
+      "chmod +x /tmp/install_tcp_mvapich.sh",
+      "/tmp/install_tcp_mvapich.sh"
+    ]
+  }
+  */
+
+  /*
   # Install Singularity
   provisioner "file" {
     source      = "./scripts/singularity/install_singularity.sh"
@@ -279,6 +295,20 @@ resource "null_resource" "setup_worker_nodes" {
   }
 
   /*
+  # Install OpenMPI with ULFM support
+  provisioner "file" {
+    source      = "./scripts/mpi/install_ulfm_ompi.sh"
+    destination = "/tmp/install_ulfm_ompi.sh"
+  }
+  provisioner "remote-exec" {
+    inline = [
+      "chmod +x /tmp/install_ulfm_ompi.sh",
+      "/tmp/install_ulfm_ompi.sh"
+    ]
+  }
+  */
+
+  /*
   # Install MVAPICH
   provisioner "file" {
     source      = "./scripts/mpi/install_tcp_mvapich.sh"
@@ -290,7 +320,9 @@ resource "null_resource" "setup_worker_nodes" {
       "/tmp/install_tcp_mvapich.sh"
     ]
   }
+  */
 
+  /*
   # Install Singularity
   provisioner "file" {
     source      = "./scripts/singularity/install_singularity.sh"
