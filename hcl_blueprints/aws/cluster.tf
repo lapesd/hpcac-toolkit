@@ -152,7 +152,6 @@ resource "null_resource" "setup_master_node" {
     ]
   }
 
-  /*
   # Basic EC2 configuration
   provisioner "file" {
     source      = "./scripts/base_setup.sh"
@@ -164,7 +163,6 @@ resource "null_resource" "setup_master_node" {
       "/tmp/base_setup.sh"
     ]
   }
-  */
 
   # Setup NFS server
   provisioner "file" {
@@ -192,7 +190,6 @@ resource "null_resource" "setup_master_node" {
   }
   */
 
-  /*
   # Install MVAPICH
   provisioner "file" {
     source      = "./scripts/mpi/install_tcp_mvapich.sh"
@@ -204,9 +201,7 @@ resource "null_resource" "setup_master_node" {
       "/tmp/install_tcp_mvapich.sh"
     ]
   }
-  */
 
-  /*
   # Install Singularity
   provisioner "file" {
     source      = "./scripts/singularity/install_singularity.sh"
@@ -218,7 +213,6 @@ resource "null_resource" "setup_master_node" {
       "/tmp/install_singularity.sh"
     ]
   }
-  */
 }
 
 resource "aws_instance" "worker_node" {
@@ -268,7 +262,6 @@ resource "null_resource" "setup_worker_nodes" {
     ]
   }
 
-  /*
   # Basic EC2 configuration
   provisioner "file" {
     source      = "./scripts/base_setup.sh"
@@ -280,7 +273,6 @@ resource "null_resource" "setup_worker_nodes" {
       "/tmp/base_setup.sh"
     ]
   }
-  */
 
   # Setup NFS client access
   provisioner "file" {
@@ -308,7 +300,6 @@ resource "null_resource" "setup_worker_nodes" {
   }
   */
 
-  /*
   # Install MVAPICH
   provisioner "file" {
     source      = "./scripts/mpi/install_tcp_mvapich.sh"
@@ -320,9 +311,7 @@ resource "null_resource" "setup_worker_nodes" {
       "/tmp/install_tcp_mvapich.sh"
     ]
   }
-  */
 
-  /*
   # Install Singularity
   provisioner "file" {
     source      = "./scripts/singularity/install_singularity.sh"
@@ -334,7 +323,6 @@ resource "null_resource" "setup_worker_nodes" {
       "/tmp/install_singularity.sh"
     ]
   }
-  */
 }
 
 output "master_node_public_ip" {

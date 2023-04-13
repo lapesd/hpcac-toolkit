@@ -32,14 +32,13 @@ build-singularity-NPB-IS: ## build the NPB IS singularity container
 run-singularity-NPB-IS: ## run the NPB IS singularity container
 	ssh ec2-user@$(ip) mpirun -n $(n) --hostfile /var/nfs_dir/hostfile singularity run /var/nfs_dir/NPB/npb_image.sif /opt/is.A.2
 
-
-build-heat-exchange-ulfm: ## compile the heat_exchange ULFM sample application
-	scp -r ../../sample_apps/heat_exchange_ulfm ec2-user@$(ip):/var/nfs_dir
-	ssh ec2-user@$(ip) make -C /var/nfs_dir/heat_exchange
+build-npb-is: ## build the NPB-IS benchmark
+	scp -r ../../sample_apps/hello_world ec2-user@$(ip):/var/nfs_dir
+	ssh ec2-user@$(ip) make IS CLASS=C NPROCS=64 -C /var/nfs_dir/NPB3.3-MPI
 	scp -r ./hostfile ec2-user@$(ip):/var/nfs_dir
 
-run-heat-exchange-ulfm: ## execute the heat exchange ULFM sample application
-	ssh ec2-user@$(ip) mpirun -np $(n) --hostfile /var/nfs_dir/hostfile /var/nfs_dir/heat_exchange_ulfm/parallelHeatEqULFM
+run-npb-is: build-npb-is  ## run the NPB-IS benchmark
+	time
 
 
 build-jacobi-ulfm: ## compile a fault-tolerant (ULFM) Jacobi solver
@@ -48,4 +47,7 @@ build-jacobi-ulfm: ## compile a fault-tolerant (ULFM) Jacobi solver
 	scp -r ./hostfile ec2-user@$(ip):/var/nfs_dir
 
 run-jacobi-ulfm: build-jacobi-ulfm ## execute a fault-tolerant (ULFM) Jacobi solver
-	time ssh ec2-user@$(ip) mpirun --oversubscribe --with-ft ulfm -np $(n) --hostfile /var/nfs_dir/hostfile /var/nfs_dir/jacobi/jacobi_ulfm -p 2 -q 2 -NB 128
+	time ssh ec2-user@$(ip) mpirun --oversubscribe --with-ft ulfm -np $(n) --hostfile /var/nfs_dir/hostfile /var/nfs_dir/jacobi/jacobi_ulfm -p 2 -q 2 -NB 2048
+
+run-jacobi-noft: build-jacobi-ulfm ## execute a fault-tolerant (ULFM) Jacobi solver
+	time ssh ec2-user@$(ip) mpirun --oversubscribe --with-ft ulfm -np $(n) --hostfile /var/nfs_dir/hostfile /var/nfs_dir/jacobi/jacobi_noft -p 2 -q 2 -NB 2048
