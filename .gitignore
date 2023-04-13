@@ -1,8 +1,7 @@
 /target
-/.hcl_files/provider.tf
-/.hcl_files/.terraform
-/.hcl_files/.terraform.lock.hcl
-/.hcl_files/plan
-/.hcl_files/terraform.tfstate
-/.hcl_files/terraform.tfstate.backup
 .env
+/schematics/
+**terraform.tfvars
+/.dev
+**.DS_Store
+/.vscode/

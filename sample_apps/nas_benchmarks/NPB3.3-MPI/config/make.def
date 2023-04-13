@@ -1,0 +1,18 @@
+MPICC = cc
+CLINK   = $(MPICC)
+CMPI_LIB  = -L/usr/local/lib -lmpi
+CMPI_INC = -I/usr/local/include
+CFLAGS  = -O3 -mcmodel=large
+CLINKFLAGS = -O3
+CC  = cc -g
+BINDIR  = ../../
+RAND   = randi8
+
+MPIF77 = mpif90
+FLINK	= $(MPIF77)
+FMPI_LIB  = -L/usr/local/lib -lmpi
+FMPI_INC = -I/usr/local/include
+FFLAGS	= -O3
+FLINKFLAGS = -O3
+BINDIR  = ../../
+RAND   = randi8
