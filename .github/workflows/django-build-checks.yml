@@ -30,7 +30,7 @@ jobs:
         run: poetry install
 
   docker-build:
-    needs: deno-test
+    needs: django-test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
