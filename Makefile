@@ -8,3 +8,6 @@ help:
 
 docker-run:  ## starts the HPC@Cloud Toolkit containers using docker-compose
 	docker-compose up -d
+
+pre-commit:  ## installs git pre-commit hooks
+	pre-commit install
