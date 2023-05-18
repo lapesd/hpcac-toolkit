@@ -1,4 +1,4 @@
-name: Django Linting, Automated Tests and Docker CI
+name: Django CI/CD
 
 on:
   push:
@@ -27,7 +27,7 @@ jobs:
           poetry-version: 1.2.2
 
       - name: Poetry install
-        run: poetry install
+        run: cd hpcc_services && poetry install
 
   docker-build:
     needs: django-test

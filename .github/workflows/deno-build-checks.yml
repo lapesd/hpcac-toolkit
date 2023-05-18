@@ -1,4 +1,4 @@
-name: Deno Linting, Automated Tests and Docker CI
+name: Deno CI/CD
 
 on:
   push:
