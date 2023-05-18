@@ -2,7 +2,7 @@
 
 This repository contains a dockerized environment and source code for the
 HPC@Cloud toolkit, comprised of a command-line interface for generating
-opionated Terraform plans for Cloud HPC clusters.
+Terraform plans for Cloud HPC clusters.
 
 # Contributing
 

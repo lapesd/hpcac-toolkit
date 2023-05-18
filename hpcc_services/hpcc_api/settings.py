@@ -37,7 +37,6 @@ INSTALLED_APPS = [
     "rest_framework",
     "django_filters",
     "hpcc_api",
-    "hpcc_api.cluster_manager",
 ]
 
 
