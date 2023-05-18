@@ -1,2 +1,0 @@
-1. run `python server.py` at the receiver VM
-2. run `python client.py {receiver_ip}` script at the sender VM

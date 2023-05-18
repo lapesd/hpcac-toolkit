@@ -8,7 +8,3 @@ help:
 
 docker-run:  ## starts the HPC@Cloud Toolkit containers using docker-compose
 	docker-compose up -d
-
-migrate:  ## execute database migrations using refinery-cli
-	cargo install refinery_cli
-	refinery migrate -c psql_refinery.toml -p ./migrations/
