@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "hpcc_api"
+version = "0.1.0"
+description = "HPC@Cloud Toolkit"
+authors = ["Vanderlei <munhoz@protonmail.ch>"]
+readme = "README.md"
+packages = [{include = "django_app"}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+Django = "^4.1.4"
+psycopg2 = "^2.9.5"
+gunicorn = "^20.1.0"
+python-dotenv = "^0.21.0"
+django-rest-framework = "^0.1.0"
+django-filter = "^22.1"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
