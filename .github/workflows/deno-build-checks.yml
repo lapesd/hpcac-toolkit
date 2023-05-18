@@ -38,4 +38,4 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
       - name: Build the Docker image
-        run: docker build . --file ./hpcc_ui/Dockerfile --tag hpcc-ui:$(date +%s)
+        run: cd hpcc_ui && docker build . --file Dockerfile --tag hpcc-ui:$(date +%s)
