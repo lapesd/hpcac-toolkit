@@ -4,7 +4,6 @@ version = "0.1.0"
 description = "HPC@Cloud Toolkit"
 authors = ["Vanderlei <munhoz@protonmail.ch>"]
 readme = "README.md"
-packages = [{include = "hpcc_api"}]
 
 [tool.poetry.dependencies]
 python = "^3.11"
@@ -15,6 +14,12 @@ python-dotenv = "^0.21.0"
 django-rest-framework = "^0.1.0"
 django-filter = "^22.1"
 pre-commit = "^3.3.2"
+pytest = "^7.3.1"
+pytest-django = "^4.5.2"
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "hpcc_api.settings"
+testpaths = ["tests"]
 
 [build-system]
 requires = ["poetry-core"]
