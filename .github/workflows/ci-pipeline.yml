@@ -31,7 +31,7 @@ jobs:
         run: deno test -A
 
   deno-docker-build:
-    needs: deno-test
+    needs: deno-tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -68,7 +68,7 @@ jobs:
         run: cd hpcc_services && poetry install && poetry run pytest
 
   django-docker-build:
-    needs: django-test
+    needs: django-tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
