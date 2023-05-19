@@ -1,4 +1,4 @@
-name: Django CI/CD
+name: Django CI
 
 on:
   push:
@@ -13,7 +13,7 @@ jobs:
   django-test:
     runs-on: ubuntu-latest
     steps:
-      - name: Setup repo
+      - name: Setup repository
         uses: actions/checkout@v3
 
       - name: Setup Python
@@ -24,10 +24,13 @@ jobs:
       - name: Setup Poetry
         uses: abatilo/actions-poetry@v2
         with:
-          poetry-version: 1.2.2
+          poetry-version: 1.4.2
 
-      - name: Poetry install
+      - name: Install poetry project
         run: cd hpcc_services && poetry install
+
+      - name: Automated tests
+        run: poetry run pytest
 
   docker-build:
     needs: django-test

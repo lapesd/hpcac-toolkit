@@ -1,4 +1,4 @@
-name: Deno CI/CD
+name: Deno CI
 
 on:
   push:

@@ -1,6 +1,6 @@
 FROM denoland/deno:1.33.3
 
-EXPOSE 8000
+EXPOSE 4000
 
 WORKDIR /app
 

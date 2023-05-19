@@ -9,5 +9,8 @@ help:
 docker-run:  ## starts the HPC@Cloud Toolkit containers using docker-compose
 	docker-compose up -d
 
-pre-commit:  ## installs git pre-commit hooks
-	pre-commit install
+docker-run-db-only:
+	docker-compose up -d postgres
+
+docker-stop:  ## stops the HPC@Cloud Toolkit containers
+	docker-compose stop
