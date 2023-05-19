@@ -26,11 +26,8 @@ jobs:
         with:
           poetry-version: 1.4.2
 
-      - name: Install poetry project
-        run: cd hpcc_services && poetry install
-
-      - name: Automated tests
-        run: poetry run pytest
+      - name: Automated Tests
+        run: cd hpcc_services && poetry install && poetry run pytest
 
   docker-build:
     needs: django-test
