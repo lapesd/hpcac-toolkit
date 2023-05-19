@@ -10,6 +10,26 @@ permissions:
   contents: read
 
 jobs:
+  launch-test-db:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_USER: local
+          POSTGRES_PASSWORD: local
+          POSTGRES_DB: postgres
+    steps:
+      - name: Wait for PostgreSQL to be ready
+        run: |
+          echo "Waiting for PostgreSQL to start..."
+          until PGPASSWORD=$POSTGRES_PASSWORD psql -h localhost -U $POSTGRES_USER -d $POSTGRES_DB -c '\l'; do
+            sleep 2
+          done
+          echo "PostgreSQL is ready!"
+
   django-test:
     runs-on: ubuntu-latest
     steps:
