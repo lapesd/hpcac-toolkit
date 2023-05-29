@@ -12,6 +12,19 @@ services:
     volumes:
       - /var/lib/postgresql:/var/lib/postgresql
 
+  minio:
+    image: minio/minio:latest
+    container_name: hpcc-services-minio
+    ports:
+      - "9000:9000"
+      - "9090:9090"
+    volumes:
+      - ./minio/data:/data/minio
+    environment:
+      MINIO_ROOT_USER: root
+      MINIO_ROOT_PASSWORD: password
+    command: minio server /data/minio --console-address ":9090"
+
   hpcc_services:
     build: ./hpcc_services
     command: >

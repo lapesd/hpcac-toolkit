@@ -38,6 +38,7 @@ INSTALLED_APPS = [
     "django_filters",
     "hpcc_api",
     "hpcc_api.clusters",
+    "hpcc_api.experiments",
 ]
 
 

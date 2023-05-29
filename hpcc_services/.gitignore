@@ -1,0 +1,4 @@
+cluster_config.yaml
+/tmp_tf_dir
+.pytest_cache
+terraform.tfstate

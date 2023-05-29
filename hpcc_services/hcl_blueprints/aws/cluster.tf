@@ -152,7 +152,7 @@ resource "null_resource" "setup_master_node" {
     ]
   }
 
-  # Basic EC2 configuration
+  /*# Basic EC2 configuration
   provisioner "file" {
     source      = "./scripts/base_setup.sh"
     destination = "/tmp/base_setup.sh"
@@ -162,7 +162,7 @@ resource "null_resource" "setup_master_node" {
       "chmod +x /tmp/base_setup.sh ${aws_key_pair.deployer_key.public_key}",
       "/tmp/base_setup.sh"
     ]
-  }
+  }*/
 
   # Setup NFS server
   provisioner "file" {
@@ -188,7 +188,6 @@ resource "null_resource" "setup_master_node" {
       "/tmp/install_ulfm_ompi.sh"
     ]
   }
-  */
 
   # Install MVAPICH
   provisioner "file" {
@@ -213,6 +212,7 @@ resource "null_resource" "setup_master_node" {
       "/tmp/install_singularity.sh"
     ]
   }
+  */
 }
 
 resource "aws_instance" "worker_node" {
@@ -262,6 +262,7 @@ resource "null_resource" "setup_worker_nodes" {
     ]
   }
 
+  /*
   # Basic EC2 configuration
   provisioner "file" {
     source      = "./scripts/base_setup.sh"
@@ -273,6 +274,7 @@ resource "null_resource" "setup_worker_nodes" {
       "/tmp/base_setup.sh"
     ]
   }
+  */
 
   # Setup NFS client access
   provisioner "file" {
@@ -298,7 +300,6 @@ resource "null_resource" "setup_worker_nodes" {
       "/tmp/install_ulfm_ompi.sh"
     ]
   }
-  */
 
   # Install MVAPICH
   provisioner "file" {
@@ -322,15 +323,10 @@ resource "null_resource" "setup_worker_nodes" {
       "chmod +x /tmp/install_singularity.sh",
       "/tmp/install_singularity.sh"
     ]
-  }
+  }*/
 }
 
 output "master_node_public_ip" {
   description = "Master Node public IP"
   value       = aws_instance.master_node.public_ip
-}
-
-output "worker_node_public_ips" {
-  description = "Worker Node public IPs"
-  value       = [for instance in aws_instance.worker_node : instance.public_ip]
 }

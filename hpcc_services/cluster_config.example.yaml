@@ -1,0 +1,5 @@
+provider: "aws"
+
+private_rsa_key_path: "/Users/vanderlei/.ssh/id_rsa"
+public_rsa_key_path: "/Users/vanderlei/.ssh/id_rsa.pub"
+public_key_name: "vanderlei@RIVET-LABS-MAC-HGMW6NW46J"

@@ -9,8 +9,8 @@ help:
 docker-run:  ## starts the HPC@Cloud Toolkit containers using docker-compose
 	docker-compose up -d
 
-docker-run-db-only:
-	docker-compose up -d postgres
+docker-run-dev:  ## start the HPC@Cloud infrastructure containers only
+	docker-compose up -d postgres minio
 
 docker-stop:  ## stops the HPC@Cloud Toolkit containers
 	docker-compose stop
