@@ -1,14 +1,56 @@
----
-version: '3.3'
+version: '3'
 services:
   postgres:
-    image: postgres:alpine
-    container_name: hpcac-postgres
+    image: docker.io/postgres:latest
+    container_name: hpcc-services-db
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     environment:
       POSTGRES_USER: local
       POSTGRES_PASSWORD: local
       POSTGRES_DB: postgres
     volumes:
       - /var/lib/postgresql:/var/lib/postgresql
+
+  minio:
+    image: minio/minio:latest
+    container_name: hpcc-services-minio
+    ports:
+      - "9000:9000"
+      - "9090:9090"
+    volumes:
+      - ./minio/data:/data/minio
+    environment:
+      MINIO_ROOT_USER: root
+      MINIO_ROOT_PASSWORD: password
+    command: minio server /data/minio --console-address ":9090"
+
+  hpcc_services:
+    build: ./hpcc_services
+    command: >
+      sh -c "python manage.py migrate && python manage.py test && python manage.py runserver 0.0.0.0:8000"
+    depends_on:
+      - postgres
+    container_name: hpcc-services
+    ports:
+      - "8000:8000"
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: local
+      POSTGRES_PASSWORD: local
+      POSTGRES_DB: postgres
+    links:
+      - postgres
+    restart: always
+
+  hpcc_ui:
+    build: ./hpcc_ui
+    command: >
+      sh -c "deno task start"
+    depends_on:
+      - postgres
+    container_name: hpcc-ui
+    ports:
+      - "4000:4000"
+    restart: always
