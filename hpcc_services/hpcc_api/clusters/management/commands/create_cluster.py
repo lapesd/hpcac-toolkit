@@ -1,16 +1,18 @@
 import os
 import re
 import subprocess
-import sys
+import textwrap
 
 from django.core.management.base import BaseCommand
 from minio import Minio
 
 from hpcc_api.clusters.models import ClusterConfiguration
-from hpcc_api.exceptions import ConfigurationError
 
 
-def spawn_cluster(cluster_config: ClusterConfiguration) -> str:
+TF_DIR = "./tmp_tf_dir"
+
+
+def create_cluster(cluster_config: ClusterConfiguration) -> str:
     # Get ClusterConfiguration blueprint files from the MinIO bucket
     minio = Minio(
         "localhost:9000",
@@ -20,12 +22,11 @@ def spawn_cluster(cluster_config: ClusterConfiguration) -> str:
     )
 
     file_names = ["versions.tf", "provider.tf", "cluster.tf", "terraform.tfvars"]
-    tf_dir = "./tmp_tf_dir"
     for file_name in file_names:
         minio_response = minio.fget_object(
             cluster_config.minio_bucket_name,
             file_name,
-            os.path.abspath(f"{tf_dir}/{file_name}"),
+            os.path.abspath(f"{TF_DIR}/{file_name}"),
         )
         print(
             "Downloaded `{0}` object with etag: `{1}` from bucket `{2}`".format(
@@ -36,37 +37,28 @@ def spawn_cluster(cluster_config: ClusterConfiguration) -> str:
         )
 
     # Initialize Terraform
-    subprocess.run(["terraform", "init"], cwd=tf_dir, check=True)
+    subprocess.run(["terraform", "init"], cwd=TF_DIR, check=True)
 
     # Apply the Terraform configuration, destroying dangling resources in case of failure
-    try:
-        process = subprocess.Popen(
-            ["terraform", "apply", "-auto-approve"],
-            cwd=tf_dir,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
+    process = subprocess.Popen(
+        ["terraform", "apply", "-auto-approve"],
+        cwd=TF_DIR,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
 
-        last_line = ""
-        for line in iter(process.stdout.readline, ""):
-            print(line, end="")
-            last_line = line if line.strip() != "" else last_line
+    last_line = ""
+    for line in iter(process.stdout.readline, ""):
+        print(line, end="")
+        last_line = line if line.strip() != "" else last_line
 
-        process.stdout.close()
-        process.wait()
+    process.stdout.close()
+    process.wait()
 
-        master_node_ip = re.findall(r"[0-9]+(?:\.[0-9]+){3}", last_line)
+    master_node_ip = re.findall(r"[0-9]+(?:\.[0-9]+){3}", last_line)
 
-        return master_node_ip
-
-    except subprocess.CalledProcessError:
-        subprocess.run(
-            ["terraform", "destroy", "-auto-approve"], cwd=tf_dir, check=True
-        )
-        raise ConfigurationError(
-            f"Failed spawning a cluster based on ClusterConfig `{cluster_config}`!"
-        )
+    return master_node_ip
 
 
 class Command(BaseCommand):
@@ -80,17 +72,52 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         config_label = options["config_label"]
 
-        try:
-            cluster_config = ClusterConfiguration.objects.get(label=config_label)
-            spawn_cluster(cluster_config)
+        cluster_config = ClusterConfiguration.objects.get(label=config_label)
+        master_node_ip = create_cluster(cluster_config)
 
-        except Exception as error:
-            self.stdout.write(self.style.ERROR(f"CommandError: {error}"))
-            sys.exit(1)
-
+        if len(master_node_ip) == 0:
+            subprocess.run(
+                ["terraform", "destroy", "-auto-approve"], cwd=TF_DIR, check=True
+            )
+            self.stdout.write(
+                self.style.ERROR(
+                    f"Failed spawning a cluster based on ClusterConfig `{cluster_config}`.\n"
+                    "All resources DESTROYED!"
+                )
+            )
         else:
             self.stdout.write(
                 self.style.SUCCESS(
-                    f"Successfully spawned Cluster `{cluster_config.label}`!"
+                    f"Successfully spawned a Cluster using the `{cluster_config.label} ClusterConfiguration`!"
+                )
+            )
+
+            print(
+                textwrap.dedent(
+                    f"""
+                To copy files from your machine to the cloud cluster, use the `scp` command:
+                
+                scp -r /Users/vanderlei/Code/lapesd/jacobi-method ec2-user@{master_node_ip[0]}:/var/nfs_dir
+
+                The command above will copy the `jacobi-method` folder and all files inside it to the 
+                /var/nfs_dir shared cluster directory.
+    
+                You can also execute commands in your cluster from your local machine using `ssh`:
+
+                ssh ec2-user@{master_node_ip[0]} make all -C /var/nfs_dir/jacobi
+
+                The command above will run the `make all -C /var/nfs_dir/jacobi` command, compiling the 
+                jacobi-method application (https://github.com/vanderlei-filho/jacobi-method), which can 
+                then be executed by the following:
+
+                ssh ec2-user@{master_node_ip[0]} mpirun --oversubscribe --with-ft ulfm -np 4 --hostfile /var/nfs_dir/hostfile /var/nfs_dir/jacobi-method/jacobi_ulfm -p 2 -q 2 -NB 128
+
+                Don't forget to edit an appropriate hostfile and copy it to the cluster.
+                You can use the `hostfile.openmpi.example` and `hostfile.mvapich2.example` files as templates.
+
+                Finally, if you want to access your cluster directly over the command-line, use SSH:
+                
+                ssh ec2-user@{master_node_ip[0]}
+                """
                 )
             )

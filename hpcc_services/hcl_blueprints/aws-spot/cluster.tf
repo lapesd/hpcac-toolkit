@@ -156,7 +156,7 @@ resource "null_resource" "setup_master_node" {
   /*
   # Basic EC2 configuration
   provisioner "file" {
-    source      = "./scripts/base_setup.sh"
+    source      = "../scripts/base_setup.sh"
     destination = "/tmp/base_setup.sh"
   }
   provisioner "remote-exec" {
@@ -169,7 +169,7 @@ resource "null_resource" "setup_master_node" {
 
   # Setup NFS server
   provisioner "file" {
-    source      = "./scripts/nfs/nfs_server_setup.sh"
+    source      = "../scripts/nfs/nfs_server_setup.sh"
     destination = "/tmp/nfs_server_setup.sh"
   }
   provisioner "remote-exec" {
@@ -179,10 +179,22 @@ resource "null_resource" "setup_master_node" {
     ]
   }
 
+  # RUN cluster-init script
+  provisioner "file" {
+    source      = "../cluster_init.sh"
+    destination = "/tmp/cluster_init.sh"
+  }
+  provisioner "remote-exec" {
+    inline = [
+      "chmod +x /tmp/cluster_init.sh",
+      "/tmp/cluster_init.sh"
+    ]
+  }
+
   /*
   # Install OpenMPI with ULFM support
   provisioner "file" {
-    source      = "./scripts/mpi/install_ulfm_ompi.sh"
+    source      = "../scripts/mpi/install_ulfm_ompi.sh"
     destination = "/tmp/install_ulfm_ompi.sh"
   }
   provisioner "remote-exec" {
@@ -196,7 +208,7 @@ resource "null_resource" "setup_master_node" {
   /*
   # Install MVAPICH
   provisioner "file" {
-    source      = "./scripts/mpi/install_tcp_mvapich.sh"
+    source      = "../scripts/mpi/install_tcp_mvapich.sh"
     destination = "/tmp/install_tcp_mvapich.sh"
   }
   provisioner "remote-exec" {
@@ -210,7 +222,7 @@ resource "null_resource" "setup_master_node" {
   /*
   # Install Singularity
   provisioner "file" {
-    source      = "./scripts/singularity/install_singularity.sh"
+    source      = "../scripts/singularity/install_singularity.sh"
     destination = "/tmp/install_singularity.sh"
   }
   provisioner "remote-exec" {
@@ -278,7 +290,7 @@ resource "null_resource" "setup_worker_nodes" {
   /*
   # Basic EC2 configuration
   provisioner "file" {
-    source      = "./scripts/base_setup.sh"
+    source      = "../scripts/base_setup.sh"
     destination = "/tmp/base_setup.sh"
   }
   provisioner "remote-exec" {
@@ -291,7 +303,7 @@ resource "null_resource" "setup_worker_nodes" {
 
   # Setup NFS client access
   provisioner "file" {
-    source      = "./scripts/nfs/nfs_client_setup.sh"
+    source      = "../scripts/nfs/nfs_client_setup.sh"
     destination = "/tmp/nfs_client_setup.sh"
   }
   provisioner "remote-exec" {
@@ -301,10 +313,22 @@ resource "null_resource" "setup_worker_nodes" {
     ]
   }
 
+  # RUN cluster-init script
+  provisioner "file" {
+    source      = "../cluster_init.sh"
+    destination = "/tmp/cluster_init.sh"
+  }
+  provisioner "remote-exec" {
+    inline = [
+      "chmod +x /tmp/cluster_init.sh",
+      "/tmp/cluster_init.sh"
+    ]
+  }
+  
   /*
   # Install OpenMPI with ULFM support
   provisioner "file" {
-    source      = "./scripts/mpi/install_ulfm_ompi.sh"
+    source      = "../scripts/mpi/install_ulfm_ompi.sh"
     destination = "/tmp/install_ulfm_ompi.sh"
   }
   provisioner "remote-exec" {
@@ -318,7 +342,7 @@ resource "null_resource" "setup_worker_nodes" {
   /*
   # Install MVAPICH
   provisioner "file" {
-    source      = "./scripts/mpi/install_tcp_mvapich.sh"
+    source      = "../scripts/mpi/install_tcp_mvapich.sh"
     destination = "/tmp/install_tcp_mvapich.sh"
   }
   provisioner "remote-exec" {
@@ -332,7 +356,7 @@ resource "null_resource" "setup_worker_nodes" {
   /*
   # Install Singularity
   provisioner "file" {
-    source      = "./scripts/singularity/install_singularity.sh"
+    source      = "../scripts/singularity/install_singularity.sh"
     destination = "/tmp/install_singularity.sh"
   }
   provisioner "remote-exec" {
@@ -347,9 +371,4 @@ resource "null_resource" "setup_worker_nodes" {
 output "master_node_public_ip" {
   description = "Master Node public IP"
   value       = aws_instance.master_node.public_ip
-}
-
-output "worker_node_public_ips" {
-  description = "Worker Node public IPs"
-  value       = [for instance in aws_spot_instance_request.worker_node : instance.public_ip]
 }
