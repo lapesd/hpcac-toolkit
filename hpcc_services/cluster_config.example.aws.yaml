@@ -8,7 +8,7 @@ aws_access_key: "your aws access key"
 
 private_rsa_key_path: "/Users/vanderlei/.ssh/id_rsa"
 public_rsa_key_path: "/Users/vanderlei/.ssh/id_rsa.pub"
-public_key_name: "vanderlei@RIVET-LABS-MAC-HGMW6NW46J"
+public_key_name: "vanderlei@RIVET-LABS-MAC-HGMW6NW46J.local"
 
 master_ami: "ami-0f79feff35a0952f8"
 master_ebs: 10
