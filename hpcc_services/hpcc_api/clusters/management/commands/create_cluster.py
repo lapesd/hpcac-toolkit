@@ -9,7 +9,7 @@ from minio import Minio
 from hpcc_api.clusters.models import ClusterConfiguration
 
 
-TF_DIR = "./tmp_tf_dir"
+TF_DIR = "./tmp_terraform_dir"
 
 
 def create_cluster(cluster_config: ClusterConfiguration) -> str:

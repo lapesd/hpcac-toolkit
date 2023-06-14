@@ -4,7 +4,7 @@ from django.core.management.base import BaseCommand
 
 
 def destroy_cluster():
-    tf_dir = "./tmp_tf_dir"
+    tf_dir = "./tmp_terraform_dir"
 
     subprocess.run(
         ["terraform", "destroy", "-auto-approve"],

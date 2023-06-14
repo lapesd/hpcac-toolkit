@@ -1,5 +1,5 @@
 cluster_config.yaml
-/tmp_tf_dir
+/tmp_terraform_dir
 .pytest_cache
 terraform.tfstate
 cluster_init.sh
