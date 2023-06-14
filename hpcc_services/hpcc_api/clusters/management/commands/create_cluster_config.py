@@ -37,8 +37,8 @@ def generate_cluster_blueprint_from_yaml_definitions(
     cluster_options = {**ClusterConfiguration.DEFAULTS[provider], **yaml_data}
 
     # Generate the terraform.tfvars file
-    os.makedirs(os.path.dirname("./tmp_tf_dir/"), exist_ok=True)
-    with open("./tmp_tf_dir/terraform.tfvars", "w") as output_tfvars_file:
+    os.makedirs(os.path.dirname("./tmp_terraform_dir/"), exist_ok=True)
+    with open("./tmp_terraform_dir/terraform.tfvars", "w") as output_tfvars_file:
         for key, value in cluster_options.items():
             if key not in ["provider", "cluster_label"]:
                 if isinstance(value, (int, float)) or (
@@ -63,7 +63,7 @@ def generate_cluster_blueprint_from_yaml_definitions(
     minio.fput_object(
         minio_bucket_name,
         "terraform.tfvars",
-        os.path.abspath(f"./tmp_tf_dir/terraform.tfvars"),
+        os.path.abspath(f"./tmp_terraform_dir/terraform.tfvars"),
     )
     print("Saved terraform.tfvars to MinIO.")
 
