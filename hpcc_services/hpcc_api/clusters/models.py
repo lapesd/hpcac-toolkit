@@ -6,6 +6,7 @@ class ClusterConfiguration(models.Model):
         ("aws", "Amazon Web Services"),
         ("aws-spot", "Spot Amazon Web Services"),
         ("vultr", "Vultr"),
+        ("aws-FSxL", 'FSx-Lustre'),
     ]
 
     DEFAULTS = {
@@ -37,6 +38,19 @@ class ClusterConfiguration(models.Model):
             "worker_spot_price": 0.5,
         },
         "vultr": {},
+        "aws-FSxL": {
+            "region": "us-east-1",
+            "availability_zone": "us-east-1a",
+            "master_ami": "ami-0c88d865df36afa1f",
+            "master_fsx": 10,
+            "master_rbs": 10,
+            "master_instance_type": "t2.micro",
+            "worker_count": 1,
+            "worker_ami": "ami-0c88d865df36afa1f",
+            "worker_fsx": 10,
+            "worker_rbs": 10,
+            "worker_instance_type": "t2.micro",
+        },
     }
 
     label = models.TextField(
