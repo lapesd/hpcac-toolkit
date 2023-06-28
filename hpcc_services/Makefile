@@ -11,3 +11,10 @@ docker-run-dev:  ## start the HPC@Cloud infrastructure containers only
 
 docker-stop:  ## stops the HPC@Cloud Toolkit containers
 	docker-compose stop
+
+create-cluster:  ## create a cluster using the cluster_config.yaml configutaion
+	python manage.py create_cluster_config cluster_config.yaml
+	python manage.py create_cluster test_cluster
+
+destroy-cluster:  ## destroy the test_cluster
+	python manage.py destroy_cluster

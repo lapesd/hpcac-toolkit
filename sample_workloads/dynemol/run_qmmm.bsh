@@ -1,0 +1,65 @@
+#!/bin/bash
+	
+# output log file (output to the screen will be redirected to this file)
+output="output.log"
+
+# number of nodes
+n_nodes=2 # (2 x 16 vCPU = 32 vCPUs (64 threads))
+
+# number of processes per node
+n_proc_per_node=4 # 8
+
+# number of threads per process
+n_threads_per_proc=5 # 8
+
+# number of gpus
+n_gpus=0
+
+#################################
+# Ask user for inputs:
+echo "Enter the following data [default values are shown in brackets]:"
+default="./a"
+read -p "the program name [$default]: " exe
+exe=${exe:-$default}
+
+default="output.log"
+read -p "output file (where to redirect screen output) [$default]: " output
+output=${output:-$default}
+
+default=1
+read -p "number of nodes to run on [$default]: " n_nodes
+n_nodes=${n_nodes:-$default}
+
+default=4
+read -p "number of MPI processes per node to launch [$default]: " n_proc_per_node
+n_proc_per_node=${n_proc_per_node:-$default}
+
+default=2
+read -p "number of OpenMP threads per MPI process to fire [$default]: " n_threads_per_proc
+n_threads_per_proc=${n_threads_per_proc:-$default}
+
+default=0
+read -p "number of gpus to run on [$default]: " n_gpus
+n_gpus=${n_gpus:-$default}
+
+# if reading user's answers, we are not under PBS
+in_PBS=false
+#################################
+fi
+
+# total mpi processes per node
+ppn=$n_proc_per_node
+
+# total processes
+n_mpi=$(($n_nodes*$n_proc_per_node))
+n_total=$(($n_nodes*$ppn))
+
+echo "mpiexec -x OMP_NUM_THREADS=$n_threads_per_proc --report-bindings $hostfile -n $n_mpi --map-by ppr:${ppn}:node:PE=$n_threads_per_proc --rank-by node --bind-to core $exe &> $output"
+
+mpiexec -x OMP_NUM_THREADS=$n_threads_per_proc \
+	--report-bindings $hostfile \
+	-n $n_mpi \
+	--map-by ppr:${ppn}:node:PE=$n_threads_per_proc \
+	--rank-by node \
+	--bind-to core \
+	$exe &> $output

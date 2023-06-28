@@ -3,4 +3,4 @@ cluster_config.yaml
 .pytest_cache
 terraform.tfstate
 cluster_init.sh
-/dynemol
+/minio
