@@ -1,0 +1,65 @@
+!--------------------------------------------------------------------
+! ACTION	flags
+!
+  DRIVER = slice_AO                       ! <== q_dynamics , avrg_confgs , Genetic_Alg , diagnostic , slice_[Cheb, AO, FSSH, CSDM] , MM_Dynamics
+!			
+  nuclear_matter = MDynamics              ! <== solvated_sys , extended_sys , MDynamics
+!			
+!			
+  survival     = true
+  QMMM         = true
+  file_type    =  structure               ! <== structure or trajectory
+  file_format  =  pdb                     ! <== xyz , pdb or vasp
+
+  electron_state = AZP:52
+  hole_state = AZP:50
+
+  t_f  =  2.d-1                           ! <== final time in PICOseconds
+  n_t  =  30000
+
+!------------------------------------------------------------------------------
+! SYSTEM  INFO
+
+  N_of_molecules = 1                      ! <== total number of molecules
+  N_of_species   = 1                      ! <== total number of species
+
+!------------------------------------------------------------------------------
+! repeat the following information filling for all the different species ...
+
+  species(1) % residue         = AZP      ! <== Residue label for species i ; character(len3)
+  species(1) % N_of_molecules  = 1        ! <== Number of molecules of species i
+  species(1) % N_of_atoms      = 35       ! <== Number of atoms comprosing a single molecule of species i
+  species(1) % flex            = T_       ! <== Flexible : T_ , F_
+
+  Selective_Dynamics = .false.            ! <== ad_hoc_MM_tuning sets MegaMass to selected atoms
+!------------------------------------------------------------------------------
+! AD-HOC settings
+
+  OPT_parms = true
+
+!------------------------------------------------------------------------------
+! ENVIRONMENT parameters ...
+!
+
+  thermostat                = Microcanonical  ! <== Berendsen, Nose_Hoover, Microcanonical
+
+  temperature               = 300.d0          ! <== Bath Temperature (K)
+
+  thermal_relaxation_time   = 7.d-1           ! <== Temperature coupling term with the bath
+
+  cutoff_radius             = 50.d0           ! <== Cut off radius (Angs.) for electrostatic and LJ interactions
+  damping_Wolf              = 0.0005          ! <== damping parameter (Angs.^-1) ; reasonable values: R_c*Wolf ~ ....
+                                              ! <== Wolf's method damping parameter (length^{-1}) ; (J. Chem. Phys. 1999; 110(17):8254)
+!------------------------------------------------------------------------------
+! GENERAL INFO ...
+!
+  driver_MM              = "MM_Dynamics"      ! <== MM_Dynamics , MM_Optimize , NormalModes , Parametrize
+
+  read_velocities        = false              ! <== reads the initial velocities : T_ , F_
+
+  MM_input_format        = GMX                ! <== GMX, NAMD, GAFF
+
+  MM_log_step            =  100               ! <== step for saving MM results & parameters
+
+  MM_frame_step          =  50                ! <== step for saving MM results & parameters
+

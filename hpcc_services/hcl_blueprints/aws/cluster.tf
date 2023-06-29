@@ -5,21 +5,28 @@ variable "public_rsa_key_path" {}
 variable "public_key_name" {}
 
 variable "master_ami" {}
-variable "master_ebs" {}
-variable "master_rbs" {}
 variable "master_instance_type" {}
+variable "master_rbs_size" {}
+variable "master_rbs_type" {}
+variable "master_rbs_iops" {}
 
 variable "worker_count" {}
 variable "worker_ami" {}
-variable "worker_ebs" {}
-variable "worker_rbs" {}
 variable "worker_instance_type" {}
+variable "worker_rbs_size" {}
+variable "worker_rbs_type" {}
+variable "worker_rbs_iops" {}
+
+variable "experiment_tag" {}
 
 
 resource "aws_vpc" "cluster_vpc" {
   cidr_block           = "10.0.0.0/16"
   enable_dns_support   = true
   enable_dns_hostnames = true
+  tags = {
+    "cost_allocation_tag" = var.experiment_tag
+  }
 }
 
 resource "aws_subnet" "cluster_subnet" {
@@ -27,14 +34,23 @@ resource "aws_subnet" "cluster_subnet" {
   cidr_block              = "10.0.0.0/20"
   availability_zone       = var.availability_zone
   map_public_ip_on_launch = true
+  tags = {
+    "cost_allocation_tag" = var.experiment_tag
+  }
 }
 
 resource "aws_internet_gateway" "cluster_ig" {
   vpc_id = aws_vpc.cluster_vpc.id
+  tags = {
+    "cost_allocation_tag" = var.experiment_tag
+  }
 }
 
 resource "aws_route_table" "cluster_rt" {
   vpc_id = aws_vpc.cluster_vpc.id
+  tags = {
+    "cost_allocation_tag" = var.experiment_tag
+  }
 }
 
 resource "aws_route" "cluster_r" {
@@ -114,18 +130,29 @@ resource "aws_instance" "master_node" {
   subnet_id       = aws_subnet.cluster_subnet.id
   key_name        = aws_key_pair.deployer_key.key_name
   root_block_device {
-    delete_on_termination = "true"
-    volume_size           = var.master_rbs
+    volume_type           = var.master_rbs_type
+    volume_size           = var.master_rbs_size
+    delete_on_termination = true
+    iops                  = var.master_rbs_iops
+    tags = {
+      Name                  = "Master RBS"
+      "cost_allocation_tag" = var.experiment_tag
+    }
   }
   ebs_block_device {
     delete_on_termination = "true"
     device_name           = "/dev/sdh"
     volume_size           = var.master_ebs
+    tags = {
+      Name                  = "Master EBS",
+      "cost_allocation_tag" = var.experiment_tag
+    }
   }
   private_ip = "10.0.0.10"
   depends_on = [aws_internet_gateway.cluster_ig]
   tags = {
-    Name = "Master Node"
+    Name                  = "Master Node"
+    "cost_allocation_tag" = var.experiment_tag
   }
 }
 
@@ -152,18 +179,6 @@ resource "null_resource" "setup_master_node" {
     ]
   }
 
-  /*# Basic EC2 configuration
-  provisioner "file" {
-    source      = "../scripts/base_setup.sh"
-    destination = "/tmp/base_setup.sh"
-  }
-  provisioner "remote-exec" {
-    inline = [
-      "chmod +x /tmp/base_setup.sh ${aws_key_pair.deployer_key.public_key}",
-      "/tmp/base_setup.sh"
-    ]
-  }*/
-
   # Setup NFS server
   provisioner "file" {
     source      = "../scripts/nfs/nfs_server_setup.sh"
@@ -187,44 +202,6 @@ resource "null_resource" "setup_master_node" {
       "/tmp/cluster_init.sh"
     ]
   }
-
-  /*
-  # Install OpenMPI with ULFM support
-  provisioner "file" {
-    source      = "../scripts/mpi/install_ulfm_ompi.sh"
-    destination = "/tmp/install_ulfm_ompi.sh"
-  }
-  provisioner "remote-exec" {
-    inline = [
-      "chmod +x /tmp/install_ulfm_ompi.sh",
-      "/tmp/install_ulfm_ompi.sh"
-    ]
-  }
-
-  # Install MVAPICH
-  provisioner "file" {
-    source      = "../scripts/mpi/install_tcp_mvapich.sh"
-    destination = "/tmp/install_tcp_mvapich.sh"
-  }
-  provisioner "remote-exec" {
-    inline = [
-      "chmod +x /tmp/install_tcp_mvapich.sh",
-      "/tmp/install_tcp_mvapich.sh"
-    ]
-  }
-
-  # Install Singularity
-  provisioner "file" {
-    source      = "../scripts/singularity/install_singularity.sh"
-    destination = "/tmp/install_singularity.sh"
-  }
-  provisioner "remote-exec" {
-    inline = [
-      "chmod +x /tmp/install_singularity.sh",
-      "/tmp/install_singularity.sh"
-    ]
-  }
-  */
 }
 
 resource "aws_instance" "worker_node" {
@@ -235,18 +212,20 @@ resource "aws_instance" "worker_node" {
   subnet_id       = aws_subnet.cluster_subnet.id
   key_name        = aws_key_pair.deployer_key.key_name
   root_block_device {
-    delete_on_termination = "true"
-    volume_size           = var.worker_rbs
-  }
-  ebs_block_device {
-    delete_on_termination = "true"
-    device_name           = "/dev/sdh"
-    volume_size           = var.worker_ebs
+    volume_type           = var.worker_rbs_type
+    volume_size           = var.worker_rbs_size
+    delete_on_termination = true
+    iops                  = var.worker_rbs_iops
+    tags = {
+      Name                  = "Worker RBS"
+      "cost_allocation_tag" = var.experiment_tag
+    }
   }
   private_ip = "10.0.0.1${count.index + 1}"
   depends_on = [aws_internet_gateway.cluster_ig, aws_instance.master_node, null_resource.setup_master_node]
   tags = {
-    Name = "Worker ${count.index + 1}"
+    Name                  = "Worker ${count.index + 1}"
+    "cost_allocation_tag" = var.experiment_tag
   }
 }
 
@@ -274,20 +253,6 @@ resource "null_resource" "setup_worker_nodes" {
     ]
   }
 
-  /*
-  # Basic EC2 configuration
-  provisioner "file" {
-    source      = "../scripts/base_setup.sh"
-    destination = "/tmp/base_setup.sh"
-  }
-  provisioner "remote-exec" {
-    inline = [
-      "chmod +x /tmp/base_setup.sh ${aws_key_pair.deployer_key.public_key}",
-      "/tmp/base_setup.sh"
-    ]
-  }
-  */
-
   # Setup NFS client access
   provisioner "file" {
     source      = "../scripts/nfs/nfs_client_setup.sh"
@@ -311,43 +276,6 @@ resource "null_resource" "setup_worker_nodes" {
       "/tmp/cluster_init.sh"
     ]
   }
-
-  /*
-  # Install OpenMPI with ULFM support
-  provisioner "file" {
-    source      = "../scripts/mpi/install_ulfm_ompi.sh"
-    destination = "/tmp/install_ulfm_ompi.sh"
-  }
-  provisioner "remote-exec" {
-    inline = [
-      "chmod +x /tmp/install_ulfm_ompi.sh",
-      "/tmp/install_ulfm_ompi.sh"
-    ]
-  }
-
-  # Install MVAPICH
-  provisioner "file" {
-    source      = "../scripts/mpi/install_tcp_mvapich.sh"
-    destination = "/tmp/install_tcp_mvapich.sh"
-  }
-  provisioner "remote-exec" {
-    inline = [
-      "chmod +x /tmp/install_tcp_mvapich.sh",
-      "/tmp/install_tcp_mvapich.sh"
-    ]
-  }
-
-  # Install Singularity
-  provisioner "file" {
-    source      = "../scripts/singularity/install_singularity.sh"
-    destination = "/tmp/install_singularity.sh"
-  }
-  provisioner "remote-exec" {
-    inline = [
-      "chmod +x /tmp/install_singularity.sh",
-      "/tmp/install_singularity.sh"
-    ]
-  }*/
 }
 
 output "master_node_public_ip" {
