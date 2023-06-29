@@ -258,17 +258,16 @@ resource "aws_instance" "worker_node" {
 #    volume_size           = var.worker_ebs
 #  }
 
-#  fsx_block_device {
-    # import_path      = "s3://${aws_s3_bucket.example.bucket}"
-#    storage_capacity = var.master_fsx
-#    subnet_ids       = [aws_subnet.cluster_subnet.id]
-#  }
-
   private_ip = "10.0.0.1${count.index + 1}"
   depends_on = [aws_internet_gateway.cluster_ig, aws_instance.master_node, null_resource.setup_master_node]
   tags = {
     Name = "Worker ${count.index + 1}"
   }
+}
+
+resource "aws_fsx_lustre_file_system" "example_Worker" {
+  storage_capacity = var.worker_fsx
+  subnet_ids       = [aws_subnet.cluster_subnet.id]
 }
 
 resource "null_resource" "setup_worker_nodes" {
