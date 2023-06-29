@@ -5,15 +5,17 @@ variable "public_rsa_key_path" {}
 variable "public_key_name" {}
 
 variable "master_ami" {}
-variable "master_ebs" {}
-variable "master_rbs" {}
 variable "master_instance_type" {}
+variable "master_rbs_size" {}
+variable "master_rbs_type" {}
+variable "master_rbs_iops" {}
 
 variable "worker_count" {}
 variable "worker_ami" {}
-variable "worker_ebs" {}
-variable "worker_rbs" {}
 variable "worker_instance_type" {}
+variable "worker_rbs_size" {}
+variable "worker_rbs_type" {}
+variable "worker_rbs_iops" {}
 variable "worker_spot_price" {}
 
 variable "experiment_tag" {}
@@ -129,19 +131,12 @@ resource "aws_instance" "master_node" {
   subnet_id       = aws_subnet.cluster_subnet.id
   key_name        = aws_key_pair.deployer_key.key_name
   root_block_device {
-    delete_on_termination = "true"
-    volume_size           = var.master_rbs
+    volume_type           = var.master_rbs_type
+    volume_size           = var.master_rbs_size
+    delete_on_termination = true
+    iops                  = var.master_rbs_iops
     tags = {
       Name                  = "Master RBS"
-      "cost_allocation_tag" = var.experiment_tag
-    }
-  }
-  ebs_block_device {
-    delete_on_termination = "true"
-    device_name           = "/dev/sdh"
-    volume_size           = var.master_ebs
-    tags = {
-      Name                  = "Master EBS",
       "cost_allocation_tag" = var.experiment_tag
     }
   }
@@ -210,19 +205,12 @@ resource "aws_spot_instance_request" "worker_node" {
   subnet_id       = aws_subnet.cluster_subnet.id
   key_name        = aws_key_pair.deployer_key.key_name
   root_block_device {
-    delete_on_termination = "true"
-    volume_size           = "10"
+    volume_type           = var.worker_rbs_type
+    volume_size           = var.worker_rbs_size
+    delete_on_termination = true
+    iops                  = var.worker_rbs_iops
     tags = {
-      Name                  = "Worker ${count.index + 1} RBS"
-      "cost_allocation_tag" = var.experiment_tag
-    }
-  }
-  ebs_block_device {
-    delete_on_termination = "true"
-    device_name           = "/dev/sdh"
-    volume_size           = "10"
-    tags = {
-      Name                  = "Worker ${count.index + 1} EBS"
+      Name                  = "Worker RBS"
       "cost_allocation_tag" = var.experiment_tag
     }
   }
@@ -237,6 +225,26 @@ resource "aws_spot_instance_request" "worker_node" {
     Name                  = "Worker ${count.index + 1}"
     "cost_allocation_tag" = var.experiment_tag
   }
+}
+
+resource "aws_ec2_tag" "worker_node_tags" {
+  count = var.worker_count
+
+  resource_id = aws_spot_instance_request.worker_node[count.index].spot_instance_id
+  key         = "Name"
+  value       = "Worker ${count.index + 1}"
+
+  depends_on = [aws_spot_instance_request.worker_node]
+}
+
+resource "aws_ec2_tag" "worker_node_cost_tags" {
+  count = var.worker_count
+
+  resource_id = aws_spot_instance_request.worker_node[count.index].spot_instance_id
+  key         = "cost_allocation_tag"
+  value       = var.experiment_tag
+
+  depends_on = [aws_spot_instance_request.worker_node]
 }
 
 resource "null_resource" "setup_worker_nodes" {

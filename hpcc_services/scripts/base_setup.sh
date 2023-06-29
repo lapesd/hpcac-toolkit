@@ -15,11 +15,15 @@ sudo yum clean all \
   && sudo rm -rf /var/cache/yum
 
 # Mount the Elastic Block Storage:
-sudo mkfs -t ext4 /dev/sdh \
-  && sudo mkdir /var/nfs_dir \
-  && sudo mount /dev/sdh /var/nfs_dir \
-  && sudo chown nfsnobody:nfsnobody /var/nfs_dir \
-  && sudo chmod 755 /var/nfs_dir
+#sudo mkfs -t ext4 /dev/sdh \
+#  && sudo mkdir /var/nfs_dir \
+#  && sudo mount /dev/sdh /var/nfs_dir \
+#  && sudo chown nfsnobody:nfsnobody /var/nfs_dir \
+#  && sudo chmod 755 /var/nfs_dir
+
+sudo mkdir /var/nfs_dir
+sudo chown nfsnobody:nfsnobody /var/nfs_dir
+sudo chmod 755 /var/nfs_dir
 
 # Edit the /etc/ssh/ssh_config file with the following:
 # Host *
