@@ -26,7 +26,7 @@ services:
     command: minio server /data/minio --console-address ":9090"
 
   hpcc_services:
-    build: ./hpcc_services
+    build: .
     command: >
       sh -c "python manage.py migrate && python manage.py test && python manage.py runserver 0.0.0.0:8000"
     depends_on:
@@ -45,7 +45,7 @@ services:
     restart: always
 
   hpcc_ui:
-    build: ./hpcc_ui
+    build: ../hpcc_ui
     command: >
       sh -c "deno task start"
     depends_on:

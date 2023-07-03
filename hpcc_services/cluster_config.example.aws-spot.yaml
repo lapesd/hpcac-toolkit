@@ -1,12 +1,12 @@
 cluster_label: "test_cluster"
-provider: "aws"
+provider: "aws-spot"
 
-private_rsa_key_path: "/Users/vanderlei/.ssh/id_rsa"
-public_rsa_key_path: "/Users/vanderlei/.ssh/id_rsa.pub"
-public_key_name: "vanderlei@MAC.local"
+private_rsa_key_path: "~/.ssh/id_rsa"
+public_rsa_key_path: "~/.ssh/id_rsa.pub"
+public_key_name: "clement@clement-Nitro-AN515-51"
 
-aws_secret_key: ""
-aws_access_key: ""
+aws_secret_key: "uyL1y/dCD8iLS3g+kdiaFUy9+w6ZBDLfox6+VHEI"
+aws_access_key: "AKIA3K4RAFVMNJTOTKMC"
 
 master_ami: "ami-06595df5f34c718e5"
 master_instance_type: "t3.2xlarge"

@@ -11,16 +11,19 @@ public_rsa_key_path: "/Users/vanderlei/.ssh/id_rsa.pub"
 public_key_name: "vanderlei@RIVET-LABS-MAC-HGMW6NW46J.local"
 
 master_ami: "ami-0f79feff35a0952f8"
-#master_ebs: 10
-master_fsx: 1200
-master_rbs: 10
+master_fsx: 2400
 master_instance_type: "t2.micro"
+master_rbs_size: 50
+master_rbs_type: "io1"
+master_rbs_iops: 150
 
 worker_count: 1
 worker_ami: "ami-0f79feff35a0952f8"
-#worker_ebs: 10
-worker_fsx: 10
-worker_rbs: 10
+worker_fsx: 2400
 worker_instance_type: "t2.micro"
+worker_rbs_size: 50
+worker_rbs_type: "io1"
+worker_rbs_iops: 150
+
 worker_spot_price: 0.5
 
