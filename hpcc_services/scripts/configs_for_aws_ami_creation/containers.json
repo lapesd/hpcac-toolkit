@@ -1,0 +1,10 @@
+[
+    {
+        "Description":"vm import",
+        "Format":"ova",
+        "UserBucket": {
+            "S3Bucket": "vanderlei-ovas",
+            "S3Key": "centos7.ova"
+        }
+    }
+]

@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Base AMI: ami-06b09bfacae1453cb
+# Instance username: ec2-user
+
 # Update OS packages with yum:
 sudo yum -y update
 

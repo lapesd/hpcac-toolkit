@@ -18,6 +18,7 @@ variable "worker_rbs_type" {}
 variable "worker_rbs_iops" {}
 
 variable "experiment_tag" {}
+variable "instance_username" {}
 
 
 resource "aws_vpc" "cluster_vpc" {
@@ -139,15 +140,6 @@ resource "aws_instance" "master_node" {
       "cost_allocation_tag" = var.experiment_tag
     }
   }
-  ebs_block_device {
-    delete_on_termination = "true"
-    device_name           = "/dev/sdh"
-    volume_size           = var.master_ebs
-    tags = {
-      Name                  = "Master EBS",
-      "cost_allocation_tag" = var.experiment_tag
-    }
-  }
   private_ip = "10.0.0.10"
   depends_on = [aws_internet_gateway.cluster_ig]
   tags = {
@@ -160,28 +152,28 @@ resource "null_resource" "setup_master_node" {
   connection {
     type        = "ssh"
     host        = aws_instance.master_node.public_ip
-    user        = "ec2-user"
+    user        = var.instance_username
     private_key = file(var.private_rsa_key_path)
   }
 
   # Copy SSH keys
   provisioner "file" {
     source      = var.private_rsa_key_path
-    destination = "/home/ec2-user/.ssh/id_rsa"
+    destination = "/home/${var.instance_username}/.ssh/id_rsa"
   }
   provisioner "file" {
     source      = var.public_rsa_key_path
-    destination = "/home/ec2-user/.ssh/id_rsa.pub"
+    destination = "/home/${var.instance_username}/.ssh/id_rsa.pub"
   }
   provisioner "remote-exec" {
     inline = [
-      "chmod 600 /home/ec2-user/.ssh/id_rsa"
+      "chmod 600 /home/${var.instance_username}/.ssh/id_rsa"
     ]
   }
 
   # Setup NFS server
   provisioner "file" {
-    source      = "../scripts/nfs/nfs_server_setup.sh"
+    source      = "../scripts/nfs/nfs_server_setup_${var.instance_username}.sh"
     destination = "/tmp/nfs_server_setup.sh"
   }
   provisioner "remote-exec" {
@@ -234,22 +226,22 @@ resource "null_resource" "setup_worker_nodes" {
   connection {
     type        = "ssh"
     host        = aws_instance.worker_node[count.index].public_ip
-    user        = "ec2-user"
+    user        = var.instance_username
     private_key = file(var.private_rsa_key_path)
   }
 
   # Copy SSH keys
   provisioner "file" {
     source      = var.private_rsa_key_path
-    destination = "/home/ec2-user/.ssh/id_rsa"
+    destination = "/home/${var.instance_username}/.ssh/id_rsa"
   }
   provisioner "file" {
     source      = var.public_rsa_key_path
-    destination = "/home/ec2-user/.ssh/id_rsa.pub"
+    destination = "/home/${var.instance_username}/.ssh/id_rsa.pub"
   }
   provisioner "remote-exec" {
     inline = [
-      "chmod 600 /home/ec2-user/.ssh/id_rsa"
+      "chmod 600 /home/${var.instance_username}/.ssh/id_rsa"
     ]
   }
 
@@ -261,7 +253,7 @@ resource "null_resource" "setup_worker_nodes" {
   provisioner "remote-exec" {
     inline = [
       "chmod +x /tmp/nfs_client_setup.sh",
-      "/tmp/nfs_client_setup.sh 10.0.0.10"
+      "/tmp/nfs_client_setup.sh"
     ]
   }
 

@@ -23,7 +23,8 @@ class ClusterConfiguration(models.Model):
             "worker_rbs_type": "io1",
             "worker_rbs_iops": 150,
             "worker_instance_type": "t2.micro",
-            "experiment_tag": "generic-test"
+            "experiment_tag": "generic-test",
+            "instance_username": "ec2-user",
         },
         "aws-spot": {
             "region": "us-east-1",
@@ -41,6 +42,7 @@ class ClusterConfiguration(models.Model):
             "worker_instance_type": "t2.micro",
             "worker_spot_price": 0.5,
             "experiment_tag": "generic-test",
+            "instance_username": "ec2-user",
         },
         "vultr": {},
     }

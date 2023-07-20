@@ -19,6 +19,7 @@ variable "worker_rbs_iops" {}
 variable "worker_spot_price" {}
 
 variable "experiment_tag" {}
+variable "instance_username" {}
 
 
 resource "aws_vpc" "cluster_vpc" {
@@ -152,22 +153,22 @@ resource "null_resource" "setup_master_node" {
   connection {
     type        = "ssh"
     host        = aws_instance.master_node.public_ip
-    user        = "ec2-user"
+    user        = var.instance_username
     private_key = file(var.private_rsa_key_path)
   }
 
   # Copy SSH keys
   provisioner "file" {
     source      = var.private_rsa_key_path
-    destination = "/home/ec2-user/.ssh/id_rsa"
+    destination = "/home/${var.instance_username}/.ssh/id_rsa"
   }
   provisioner "file" {
     source      = var.public_rsa_key_path
-    destination = "/home/ec2-user/.ssh/id_rsa.pub"
+    destination = "/home/${var.instance_username}/.ssh/id_rsa.pub"
   }
   provisioner "remote-exec" {
     inline = [
-      "chmod 600 /home/ec2-user/.ssh/id_rsa"
+      "chmod 600 /home/${var.instance_username}/.ssh/id_rsa"
     ]
   }
 
@@ -227,26 +228,6 @@ resource "aws_spot_instance_request" "worker_node" {
   }
 }
 
-resource "aws_ec2_tag" "worker_node_tags" {
-  count = var.worker_count
-
-  resource_id = aws_spot_instance_request.worker_node[count.index].spot_instance_id
-  key         = "Name"
-  value       = "Worker ${count.index + 1}"
-
-  depends_on = [aws_spot_instance_request.worker_node]
-}
-
-resource "aws_ec2_tag" "worker_node_cost_tags" {
-  count = var.worker_count
-
-  resource_id = aws_spot_instance_request.worker_node[count.index].spot_instance_id
-  key         = "cost_allocation_tag"
-  value       = var.experiment_tag
-
-  depends_on = [aws_spot_instance_request.worker_node]
-}
-
 resource "null_resource" "setup_worker_nodes" {
   count = var.worker_count
   connection {
@@ -279,7 +260,7 @@ resource "null_resource" "setup_worker_nodes" {
   provisioner "remote-exec" {
     inline = [
       "chmod +x /tmp/nfs_client_setup.sh",
-      "/tmp/nfs_client_setup.sh 10.0.0.10"
+      "/tmp/nfs_client_setup.sh"
     ]
   }
 
@@ -294,6 +275,26 @@ resource "null_resource" "setup_worker_nodes" {
       "/tmp/cluster_init.sh"
     ]
   }
+}
+
+resource "aws_ec2_tag" "worker_node_tags" {
+  count = var.worker_count
+
+  resource_id = aws_spot_instance_request.worker_node[count.index].spot_instance_id
+  key         = "Name"
+  value       = "Worker ${count.index + 1}"
+
+  depends_on = [aws_spot_instance_request.worker_node]
+}
+
+resource "aws_ec2_tag" "worker_node_cost_tags" {
+  count = var.worker_count
+
+  resource_id = aws_spot_instance_request.worker_node[count.index].spot_instance_id
+  key         = "cost_allocation_tag"
+  value       = var.experiment_tag
+
+  depends_on = [aws_spot_instance_request.worker_node]
 }
 
 output "master_node_public_ip" {
