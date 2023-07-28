@@ -14,7 +14,6 @@ from hpcc_api.exceptions import ConfigurationError
 
 VM_USER_MAPPING = {
     "aws": "ec2-user",
-    "aws-spot": "ec2-user",
     "vultr": "root",
 }
 

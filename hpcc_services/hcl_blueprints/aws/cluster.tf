@@ -17,6 +17,9 @@ variable "worker_rbs_size" {}
 variable "worker_rbs_type" {}
 variable "worker_rbs_iops" {}
 
+variable "use_spot" {}
+variable "spot_maximum_rate" {}
+
 variable "experiment_tag" {}
 variable "instance_username" {}
 
@@ -124,6 +127,15 @@ resource "aws_key_pair" "deployer_key" {
   public_key = file(var.public_rsa_key_path)
 }
 
+resource "aws_placement_group" "cluster_pg" {
+  name     = "cluster-placement-group"
+  strategy = "cluster"
+  tags = {
+    Name                  = "Cluster Placement Group"
+    "cost_allocation_tag" = var.experiment_tag
+  }
+}
+
 resource "aws_instance" "master_node" {
   ami             = var.master_ami
   instance_type   = var.master_instance_type
@@ -140,8 +152,9 @@ resource "aws_instance" "master_node" {
       "cost_allocation_tag" = var.experiment_tag
     }
   }
-  private_ip = "10.0.0.10"
-  depends_on = [aws_internet_gateway.cluster_ig]
+  private_ip      = "10.0.0.10"
+  depends_on      = [aws_internet_gateway.cluster_ig, aws_placement_group.cluster_pg]
+  placement_group = aws_placement_group.cluster_pg.name
   tags = {
     Name                  = "Master Node"
     "cost_allocation_tag" = var.experiment_tag
@@ -172,8 +185,8 @@ resource "null_resource" "setup_master_node" {
   }
 
   # Setup NFS server
-  provisioner "file" {
-    source      = "../scripts/nfs/nfs_server_setup_${var.instance_username}.sh"
+  /*provisioner "file" {
+    source      = "../scripts/nfs/nfs_server_setup.sh"
     destination = "/tmp/nfs_server_setup.sh"
   }
   provisioner "remote-exec" {
@@ -191,13 +204,13 @@ resource "null_resource" "setup_master_node" {
   provisioner "remote-exec" {
     inline = [
       "chmod +x /tmp/cluster_init.sh",
-      "/tmp/cluster_init.sh"
+      "sudo /tmp/cluster_init.sh"
     ]
-  }
+  }*/
 }
 
 resource "aws_instance" "worker_node" {
-  count           = var.worker_count
+  count           = var.use_spot ? 0 : var.worker_count
   ami             = var.worker_ami
   instance_type   = var.worker_instance_type
   security_groups = [aws_security_group.allow_ssh.id, aws_security_group.allow_nfs.id, aws_security_group.allow_mpi.id]
@@ -213,8 +226,9 @@ resource "aws_instance" "worker_node" {
       "cost_allocation_tag" = var.experiment_tag
     }
   }
-  private_ip = "10.0.0.1${count.index + 1}"
-  depends_on = [aws_internet_gateway.cluster_ig, aws_instance.master_node, null_resource.setup_master_node]
+  private_ip      = "10.0.0.1${count.index + 1}"
+  depends_on      = [aws_internet_gateway.cluster_ig, aws_instance.master_node, null_resource.setup_master_node, aws_placement_group.cluster_pg]
+  placement_group = aws_placement_group.cluster_pg.name
   tags = {
     Name                  = "Worker ${count.index + 1}"
     "cost_allocation_tag" = var.experiment_tag
@@ -222,7 +236,7 @@ resource "aws_instance" "worker_node" {
 }
 
 resource "null_resource" "setup_worker_nodes" {
-  count = var.worker_count
+  count = var.use_spot ? 0 : var.worker_count
   connection {
     type        = "ssh"
     host        = aws_instance.worker_node[count.index].public_ip
@@ -265,9 +279,109 @@ resource "null_resource" "setup_worker_nodes" {
   provisioner "remote-exec" {
     inline = [
       "chmod +x /tmp/cluster_init.sh",
+      "sudo /tmp/cluster_init.sh"
+    ]
+  }
+}
+
+resource "aws_spot_instance_request" "spot_worker_node" {
+  count           = var.use_spot ? var.worker_count : 0
+  ami             = var.worker_ami
+  instance_type   = var.worker_instance_type
+  spot_price      = var.spot_maximum_rate
+  security_groups = [aws_security_group.allow_ssh.id, aws_security_group.allow_nfs.id, aws_security_group.allow_mpi.id]
+  subnet_id       = aws_subnet.cluster_subnet.id
+  key_name        = aws_key_pair.deployer_key.key_name
+  root_block_device {
+    volume_type           = var.worker_rbs_type
+    volume_size           = var.worker_rbs_size
+    delete_on_termination = true
+    iops                  = var.worker_rbs_iops
+    tags = {
+      Name                  = "Worker RBS"
+      "cost_allocation_tag" = var.experiment_tag
+    }
+  }
+  spot_type                      = "one-time"
+  instance_interruption_behavior = "terminate"
+  wait_for_fulfillment           = "true"
+
+  private_ip = "10.0.0.1${count.index + 1}"
+  depends_on = [aws_internet_gateway.cluster_ig, aws_instance.master_node, null_resource.setup_master_node]
+  monitoring = true
+  tags = {
+    Name                  = "Worker ${count.index + 1}"
+    "cost_allocation_tag" = var.experiment_tag
+  }
+}
+
+resource "null_resource" "setup_spot_worker_nodes" {
+  count = var.use_spot ? var.worker_count : 0
+  connection {
+    type        = "ssh"
+    host        = aws_spot_instance_request.spot_worker_node[count.index].public_ip
+    user        = "ec2-user"
+    private_key = file(var.private_rsa_key_path)
+  }
+
+  # Copy SSH keys
+  provisioner "file" {
+    source      = var.private_rsa_key_path
+    destination = "/home/ec2-user/.ssh/id_rsa"
+  }
+  provisioner "file" {
+    source      = var.public_rsa_key_path
+    destination = "/home/ec2-user/.ssh/id_rsa.pub"
+  }
+  provisioner "remote-exec" {
+    inline = [
+      "chmod 600 /home/ec2-user/.ssh/id_rsa"
+    ]
+  }
+
+  # Setup NFS client access
+  provisioner "file" {
+    source      = "../scripts/nfs/nfs_client_setup.sh"
+    destination = "/tmp/nfs_client_setup.sh"
+  }
+  provisioner "remote-exec" {
+    inline = [
+      "chmod +x /tmp/nfs_client_setup.sh",
+      "/tmp/nfs_client_setup.sh"
+    ]
+  }
+
+  # RUN cluster-init script
+  provisioner "file" {
+    source      = "../cluster_init.sh"
+    destination = "/tmp/cluster_init.sh"
+  }
+  provisioner "remote-exec" {
+    inline = [
+      "chmod +x /tmp/cluster_init.sh",
       "/tmp/cluster_init.sh"
     ]
   }
+}
+
+resource "aws_ec2_tag" "spot_worker_node_tags" {
+  count = var.use_spot ? var.worker_count : 0
+
+  resource_id = aws_spot_instance_request.spot_worker_node[count.index].spot_instance_id
+  key         = "Name"
+  value       = "Worker ${count.index + 1}"
+
+  depends_on = [aws_spot_instance_request.spot_worker_node]
+}
+
+resource "aws_ec2_tag" "spot_worker_node_cost_tags" {
+  count = var.use_spot ? var.worker_count : 0
+
+  resource_id = aws_spot_instance_request.spot_worker_node[count.index].spot_instance_id
+  key         = "cost_allocation_tag"
+  value       = var.experiment_tag
+
+  depends_on = [aws_spot_instance_request.spot_worker_node]
 }
 
 output "master_node_public_ip" {

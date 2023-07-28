@@ -86,6 +86,10 @@ class Command(BaseCommand):
                 )
             )
         else:
+            # Update `entrypoint_ip`:
+            cluster_config.entrypoint_ip = master_node_ip[0]
+            cluster_config.save()
+
             self.stdout.write(
                 self.style.SUCCESS(
                     f"Successfully spawned a Cluster using the `{cluster_config.label} ClusterConfiguration`!"
@@ -97,27 +101,27 @@ class Command(BaseCommand):
                     f"""
                 To copy files from your machine to the cloud cluster, use the `scp` command:
                 
-                scp -r /Users/vanderlei/Code/lapesd/jacobi-method ec2-user@{master_node_ip[0]}:/var/nfs_dir
+                scp -r /Users/vanderlei/Code/lapesd/jacobi-method {cluster_config.username}@{cluster_config.entrypoint_ip}:/var/nfs_dir
 
                 The command above will copy the `jacobi-method` folder and all files inside it to the 
                 /var/nfs_dir shared cluster directory.
     
                 You can also execute commands in your cluster from your local machine using `ssh`:
 
-                ssh ec2-user@{master_node_ip[0]} make all -C /var/nfs_dir/jacobi
+                ssh {cluster_config.username}@{cluster_config.entrypoint_ip} make all -C /var/nfs_dir/jacobi
 
                 The command above will run the `make all -C /var/nfs_dir/jacobi` command, compiling the 
                 jacobi-method application (https://github.com/vanderlei-filho/jacobi-method), which can 
                 then be executed by the following:
 
-                ssh ec2-user@{master_node_ip[0]} mpirun --oversubscribe --with-ft ulfm -np 4 --hostfile /var/nfs_dir/hostfile /var/nfs_dir/jacobi-method/jacobi_ulfm -p 2 -q 2 -NB 128
+                ssh {cluster_config.username}@{cluster_config.entrypoint_ip} mpirun --oversubscribe --with-ft ulfm -np 4 --hostfile /var/nfs_dir/hostfile /var/nfs_dir/jacobi-method/jacobi_ulfm -p 2 -q 2 -NB 128
 
                 Don't forget to edit an appropriate hostfile and copy it to the cluster.
                 You can use the `hostfile.openmpi.example` and `hostfile.mvapich2.example` files as templates.
 
                 Finally, if you want to access your cluster directly over the command-line, use SSH:
                 
-                ssh ec2-user@{master_node_ip[0]}
+                ssh {cluster_config.username}@{cluster_config.entrypoint_ip}
                 """
                 )
             )

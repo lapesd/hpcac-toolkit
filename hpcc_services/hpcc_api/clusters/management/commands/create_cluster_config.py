@@ -35,6 +35,7 @@ def generate_cluster_blueprint_from_yaml_definitions(
 
     # Merge default and input YAML definitions
     cluster_options = {**ClusterConfiguration.DEFAULTS[provider], **yaml_data}
+    use_spot = cluster_options.get("use_spot")
 
     # Generate the terraform.tfvars file
     os.makedirs(os.path.dirname("./tmp_terraform_dir/"), exist_ok=True)
@@ -87,6 +88,8 @@ def generate_cluster_blueprint_from_yaml_definitions(
         label=cluster_options.get("cluster_label"),
         defaults={
             "cloud_provider": provider,
+            "nodes": cluster_options.get("worker_count") + 1,
+            "transient": True if use_spot.lower() == "true" else False,
             "minio_bucket_name": minio_bucket_name,
         },
     )
@@ -111,7 +114,6 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         yaml_file = options["yaml_file"]
-        singularity = options["singularity"]
 
         try:
             cluster_config = generate_cluster_blueprint_from_yaml_definitions(yaml_file)
