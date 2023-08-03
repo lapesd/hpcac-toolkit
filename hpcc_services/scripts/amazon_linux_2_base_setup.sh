@@ -25,8 +25,9 @@ sudo yum clean all \
 #  && sudo chmod 755 /var/nfs_dir
 
 sudo mkdir /var/nfs_dir
-sudo chown nobody:nobody /var/nfs_dir
-sudo chmod 755 /var/nfs_dir
+sudo chown -R nobody:nobody /var/nfs_dir
+sudo chown -R ec2-user:nobody /var/nfs_dir
+sudo chmod -R 775 /var/nfs_dir
 
 # Edit the /etc/ssh/ssh_config file with the following:
 # Host *

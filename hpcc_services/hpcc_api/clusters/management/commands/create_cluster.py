@@ -66,7 +66,9 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument(
-            "config_label", type=str, help="The ClusterConfiguration label"
+            "config_label",
+            type=str,
+            help="The ClusterConfiguration label",
         )
 
     def handle(self, *args, **options):
