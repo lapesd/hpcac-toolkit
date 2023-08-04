@@ -44,55 +44,56 @@ class Command(BaseCommand):
                 "10.0.0.10,10.0.0.11,10.0.0.12,10.0.0.13",
             ]
 
-            with open("experiment_logs.txt", "w") as file:
-                for workload in workloads:
-                    # Copy experiment files to NFS dir inside the Cloud Cluster
-                    subprocess.run(
-                        [
-                            "scp",
-                            "-r",
-                            f"./{workload}",
-                            f"{user}@{ip}:/var/nfs_dir/dynemol",
-                        ],
-                        cwd=f"../sample_workloads/dynemol",
-                        check=True,
-                    )
+            for workload in workloads:
+                # Copy experiment files to NFS dir inside the Cloud Cluster
+                subprocess.run(
+                    [
+                        "scp",
+                        "-r",
+                        f"./{workload}",
+                        f"{user}@{ip}:/var/nfs_dir/dynemol",
+                    ],
+                    cwd=f"../sample_workloads/dynemol",
+                    check=True,
+                )
 
-                    for n in nodes:
-                        # Start time
-                        start_time = time.time()
+                for n in nodes:
+                    # Start time
+                    start_time = time.time()
 
-                        subprocess.run(
-                            [
-                                "ssh",
-                                f"{user}@{ip}",
-                                f"cd /var/nfs_dir/dynemol && mpiexec.hydra \
-                                    -genv OMP_NUM_THREADS=4 \
-                                    -n {n*4} \
-                                    -ppn 4 \
-                                    -hosts {hosts[n-1]} /home/ec2-user/Dynemol/dynemol",
-                            ],
-                            check=True,
-                        )
-                        # Record the end time
-                        end_time = time.time()
-
-                        # Compute the total duration
-                        duration = end_time - start_time
-
-                        file.write(
-                            f"Workload {workload} with {n} nodes took {duration} to complete.\n"
-                        )
-
-                    # Remove experiment files
                     subprocess.run(
                         [
                             "ssh",
                             f"{user}@{ip}",
-                            f"cd /var/nfs_dir && rm -r ./dynemol",
+                            f"cd /var/nfs_dir/dynemol && mpiexec.hydra \
+                                -genv OMP_NUM_THREADS=8 \
+                                -n {n*4} \
+                                -ppn 4 \
+                                -hosts {hosts[n-1]} /home/ec2-user/Dynemol/dynemol",
                         ],
                         check=True,
                     )
+
+                    # Record the end time
+                    end_time = time.time()
+
+                    # Compute the total duration
+                    duration = end_time - start_time
+
+                    with open("spot-ebs-efa.txt", "a") as file:
+                        file.write(
+                            f"Workload {workload} with {n} nodes took {duration} to complete.\n"
+                        )
+
+                # Remove experiment files
+                subprocess.run(
+                    [
+                        "ssh",
+                        f"{user}@{ip}",
+                        f"cd /var/nfs_dir && rm -r ./dynemol",
+                    ],
+                    check=True,
+                )
 
         except Exception as error:
             # destroy_cluster()
@@ -100,7 +101,7 @@ class Command(BaseCommand):
             sys.exit(1)
 
         else:
-            # destroy_cluster()
+            destroy_cluster()
             self.stdout.write(
                 self.style.SUCCESS(f"Successfully executed the experiments!")
             )

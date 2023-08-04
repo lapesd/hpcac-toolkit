@@ -7,7 +7,7 @@
   DK_of_mixing = local
 !
   nuclear_matter = MDynamics             ! <== solvated_sys , extended_sys , MDynamics
-!			
+!
 !			
   survival     = true
   QMMM         = true
@@ -17,9 +17,9 @@
   electron_state = AZP:52
   hole_state = AZP:50
 
-  t_f  =  1.d00                          ! <== final time in PICOseconds
-  n_t  =  100000
-  step_security = 1000
+  t_f  =  1.d-1                          ! <== final time in PICOseconds
+  n_t  =  10000
+  step_security = 1000000
 
   DensityMatrix = TRUE 
   DOS_range = real_interval( -16.d0 , -5.d0 )   
@@ -66,7 +66,6 @@
 
   MM_input_format        = GMX                ! <== GMX, NAMD, GAFF
 
-  MM_log_step            = 100                ! <== step for saving MM results & parameters
+  MM_log_step            = 1000               ! <== step for saving MM results & parameters
 
-  MM_frame_step          = 100                ! <== step for saving MM results & parameters
-
+  MM_frame_step          = 1000000               ! <== step for saving MM results & parameters

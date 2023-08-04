@@ -20,6 +20,7 @@ variable "worker_rbs_iops" {}
 variable "use_spot" {}
 variable "use_efa" {}
 variable "use_nfs" {}
+variable "use_fsx" {}
 variable "spot_maximum_rate" {}
 
 variable "experiment_tag" {}
@@ -74,12 +75,14 @@ resource "aws_security_group" "allow_ssh" {
   name        = "allow_ssh"
   description = "Allow SSH traffic"
   vpc_id      = aws_vpc.cluster_vpc.id
+
   ingress {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
+
   egress {
     from_port   = 0
     to_port     = 0
@@ -92,12 +95,34 @@ resource "aws_security_group" "allow_nfs" {
   name        = "allow_nfs"
   description = "Allow NFS traffic"
   vpc_id      = aws_vpc.cluster_vpc.id
+
   ingress {
     from_port   = 2049
     to_port     = 2049
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_security_group" "allow_lustre" {
+  name        = "allow_lustre"
+  description = "Allow Lustre FSx traffic"
+  vpc_id      = aws_vpc.cluster_vpc.id
+
+  ingress {
+    from_port   = 988
+    to_port     = 988
+    protocol    = "tcp"
+    self        = true
+  }
+
   egress {
     from_port   = 0
     to_port     = 0
@@ -143,7 +168,7 @@ resource "aws_placement_group" "cluster_pg" {
 resource "aws_network_interface" "master_node_eni" {
   subnet_id       = aws_subnet.cluster_subnet.id
   private_ips     = ["10.0.0.10"]
-  security_groups = [aws_security_group.allow_all.id, aws_security_group.allow_ssh.id, aws_security_group.allow_nfs.id]
+  security_groups = [aws_security_group.allow_all.id, aws_security_group.allow_ssh.id, aws_security_group.allow_nfs.id, aws_security_group.allow_lustre.id]
   interface_type  = var.use_efa ? "efa" : null
   tags = {
     Name                  = "Master Node ENI"
@@ -155,7 +180,7 @@ resource "aws_instance" "master_node" {
   ami             = var.master_ami
   instance_type   = var.master_instance_type
   key_name        = aws_key_pair.deployer_key.key_name
-  placement_group = aws_placement_group.cluster_pg.name
+  placement_group = var.use_efa ? aws_placement_group.cluster_pg.name : null
   depends_on      = [aws_internet_gateway.cluster_ig, aws_placement_group.cluster_pg, aws_network_interface.master_node_eni]
   tags = {
     Name                  = "Master Node"
@@ -210,7 +235,9 @@ resource "null_resource" "setup_master_node" {
   provisioner "remote-exec" {
     inline = [
       "chmod +x /tmp/cluster_init.sh",
-      "/tmp/cluster_init.sh"
+      "/tmp/cluster_init.sh",
+      "echo 'export OMP_NUM_THREADS=4' >> ~/.bashrc",
+      "source ~/.bashrc",
     ]
   }
 }
@@ -242,7 +269,7 @@ resource "aws_network_interface" "worker_node_eni" {
   count           = var.worker_count
   subnet_id       = aws_subnet.cluster_subnet.id
   private_ips     = ["10.0.0.1${count.index + 1}"]
-  security_groups = [aws_security_group.allow_all.id, aws_security_group.allow_ssh.id, aws_security_group.allow_nfs.id]
+  security_groups = [aws_security_group.allow_all.id, aws_security_group.allow_ssh.id, aws_security_group.allow_nfs.id, aws_security_group.allow_lustre.id]
   interface_type  = var.use_efa ? "efa" : null
   tags = {
     Name                  = "Worker ${count.index + 1} ENI"
@@ -255,7 +282,7 @@ resource "aws_instance" "worker_node" {
   ami             = var.worker_ami
   instance_type   = var.worker_instance_type
   key_name        = aws_key_pair.deployer_key.key_name
-  placement_group = aws_placement_group.cluster_pg.name
+  placement_group = var.use_efa ? aws_placement_group.cluster_pg.name : null
   depends_on      = [null_resource.setup_master_node, aws_network_interface.worker_node_eni]
   tags = {
     Name                  = "Worker ${count.index + 1}"
@@ -286,7 +313,7 @@ resource "aws_spot_instance_request" "spot_worker_node" {
   instance_type                  = var.worker_instance_type
   spot_price                     = var.spot_maximum_rate
   key_name                       = aws_key_pair.deployer_key.key_name
-  placement_group                = aws_placement_group.cluster_pg.name
+  placement_group                = var.use_efa ? aws_placement_group.cluster_pg.name : null
   depends_on                     = [null_resource.setup_master_node, aws_network_interface.worker_node_eni]
   spot_type                      = "one-time"
   instance_interruption_behavior = "terminate"
@@ -348,7 +375,9 @@ resource "null_resource" "setup_worker_nodes_ssh" {
   provisioner "remote-exec" {
     inline = [
       "chmod +x /tmp/cluster_init.sh",
-      "/tmp/cluster_init.sh"
+      "/tmp/cluster_init.sh",
+      "echo 'export OMP_NUM_THREADS=4' >> ~/.bashrc",
+      "source ~/.bashrc",
     ]
   }
 }
@@ -394,6 +423,24 @@ resource "aws_ec2_tag" "spot_worker_node_cost_tags" {
   value       = var.experiment_tag
 
   depends_on = [aws_spot_instance_request.spot_worker_node]
+}
+
+resource "aws_fsx_lustre_file_system" "lustre_fsx" {
+  count = var.use_fsx ? 1 : 0
+  storage_capacity    = 1200
+  subnet_ids          = [aws_subnet.cluster_subnet.id]
+  security_group_ids  = [aws_security_group.allow_lustre.id]
+  depends_on = [null_resource.setup_worker_nodes_nfs]
+
+  tags = {
+    Name                  = "FSx Lustre Filesystem"
+    "cost_allocation_tag" = var.experiment_tag
+  }
+}
+
+output "fsx_lustre_dns_name" {
+  description = "FSx Lustre filesystem DNS name"
+  value = var.use_fsx ? aws_fsx_lustre_file_system.lustre_fsx[0].dns_name : "No Lustre FSx"
 }
 
 output "master_node_public_ip" {

@@ -15,9 +15,9 @@
 
   PBC = [ 1 , 1 , 0 ] 
 
-  t_f  =  25.d-4                    ! <== final time in PICOseconds
-  n_t  =  250                       ! <== number of time steps
-  step_security = 2
+  t_f  =  1.d-4                    ! <== final time in PICOseconds
+  n_t  =  10                       ! <== number of time steps
+  step_security = 100
 
   electron_state = AZD:92
   hole_state     = AZD:89
@@ -79,10 +79,8 @@
 
   MM_input_format        = GMX                ! <== GMX, NAMD, GAFF
 
-  MM_log_step            =  10                ! <== step for saving MM results & parameters
+  MM_log_step            =  1                 ! <== step for saving MM results & parameters
 
-  MM_frame_step          =  50                ! <== step for saving MM results & parameters
+  MM_frame_step          =  100                 ! <== step for saving MM results & parameters
 
   Units_MM               = eV                 ! <== choose OUTPUT energy units: "eV" or "kj-mol" 
-
-
