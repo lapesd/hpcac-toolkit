@@ -25,6 +25,9 @@ class ClusterConfiguration(models.Model):
             "experiment_tag": "generic-test",
             "instance_username": "ec2-user",
             "use_spot": False,
+            "use_nfs": True,
+            "use_fsx": False,
+            "use_efa": False,
         },
         "vultr": {
             # TODO review and add Vultr base params
@@ -45,6 +48,18 @@ class ClusterConfiguration(models.Model):
         null=False,
     )
     transient = models.BooleanField(
+        default=False,
+        null=False,
+    )
+    fsx = models.BooleanField(
+        default=False,
+        null=False,
+    )
+    nfs = models.BooleanField(
+        default=False,
+        null=False,
+    )
+    efa = models.BooleanField(
         default=False,
         null=False,
     )

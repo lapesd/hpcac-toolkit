@@ -202,6 +202,12 @@ resource "aws_instance" "master_node" {
     device_index         = 0
     network_interface_id = aws_network_interface.master_node_eni.id
   }
+
+  timeouts {
+    create = "30m"
+    update = "30m"
+    delete = "30m"
+  }
 }
 
 resource "null_resource" "setup_master_node" {
@@ -303,6 +309,12 @@ resource "aws_instance" "worker_node" {
   network_interface {
     device_index         = 0
     network_interface_id = aws_network_interface.worker_node_eni[count.index].id
+  }
+
+  timeouts {
+    create = "30m"
+    update = "30m"
+    delete = "30m"
   }
 }
 

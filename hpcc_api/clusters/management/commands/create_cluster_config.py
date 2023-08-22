@@ -36,6 +36,9 @@ def generate_cluster_blueprint_from_yaml_definitions(
     # Merge default and input YAML definitions
     cluster_options = {**ClusterConfiguration.DEFAULTS[provider], **yaml_data}
     use_spot = cluster_options.get("use_spot")
+    use_nfs = cluster_options.get("use_nfs")
+    use_fsx = cluster_options.get("use_fsx")
+    use_efa = cluster_options.get("use_efa")
 
     # Generate the terraform.tfvars file
     os.makedirs(os.path.dirname("./tmp_terraform_dir/"), exist_ok=True)
@@ -90,6 +93,9 @@ def generate_cluster_blueprint_from_yaml_definitions(
             "cloud_provider": provider,
             "nodes": cluster_options.get("worker_count") + 1,
             "transient": True if use_spot.lower() == "true" else False,
+            "efa": True if use_efa.lower() == "true" else False,
+            "nfs": True if use_nfs.lower() == "true" else False,
+            "fsx": True if use_fsx.lower() == "true" else False,
             "minio_bucket_name": minio_bucket_name,
         },
     )

@@ -1,6 +1,0 @@
-cluster_config.yaml
-/tmp_terraform_dir
-.pytest_cache
-terraform.tfstate
-cluster_init.sh
-/minio

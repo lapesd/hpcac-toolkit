@@ -65,7 +65,7 @@ jobs:
           poetry-version: 1.4.2
 
       - name: Automated Tests
-        run: cd hpcc_services && poetry install && poetry run pytest
+        run: poetry install && poetry run pytest
 
   django-docker-build:
     needs: django-tests
@@ -74,4 +74,4 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
       - name: Build the Docker image
-        run: cd hpcc_services && docker build . --file Dockerfile --tag hpcc-services:$(date +%s)
+        run: docker build . --file Dockerfile --tag hpcc-services:$(date +%s)

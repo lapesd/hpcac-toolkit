@@ -8,9 +8,3 @@ repos:
         # pre-commit's default_language_version, see
         # https://pre-commit.com/#top_level-default_language_version
         language_version: python3.11
-  - repo: https://github.com/nozaq/pre-commit-deno
-    rev: 0.1.0  # Use the ref you want to point at
-    hooks:
-    -   id: deno-fmt  # Auto-format all JavaScript, TypeScript, Markdown and JSON files
-    -   id: deno-lint  # Lint all JavaScript and TypeScript source code files
-    -   id: deno-test  # Run Deno tests

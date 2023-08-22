@@ -1,0 +1,33 @@
+cluster_label: "test_cluster"
+region: "us-east-1"
+provider: "aws"
+availability_zone: "us-east-1c"
+
+private_rsa_key_path: "/Users/vanderlei/.ssh/id_rsa"
+public_rsa_key_path: "/Users/vanderlei/.ssh/id_rsa.pub"
+public_key_name: "vanderlei@RIVET-LABS-MAC-HGMW6NW46J.local"
+
+aws_secret_key: "xxxx"
+aws_access_key: "xxxx"
+
+master_ami: "ami-031510926fbb78ea2"
+master_instance_type: "g3s.xlarge"
+master_rbs_size: 100
+master_rbs_type: "io2"
+master_rbs_iops: 5000
+
+worker_count: 0
+worker_ami: "ami-031510926fbb78ea2"
+worker_instance_type: "g3s.xlarge"
+worker_rbs_size: 100
+worker_rbs_type: "io2"
+worker_rbs_iops: 5000
+
+use_efa: "false"
+use_fsx: "false"
+use_nfs: "false"
+use_spot: "false"
+spot_maximum_rate: 5
+
+experiment_tag: "gpu-test-1"
+instance_username: "ec2-user"
