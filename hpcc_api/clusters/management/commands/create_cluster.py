@@ -98,13 +98,20 @@ class Command(BaseCommand):
                 )
             )
 
+            shared_dir_paths = "None"
+            if cluster_config.nfs and not cluster_config.fsx:
+                shared_dir_paths = f"`/var/nfs_dir`"
+            if cluster_config.fsx and not cluster_config.nfs:
+                shared_dir_paths = f"`/fsx`"
+            if cluster_config.fsx and cluster_config.nfs:
+                shared_dir_paths = f"`/fsx` and `/var/nfs_dir`"
+
             print(
                 textwrap.dedent(
-                    f"""
-                Cluster shared directory path: '/var/nfs_dir'
-                
-                To access your cluster over the command-line, use SSH:
-                ssh {cluster_config.username}@{cluster_config.entrypoint_ip}
-                """
+                    f"""                
+                    Shared directories: {shared_dir_paths}
+                    To access your cluster over the command-line, use SSH:
+                    ssh {cluster_config.username}@{cluster_config.entrypoint_ip}
+                    """
                 )
             )
