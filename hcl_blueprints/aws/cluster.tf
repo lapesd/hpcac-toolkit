@@ -117,10 +117,10 @@ resource "aws_security_group" "allow_lustre" {
   vpc_id      = aws_vpc.cluster_vpc.id
 
   ingress {
-    from_port   = 988
-    to_port     = 988
-    protocol    = "tcp"
-    self        = true
+    from_port = 988
+    to_port   = 988
+    protocol  = "tcp"
+    self      = true
   }
 
   egress {
@@ -248,7 +248,7 @@ resource "null_resource" "setup_master_node" {
   # DISABLE HT
   provisioner "remote-exec" {
     inline = [
-      "sudo for cpunum in $(cat /sys/devices/system/cpu/cpu*/topology/thread_siblings_list | cut -s -d, -f2- | tr ',' '\n' | sort -un); do echo 0 > /sys/devices/system/cpu/cpu$cpunum/online; done",
+      "sudo sh -c 'for cpunum in $(cat /sys/devices/system/cpu/cpu*/topology/thread_siblings_list | cut -s -d, -f2- | tr \",\" \"\\n\" | sort -un); do echo 0 > /sys/devices/system/cpu/cpu$cpunum/online; done'"
     ]
   }
 }
@@ -261,7 +261,7 @@ resource "null_resource" "setup_master_node_nfs" {
     user        = var.instance_username
     private_key = file(var.private_rsa_key_path)
   }
-  depends_on    = [null_resource.setup_master_node]
+  depends_on = [null_resource.setup_master_node]
 
   # Setup NFS server
   provisioner "file" {
@@ -399,7 +399,7 @@ resource "null_resource" "setup_worker_nodes_ssh" {
   # DISABLE HT
   provisioner "remote-exec" {
     inline = [
-      "sudo for cpunum in $(cat /sys/devices/system/cpu/cpu*/topology/thread_siblings_list | cut -s -d, -f2- | tr ',' '\n' | sort -un); do echo 0 > /sys/devices/system/cpu/cpu$cpunum/online; done",
+      "sudo sh -c 'for cpunum in $(cat /sys/devices/system/cpu/cpu*/topology/thread_siblings_list | cut -s -d, -f2- | tr \",\" \"\\n\" | sort -un); do echo 0 > /sys/devices/system/cpu/cpu$cpunum/online; done'"
     ]
   }
 }
@@ -412,7 +412,7 @@ resource "null_resource" "setup_worker_nodes_nfs" {
     user        = "ec2-user"
     private_key = file(var.private_rsa_key_path)
   }
-  depends_on    = [null_resource.setup_worker_nodes_ssh]
+  depends_on = [null_resource.setup_worker_nodes_ssh]
 
   # Setup NFS client access
   provisioner "file" {
@@ -448,11 +448,11 @@ resource "aws_ec2_tag" "spot_worker_node_cost_tags" {
 }
 
 resource "aws_fsx_lustre_file_system" "lustre_fsx" {
-  count = var.use_fsx ? 1 : 0
-  storage_capacity    = 1200
-  subnet_ids          = [aws_subnet.cluster_subnet.id]
-  security_group_ids  = [aws_security_group.allow_lustre.id]
-  depends_on = [null_resource.setup_worker_nodes_nfs]
+  count              = var.use_fsx ? 1 : 0
+  storage_capacity   = 1200
+  subnet_ids         = [aws_subnet.cluster_subnet.id]
+  security_group_ids = [aws_security_group.allow_lustre.id]
+  depends_on         = [null_resource.setup_worker_nodes_nfs]
 
   tags = {
     Name                  = "FSx Lustre Filesystem"
@@ -462,7 +462,7 @@ resource "aws_fsx_lustre_file_system" "lustre_fsx" {
 
 output "fsx_lustre_dns_name" {
   description = "FSx Lustre filesystem DNS name"
-  value = var.use_fsx ? aws_fsx_lustre_file_system.lustre_fsx[0].dns_name : "No Lustre FSx"
+  value       = var.use_fsx ? aws_fsx_lustre_file_system.lustre_fsx[0].dns_name : "No Lustre FSx"
 }
 
 output "master_node_public_ip" {
