@@ -242,8 +242,13 @@ resource "null_resource" "setup_master_node" {
     inline = [
       "chmod +x /tmp/cluster_init.sh",
       "/tmp/cluster_init.sh",
-      "echo 'export OMP_NUM_THREADS=4' >> ~/.bashrc",
-      "source ~/.bashrc",
+    ]
+  }
+
+  # DISABLE HT
+  provisioner "remote-exec" {
+    inline = [
+      "sudo for cpunum in $(cat /sys/devices/system/cpu/cpu*/topology/thread_siblings_list | cut -s -d, -f2- | tr ',' '\n' | sort -un); do echo 0 > /sys/devices/system/cpu/cpu$cpunum/online; done",
     ]
   }
 }
@@ -388,8 +393,13 @@ resource "null_resource" "setup_worker_nodes_ssh" {
     inline = [
       "chmod +x /tmp/cluster_init.sh",
       "/tmp/cluster_init.sh",
-      "echo 'export OMP_NUM_THREADS=4' >> ~/.bashrc",
-      "source ~/.bashrc",
+    ]
+  }
+
+  # DISABLE HT
+  provisioner "remote-exec" {
+    inline = [
+      "sudo for cpunum in $(cat /sys/devices/system/cpu/cpu*/topology/thread_siblings_list | cut -s -d, -f2- | tr ',' '\n' | sort -un); do echo 0 > /sys/devices/system/cpu/cpu$cpunum/online; done",
     ]
   }
 }
