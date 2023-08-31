@@ -69,3 +69,7 @@ The `cluster_label` is the same variable set at the `cluster_config.yaml` file.
 
 After the execution completes, the cluster will be available over SSH
 connection.
+
+# Research
+
+HPC@Cloud: A Provider-Agnostic Software Framework for Enabling HPC in Public Cloud Platforms: https://doi.org/10.5753/wscad.2022.226528
