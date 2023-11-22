@@ -16,13 +16,15 @@ recommended to use a Linux distro or MacOS.
 - Install [pyenv](https://github.com/pyenv/pyenv) and set a virtual environment
   for Python 3.11
 - Install [poetry](https://python-poetry.org/)
+- Install [terraform](https://www.terraform.io/)
+- Install [aws cli](https://aws.amazon.com/cli/)
 
 ### First time setup
 
 1. Run Docker and launch the dev containers:
 
 ```shell
-make docker-run-dev
+make init
 ```
 
 2. Launch and setup the Python environment with Poetry:

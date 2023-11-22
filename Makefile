@@ -7,10 +7,10 @@ help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
 
 init:  ## start the HPC@Cloud infrastructure containers only
-	docker-compose up -d postgres minio
+	docker compose up -d postgres minio
 
 stop:  ## stops the HPC@Cloud Toolkit containers
-	docker-compose stop
+	docker compose stop
 
 create-cluster:  ## create a cluster using the cluster_config.yaml configutaion
 	python manage.py create_cluster_config cluster_config.yaml
