@@ -21,13 +21,29 @@ recommended to use a Linux distro or MacOS.
 
 ### First time setup
 
-1. Run Docker and launch the dev containers:
+1. Clone the repository and cd into it:
+
+```shell
+git clone https://github.com/lapesd/hpcac-toolkit.git
+```
+
+```shell
+cd hpcac-toolkit
+```
+
+2. Configure aws cli:
+
+```shell
+aws configure
+```
+
+3. Run Docker and launch the dev containers:
 
 ```shell
 make init
 ```
 
-2. Launch and setup the Python environment with Poetry:
+4. Launch and setup the Python environment with Poetry:
 
 ```shell
 poetry shell
@@ -37,7 +53,7 @@ poetry shell
 poetry install
 ```
 
-3. Run Django migrations:
+5. Run Django migrations:
 
 ```shell
 python manage.py migrate
