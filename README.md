@@ -13,6 +13,7 @@ recommended to use a Linux distro or MacOS.
 
 - Install [git](https://git-scm.com/)
 - Install [docker](https://www.docker.com/) (at least docker 24.0.7)
+- Install [docker compose](https://docs.docker.com/compose/)
 - Install [pyenv](https://github.com/pyenv/pyenv) (run `pyenv doctor` to see if the instalation was successful; install the missing packages pointed otherwise) and set a virtual environment
   for Python 3.11
 - Install [poetry](https://python-poetry.org/)
