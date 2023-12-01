@@ -1,3 +1,4 @@
+import csv
 import os
 import sys
 import yaml
@@ -39,6 +40,9 @@ def generate_cluster_blueprint_from_yaml_definitions(
     use_nfs = cluster_options.get("use_nfs")
     use_fsx = cluster_options.get("use_fsx")
     use_efa = cluster_options.get("use_efa")
+    master_instance_type = cluster_options.get("master_instance_type")
+    worker_instance_type = cluster_options.get("worker_instance_type")
+    nodes = cluster_options.get("worker_count") + 1
 
     # Generate the terraform.tfvars file
     os.makedirs(os.path.dirname("./tmp_terraform_dir/"), exist_ok=True)
@@ -86,17 +90,31 @@ def generate_cluster_blueprint_from_yaml_definitions(
             )
         )
 
+    # Get instance data from provider CSV file
+    csv_file_path = './provider_data/vantage_aws_ec2_data_1_dec.csv'
+    instance_vcpus = {}
+    with open(csv_file_path, mode='r', encoding='utf-8') as csvfile:
+        csv_reader = csv.DictReader(csvfile)
+        for row in csv_reader:
+            instance_name = row['API Name']
+            vcpus = int(row['vCPUs'].split(" ")[0])
+            instance_vcpus[instance_name] = vcpus
+
+    # Compute total available vCPUs
+    total_vcpus = instance_vcpus[master_instance_type] + nodes * instance_vcpus[worker_instance_type]
+
     # Create and save the ClusterConfiguration object
     cluster_config, _created = ClusterConfiguration.objects.update_or_create(
         label=cluster_options.get("cluster_label"),
         defaults={
             "cloud_provider": provider,
-            "nodes": cluster_options.get("worker_count") + 1,
+            "nodes": nodes,
             "transient": True if use_spot.lower() == "true" else False,
             "efa": True if use_efa.lower() == "true" else False,
             "nfs": True if use_nfs.lower() == "true" else False,
             "fsx": True if use_fsx.lower() == "true" else False,
             "minio_bucket_name": minio_bucket_name,
+            "vcpus": total_vcpus,
         },
     )
 

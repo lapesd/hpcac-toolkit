@@ -13,8 +13,10 @@ recommended to use a Linux distro or MacOS.
 
 - Install [git](https://git-scm.com/)
 - Install [docker](https://www.docker.com/)
-- Install [pyenv](https://github.com/pyenv/pyenv) and set a virtual environment
-  for Python 3.11
+- Install [terraform](https://developer.hashicorp.com/terraform/install?product_intent=terraform)
+- Install [aws cli](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html), if you plan to use AWS
+- Install [pyenv](https://github.com/pyenv/pyenv#installation) and set a virtual environment
+  for Python 3.11 (you'll need a bunch of other dependencies to successfully use pyenv, refer to it's own documentation or install any package required if you get errors during pyenv's installation)
 - Install [poetry](https://python-poetry.org/)
 
 ### First time setup
@@ -22,14 +24,16 @@ recommended to use a Linux distro or MacOS.
 1. Run Docker and launch the dev containers:
 
 ```shell
-make docker-run-dev
+make init
 ```
 
-2. Launch and setup the Python environment with Poetry:
+2. Launch a Python environment with Poetry:
 
 ```shell
 poetry shell
 ```
+
+3. You then can install the dependencies with the command below. You may need to install `libpq-dev` or other packages to be able to compile `psycopg2`:
 
 ```shell
 poetry install
@@ -40,6 +44,14 @@ poetry install
 ```shell
 python manage.py migrate
 ```
+
+4. If you plan to use AWS, generate credentials (ACCESS and SECRET keys) and run the following to create a default profile:
+
+```shell
+aws configure
+```
+
+It should create the file `~/.aws/configure` with the `default` profile.
 
 You are now ready to use HPC@Cloud!
 
@@ -55,20 +67,17 @@ and rename it to `cluster_config.yaml`. Edit the file as you like, and then run
 from the command-line:
 
 ```shell
-python manage.py create_cluster_config cluster_config.yaml
+make create-cluster
 ```
-
-Then, to create a cluster from the created cluster configuration, run from the
-command-line:
-
-```shell
-python manage.py create_cluster <cluster_label>
-```
-
-The `cluster_label` is the same variable set at the `cluster_config.yaml` file.
 
 After the execution completes, the cluster will be available over SSH
 connection.
+
+To destroy your cluster, run:
+
+```shell
+make destroy-cluster
+```
 
 # Publications
 

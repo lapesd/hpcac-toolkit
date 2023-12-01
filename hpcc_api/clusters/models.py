@@ -75,6 +75,9 @@ class ClusterConfiguration(models.Model):
         null=False,
         blank=False,
     )
+    vcpus = models.IntegerField(
+        null=False,
+    )
 
     def __str__(self):
         return f"ClusterConfig {self.id}"
