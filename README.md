@@ -79,8 +79,9 @@ To destroy your cluster, run:
 make destroy-cluster
 ```
 
-### The `mpi_run.yaml` file
+### The `mpi_run.yaml` file and the `my_files` directory
 
+Place all the files you want to transfer to the cluster inside the `my_files` folder.
 To setup a MPI workload to be executed, copy the `mpi_run.example.yaml` file
 and rename it to `mpi_run.yaml`. Edit the file as you like, and then run
 from the command-line:
