@@ -45,10 +45,10 @@ class Command(BaseCommand):
             self.stdout.write(
                 self.style.SUCCESS(f"Cluster `{cluster_config_id}` at `{cluster_config.cloud_provider}` provider:")
             )
-            print(f"\t Total Nodes: {cluster_config.nodes}")
-            print(f"\t Total vCPU cores: {cluster_config.vcpus}")
+            print(f"Total Nodes: {cluster_config.nodes}")
+            print(f"Total vCPU cores: {cluster_config.vcpus}")
             ppn = round(cluster_config.vcpus/cluster_config.nodes)
-            print(f"\t Maximum MPI ranks per node: {ppn}")
+            print(f"Maximum MPI ranks per node: {ppn}")
 
             # Generate hostfile
             self.stdout.write(
@@ -58,80 +58,47 @@ class Command(BaseCommand):
             with open("./my_files/hostfile", "w") as file:
                 for i in range(10, 10 + cluster_config.nodes):
                     file.write(f"{base_ip}{i} slots={ppn}\n")
+            print("Done.")
 
             # Copy everything inside `my_files` to the NFS dir inside the Cluster
+            # Generate hostfile
+            self.stdout.write(
+                self.style.SUCCESS("Transfering `/my_files` to `/var/nfs_dir/`...")
+            )
             subprocess.run(
                 [
                     "scp",
                     "-r",
                     f"./",
-                    f"{user}@{ip}:/var/nfs_dir/dynemol",
+                    f"{user}@{ip}:/var/nfs_dir/my_files",
                 ],
                 cwd=f"./my_files",
                 check=True,
             )
+            print("Done.")
 
-            """
-            workloads = ["small", "medium", "large"]
-            nodes = [1, 2, 3, 4]
-            hosts = [
-                "10.0.0.10",
-                "10.0.0.10,10.0.0.11",
-                "10.0.0.10,10.0.0.11,10.0.0.12",
-                "10.0.0.10,10.0.0.11,10.0.0.12,10.0.0.13",
-            ]
+            # Launch MPI workload
+            # Start time
+            start_time = time.time()
 
-            for workload in workloads:
-                # Copy experiment files to NFS dir inside the Cloud Cluster
-                subprocess.run(
-                    [
-                        "scp",
-                        "-r",
-                        f"./{workload}",
-                        f"{user}@{ip}:/var/nfs_dir/dynemol",
-                    ],
-                    cwd=f"../sample_workloads/dynemol",
-                    check=True,
-                )
+            subprocess.run(
+                [
+                    "ssh",
+                    f"{user}@{ip}",
+                    f"cd /var/nfs_dir/dynemol && mpiexec.hydra \
+                        -genv OMP_NUM_THREADS=8 \
+                        -n {n*4} \
+                        -ppn 4 \
+                        -hosts {hosts[n-1]} /home/ec2-user/Dynemol/dynemol",
+                ],
+                check=True,
+            )
 
-                for n in nodes:
-                    # Start time
-                    start_time = time.time()
+            # Record the end time
+            end_time = time.time()
 
-                    subprocess.run(
-                        [
-                            "ssh",
-                            f"{user}@{ip}",
-                            f"cd /var/nfs_dir/dynemol && mpiexec.hydra \
-                                -genv OMP_NUM_THREADS=8 \
-                                -n {n*4} \
-                                -ppn 4 \
-                                -hosts {hosts[n-1]} /home/ec2-user/Dynemol/dynemol",
-                        ],
-                        check=True,
-                    )
-
-                    # Record the end time
-                    end_time = time.time()
-
-                    # Compute the total duration
-                    duration = end_time - start_time
-
-                    with open("spot-ebs-efa.txt", "a") as file:
-                        file.write(
-                            f"Workload {workload} with {n} nodes took {duration} to complete.\n"
-                        )
-
-                # Remove experiment files
-                subprocess.run(
-                    [
-                        "ssh",
-                        f"{user}@{ip}",
-                        f"cd /var/nfs_dir && rm -r ./dynemol",
-                    ],
-                    check=True,
-                )
-            """
+            # Compute the total duration
+            duration = end_time - start_time
 
         except Exception as error:
             self.stdout.write(self.style.ERROR(f"CommandError: {error}"))
