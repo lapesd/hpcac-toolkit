@@ -5,6 +5,7 @@
 
 cluster_config.yaml
 cluster_init.sh
+mpi_run.yaml
 
 **terraform.tfvars
 /tmp_terraform_dir

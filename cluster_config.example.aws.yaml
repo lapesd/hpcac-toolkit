@@ -7,24 +7,24 @@ private_rsa_key_path: "/Users/vanderlei/.ssh/id_rsa"
 public_rsa_key_path: "/Users/vanderlei/.ssh/id_rsa.pub"
 public_key_name: "vanderlei@RIVET-LABS-MAC-HGMW6NW46J.local"
 
-master_ami: "ami-031510926fbb78ea2"
-master_instance_type: "g3s.xlarge"
+master_ami: "ami-053a3b7c158c56eb5"
+master_instance_type: "t2.micro"
 master_rbs_size: 100
 master_rbs_type: "io2"
 master_rbs_iops: 5000
 
-worker_count: 0
-worker_ami: "ami-031510926fbb78ea2"
-worker_instance_type: "g3s.xlarge"
+worker_count: 3
+worker_ami: "ami-053a3b7c158c56eb5"
+worker_instance_type: "t2.micro"
 worker_rbs_size: 100
 worker_rbs_type: "io2"
 worker_rbs_iops: 5000
 
 use_efa: "false"
 use_fsx: "false"
-use_nfs: "false"
+use_nfs: "true"
 use_spot: "false"
 spot_maximum_rate: 5
 
-experiment_tag: "gpu-test-1"
+experiment_tag: "development-mac"
 instance_username: "ec2-user"

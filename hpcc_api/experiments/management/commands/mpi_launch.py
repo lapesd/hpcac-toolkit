@@ -1,6 +1,8 @@
+import os
 import subprocess
 import sys
 import time
+import yaml
 
 from django.core.management.base import BaseCommand
 
@@ -23,16 +25,23 @@ class Command(BaseCommand):
             type=str,
             help="The ID of the ClusterConfiguration to be used",
         )
-        parser.add_argument(
-            "--np",
-            type=int,
-            help="Number of MPI ranks to be used",
-        )
 
     def handle(self, *args, **options):
         cluster_config_id = options["cluster_config_id"]
 
         try:
+            # Reading mpi_run.yaml file
+            self.stdout.write(
+                self.style.SUCCESS("Reading `mpi_run.yaml` information...")
+            )
+            # Ensure the input YAML file exists
+            if not os.path.exists("./mpi_run.yaml"):
+                raise FileNotFoundError(f"./mpi_run.yaml does not exist")
+            # Read YAML definitions
+            with open("./mpi_run.yaml", "r") as file:
+                yaml_data = yaml.safe_load(file)
+
+
             # Get Cluster information
             self.stdout.write(
                 self.style.SUCCESS("Getting cluster information...")
@@ -50,15 +59,20 @@ class Command(BaseCommand):
             ppn = round(cluster_config.vcpus/cluster_config.nodes)
             print(f"Maximum MPI ranks per node: {ppn}")
 
+
             # Generate hostfile
             self.stdout.write(
                 self.style.SUCCESS("Generating hostfile...")
             )
             base_ip = "10.0.0."
-            with open("./my_files/hostfile", "w") as file:
+            hostfile_path = "./my_files/hostfile"
+            if os.path.exists(hostfile_path):
+                os.remove(hostfile_path)
+            with open(hostfile_path, "w") as file:
                 for i in range(10, 10 + cluster_config.nodes):
                     file.write(f"{base_ip}{i} slots={ppn}\n")
             print("Done.")
+
 
             # Copy everything inside `my_files` to the NFS dir inside the Cluster
             # Generate hostfile
@@ -77,22 +91,46 @@ class Command(BaseCommand):
             )
             print("Done.")
 
-            # Launch MPI workload
+
+            # Compile target application
+            self.stdout.write(
+                self.style.SUCCESS("Compiling target MPI application...")
+            )
+            source_dir = yaml_data["source_dir"]
+            compile_command = yaml_data["compile_command"]
+            remote_command = f"cd {source_dir} && {compile_command}"
+            subprocess.run(
+                ["ssh", f"{user}@{ip}", remote_command],
+                check=True,
+                shell=False,
+                text=True,
+            )
+            print("Done.")
+
+
+            # Execute MPI application
+            np = yaml_data["np"]
+            executable_path = yaml_data["executable_path"]
+            remote_command = f"mpiexec -np {np} --hostfile /var/nfs_dir/my_files/hostfile {executable_path}"
+
             # Start time
             start_time = time.time()
 
-            subprocess.run(
-                [
-                    "ssh",
-                    f"{user}@{ip}",
-                    f"cd /var/nfs_dir/dynemol && mpiexec.hydra \
-                        -genv OMP_NUM_THREADS=8 \
-                        -n {n*4} \
-                        -ppn 4 \
-                        -hosts {hosts[n-1]} /home/ec2-user/Dynemol/dynemol",
-                ],
-                check=True,
+            # Launch MPI workload
+            process = subprocess.Popen(
+                ["ssh", f"{user}@{ip}", remote_command],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
             )
+            
+            last_line = ""
+            for line in iter(process.stdout.readline, ""):
+                print(line, end="")
+                last_line = line if line.strip() != "" else last_line
+
+            process.stdout.close()
+            process.wait()
 
             # Record the end time
             end_time = time.time()
@@ -104,10 +142,15 @@ class Command(BaseCommand):
             self.stdout.write(self.style.ERROR(f"CommandError: {error}"))
             sys.exit(1)
 
-        else:
+        else:            
             self.stdout.write(
-                self.style.SUCCESS(f"Successfully executed the experiments.")
+                self.style.SUCCESS(f"Successfully executed the MPI workload. Duration: {duration}.")
             )
-            self.stdout.write(
-                self.style.ERROR(f"\n !!! Remember to destroy your Cluster !!!\n")
-            )
+
+        finally:
+            if yaml_data["delete_cluster_after"]:
+                destroy_cluster()
+            else:
+                self.stdout.write(
+                    self.style.ERROR(f"\n !!! Remember to destroy your Cluster !!!\n")
+                )

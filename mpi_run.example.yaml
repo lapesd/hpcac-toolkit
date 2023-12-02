@@ -1,0 +1,5 @@
+source_dir: "/var/nfs_dir/my_files/hello_world"
+compile_command: "mpicc -o exec main.c"
+executable_path: "/var/nfs_dir/my_files/hello_world/exec"
+np: 4
+delete_cluster_after: false

@@ -79,6 +79,16 @@ To destroy your cluster, run:
 make destroy-cluster
 ```
 
+### The `mpi_run.yaml` file
+
+To setup a MPI workload to be executed, copy the `mpi_run.example.yaml` file
+and rename it to `mpi_run.yaml`. Edit the file as you like, and then run
+from the command-line:
+
+```shell
+make mpi-launch
+```
+
 # Publications
 
 Please, find bellow the list of publications related to the HPC@Cloud Toolkit. If you need to cite HPC@Cloud Toolkit, please reference [*HPC@Cloud: A Provider-Agnostic Software Framework for Enabling HPC in Public Cloud Platforms*](https://doi.org/10.5753/wscad.2022.226528) for a general presentation.
