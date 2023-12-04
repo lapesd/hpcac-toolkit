@@ -92,26 +92,67 @@ class Command(BaseCommand):
             cluster_config.entrypoint_ip = master_node_ip[0]
             cluster_config.save()
 
+            ip = cluster_config.entrypoint_ip
+            user = cluster_config.username
+
             self.stdout.write(
                 self.style.SUCCESS(
                     f"Successfully spawned a Cluster using the `{cluster_config.label} ClusterConfiguration`!"
                 )
             )
 
-            shared_dir_paths = "None"
-            if cluster_config.nfs and not cluster_config.fsx:
-                shared_dir_paths = f"`/var/nfs_dir`"
-            if cluster_config.fsx and not cluster_config.nfs:
-                shared_dir_paths = f"`/fsx`"
-            if cluster_config.fsx and cluster_config.nfs:
-                shared_dir_paths = f"`/fsx` and `/var/nfs_dir`"
+            ppn = round(cluster_config.vcpus/cluster_config.nodes)
 
-            print(
-                textwrap.dedent(
-                    f"""                
-                    Shared directories: {shared_dir_paths}
-                    To access your cluster over the command-line, use SSH:
-                    ssh {cluster_config.username}@{cluster_config.entrypoint_ip}
-                    """
+            # Generate hostfile
+            self.stdout.write(
+                self.style.SUCCESS("Generating hostfile...")
+            )
+            base_ip = "10.0.0."
+            hostfile_path = "./my_files/hostfile"
+            if os.path.exists(hostfile_path):
+                os.remove(hostfile_path)
+            with open(hostfile_path, "w") as file:
+                for i in range(10, 10 + cluster_config.nodes):
+                    file.write(f"{base_ip}{i} slots={ppn}\n")
+            print("Done.")
+
+            # Copy everything inside `my_files` to the shared dir inside the Cluster
+            shared_dir_path = None
+            if cluster_config.fsx:
+                shared_dir_path = "/fsx"
+            elif cluster_config.nfs:
+                shared_dir_path = "/var/nfs_dir"
+
+            if shared_dir_path:
+                self.stdout.write(
+                    self.style.SUCCESS(f"Transfering `/my_files` to `{shared_dir_path}`...")
+                )
+                subprocess.run(
+                    [
+                        "scp",
+                        "-r",
+                        f"./",
+                        f"{user}@{ip}:/var/nfs_dir/my_files",
+                    ],
+                    cwd=f"./my_files",
+                    check=True,
+                )
+            else:
+                self.stdout.write(
+                    self.style.ERROR(f"Files in `/my_files` won't be transferred to the cluster (no shared directory)")
+                )
+
+            self.stdout.write(
+                self.style.SUCCESS(
+                    textwrap.dedent(
+                        f"""                
+                        To access your cluster over the command-line, use SSH:
+                        ssh {user}@{ip}
+
+                        Total Nodes: {cluster_config.nodes}
+                        Total vCPU cores: {cluster_config.vcpus}
+                        Maximum MPI ranks per node: {ppn}
+                        """
+                    )
                 )
             )

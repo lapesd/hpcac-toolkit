@@ -1,5 +1,6 @@
 source_dir: "/var/nfs_dir/my_files/hello_world"
 compile_command: "mpicc -o exec main.c"
-executable_path: "/var/nfs_dir/my_files/hello_world/exec"
-np: 4
+execute_commands: 
+  - "mpiexec -np 2 --hostfile /var/nfs_dir/my_files/hostfile /var/nfs_dir/my_files/hello_world/exec"
+  - "mpiexec -np 4 --hostfile /var/nfs_dir/my_files/hostfile /var/nfs_dir/my_files/hello_world/exec"
 delete_cluster_after: false

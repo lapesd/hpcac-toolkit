@@ -42,7 +42,7 @@ def generate_cluster_blueprint_from_yaml_definitions(
     use_efa = cluster_options.get("use_efa")
     master_instance_type = cluster_options.get("master_instance_type")
     worker_instance_type = cluster_options.get("worker_instance_type")
-    nodes = cluster_options.get("worker_count") + 1
+    worker_count = cluster_options.get("worker_count")
 
     # Generate the terraform.tfvars file
     os.makedirs(os.path.dirname("./tmp_terraform_dir/"), exist_ok=True)
@@ -101,14 +101,14 @@ def generate_cluster_blueprint_from_yaml_definitions(
             instance_vcpus[instance_name] = vcpus
 
     # Compute total available vCPUs
-    total_vcpus = instance_vcpus[master_instance_type] + nodes * instance_vcpus[worker_instance_type]
+    total_vcpus = instance_vcpus[master_instance_type] + worker_count * instance_vcpus[worker_instance_type]
 
     # Create and save the ClusterConfiguration object
     cluster_config, _created = ClusterConfiguration.objects.update_or_create(
         label=cluster_options.get("cluster_label"),
         defaults={
             "cloud_provider": provider,
-            "nodes": nodes,
+            "nodes": worker_count + 1,
             "transient": True if use_spot.lower() == "true" else False,
             "efa": True if use_efa.lower() == "true" else False,
             "nfs": True if use_nfs.lower() == "true" else False,

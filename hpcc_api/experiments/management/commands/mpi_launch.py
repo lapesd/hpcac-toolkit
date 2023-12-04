@@ -51,46 +51,6 @@ class Command(BaseCommand):
             )
             ip = cluster_config.entrypoint_ip
             user = cluster_config.username
-            self.stdout.write(
-                self.style.SUCCESS(f"Cluster `{cluster_config_id}` at `{cluster_config.cloud_provider}` provider:")
-            )
-            print(f"Total Nodes: {cluster_config.nodes}")
-            print(f"Total vCPU cores: {cluster_config.vcpus}")
-            ppn = round(cluster_config.vcpus/cluster_config.nodes)
-            print(f"Maximum MPI ranks per node: {ppn}")
-
-
-            # Generate hostfile
-            self.stdout.write(
-                self.style.SUCCESS("Generating hostfile...")
-            )
-            base_ip = "10.0.0."
-            hostfile_path = "./my_files/hostfile"
-            if os.path.exists(hostfile_path):
-                os.remove(hostfile_path)
-            with open(hostfile_path, "w") as file:
-                for i in range(10, 10 + cluster_config.nodes):
-                    file.write(f"{base_ip}{i} slots={ppn}\n")
-            print("Done.")
-
-
-            # Copy everything inside `my_files` to the NFS dir inside the Cluster
-            # Generate hostfile
-            self.stdout.write(
-                self.style.SUCCESS("Transfering `/my_files` to `/var/nfs_dir/`...")
-            )
-            subprocess.run(
-                [
-                    "scp",
-                    "-r",
-                    f"./",
-                    f"{user}@{ip}:/var/nfs_dir/my_files",
-                ],
-                cwd=f"./my_files",
-                check=True,
-            )
-            print("Done.")
-
 
             # Compile target application
             self.stdout.write(
@@ -99,24 +59,7 @@ class Command(BaseCommand):
             source_dir = yaml_data["source_dir"]
             compile_command = yaml_data["compile_command"]
             remote_command = f"cd {source_dir} && {compile_command}"
-            subprocess.run(
-                ["ssh", f"{user}@{ip}", remote_command],
-                check=True,
-                shell=False,
-                text=True,
-            )
-            print("Done.")
 
-
-            # Execute MPI application
-            np = yaml_data["np"]
-            executable_path = yaml_data["executable_path"]
-            remote_command = f"mpiexec -np {np} --hostfile /var/nfs_dir/my_files/hostfile {executable_path}"
-
-            # Start time
-            start_time = time.time()
-
-            # Launch MPI workload
             process = subprocess.Popen(
                 ["ssh", f"{user}@{ip}", remote_command],
                 stdout=subprocess.PIPE,
@@ -132,11 +75,37 @@ class Command(BaseCommand):
             process.stdout.close()
             process.wait()
 
-            # Record the end time
-            end_time = time.time()
 
-            # Compute the total duration
-            duration = end_time - start_time
+            # Execute MPI application
+            remote_commands_durations = []
+            remote_commands_list = yaml_data["execute_commands"]
+
+            for remote_command in remote_commands_list:
+                # Start time
+                start_time = time.time()
+
+                # Launch MPI workload
+                process = subprocess.Popen(
+                    ["ssh", f"{user}@{ip}", remote_command],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+                
+                last_line = ""
+                for line in iter(process.stdout.readline, ""):
+                    print(line, end="")
+                    last_line = line if line.strip() != "" else last_line
+
+                process.stdout.close()
+                process.wait()
+
+                # Record the end time
+                end_time = time.time()
+
+                # Compute the total duration
+                duration = end_time - start_time
+                remote_commands_durations.append(duration)
 
         except Exception as error:
             self.stdout.write(self.style.ERROR(f"CommandError: {error}"))
@@ -144,8 +113,11 @@ class Command(BaseCommand):
 
         else:            
             self.stdout.write(
-                self.style.SUCCESS(f"Successfully executed the MPI workload. Duration: {duration}.")
+                self.style.SUCCESS(f"Successfully executed all commands defined in `mpi_run.yaml`.")
             )
+            for ix, duration in enumerate(remote_commands_durations):
+                print(f"Command: {remote_commands_list[ix]}")
+                print(f"Execution time: {duration}\n")
 
         finally:
             if yaml_data["delete_cluster_after"]:
