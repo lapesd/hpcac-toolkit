@@ -114,7 +114,6 @@ class Command(BaseCommand):
             with open(hostfile_path, "w") as file:
                 for i in range(10, 10 + cluster_config.nodes):
                     file.write(f"{base_ip}{i} slots={ppn}\n")
-            print("Done.")
 
             # Copy everything inside `my_files` to the shared dir inside the Cluster
             shared_dir_path = None
@@ -131,10 +130,9 @@ class Command(BaseCommand):
                     [
                         "scp",
                         "-r",
-                        f"./",
+                        "./my_files",
                         f"{user}@{ip}:/var/nfs_dir/my_files",
                     ],
-                    cwd=f"./my_files",
                     check=True,
                 )
             else:
