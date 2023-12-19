@@ -19,5 +19,5 @@ create-cluster:  ## create a cluster using the cluster_config.yaml configutaion
 destroy-cluster:  ## destroy the test_cluster
 	python manage.py destroy_cluster
 
-mpi-launch:  ## launch an MPI job
-	python manage.py mpi_launch --cluster-config-id test_cluster
+launch-mpi-jobs:  ## launch all MPI jobs configured in mpi_run.yaml
+	python manage.py launch_mpi_jobs --cluster-config-id test_cluster

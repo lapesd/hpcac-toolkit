@@ -7,6 +7,7 @@ from django.core.management.base import BaseCommand
 from minio import Minio
 
 from hpcc_api.clusters.models import ClusterConfiguration
+from hpcc_api.utils.files import generate_hostfile, transfer_folder_over_ssh
 
 
 TF_DIR = "./tmp_terraform_dir"
@@ -65,92 +66,70 @@ class Command(BaseCommand):
     help = "Spawns a Cluster from a previously created ClusterConfiguration."
 
     def add_arguments(self, parser):
-        parser.add_argument(
-            "config_label",
-            type=str,
-            help="The ClusterConfiguration label",
-        )
+        parser.add_argument("config_label", type=str)
+
+    def print_success(self, message):
+        self.stdout.write(self.style.SUCCESS(message))
+
+    def print_error(self, message):
+        self.stdout.write(self.style.ERROR(message))
 
     def handle(self, *args, **options):
         config_label = options["config_label"]
 
+        # Read ClusterConfiguration
         cluster_config = ClusterConfiguration.objects.get(label=config_label)
+        
+        # Launch cluster
         master_node_ip = create_cluster(cluster_config)
+        # Update cluster `entrypoint_ip`:
+        cluster_config.entrypoint_ip = master_node_ip[0]
+        cluster_config.save()
+        ip = cluster_config.entrypoint_ip
+        user = cluster_config.username
+        self.print_success(
+            f"Successfully spawned a Cluster using the `{cluster_config.label} ClusterConfiguration`!"
+        )
 
-        if len(master_node_ip) == 0:
-            subprocess.run(
-                ["terraform", "destroy", "-auto-approve"], cwd=TF_DIR, check=True
+        # Generate hostfile
+        ppn = round(cluster_config.vcpus/cluster_config.nodes)
+        generate_hostfile(
+            number_of_nodes=cluster_config.nodes,
+            processes_per_node=ppn,
+            hostfile_path="./my_files/hostfile",
+        )
+        self.print_success(f"Successfully generated hostfile for OpenMPI!")
+
+        # Copy everything inside `my_files` to the shared dir inside the Cluster
+        shared_dir_path = None
+        if cluster_config.fsx:
+            shared_dir_path = "/fsx"
+        elif cluster_config.nfs:
+            shared_dir_path = "/var/nfs_dir"
+
+        if shared_dir_path:
+            self.print_success(f"Transfering `/my_files` to `{shared_dir_path}`...")
+            transfer_folder_over_ssh(
+                local_folder_path="./my_files",
+                remote_destination_path=shared_dir_path,
+                ip=ip,
+                user=user,
             )
-            self.stdout.write(
-                self.style.ERROR(
-                    f"Failed spawning a cluster based on ClusterConfig `{cluster_config}`.\n"
-                    "All resources DESTROYED!"
-                )
-            )
+            self.print_success(f"Sucessfully transferred files to cluster!")
         else:
-            # Update `entrypoint_ip`:
-            cluster_config.entrypoint_ip = master_node_ip[0]
-            cluster_config.save()
-
-            ip = cluster_config.entrypoint_ip
-            user = cluster_config.username
-
-            self.stdout.write(
-                self.style.SUCCESS(
-                    f"Successfully spawned a Cluster using the `{cluster_config.label} ClusterConfiguration`!"
-                )
+            self.print_error(
+                f"Files in `/my_files` won't be transferred to the cluster (no shared directory)"
             )
 
-            ppn = round(cluster_config.vcpus/cluster_config.nodes)
+        self.print_success(
+            textwrap.dedent(
+                f"""                
+                To access your cluster over the command-line, use SSH:
+                ssh {user}@{ip}
 
-            # Generate hostfile
-            self.stdout.write(
-                self.style.SUCCESS("Generating hostfile...")
+                Total Nodes: {cluster_config.nodes}
+                Total vCPU cores: {cluster_config.vcpus}
+                Maximum MPI ranks per node: {ppn}
+                """
             )
-            base_ip = "10.0.0."
-            hostfile_path = "./my_files/hostfile"
-            if os.path.exists(hostfile_path):
-                os.remove(hostfile_path)
-            with open(hostfile_path, "w") as file:
-                for i in range(10, 10 + cluster_config.nodes):
-                    file.write(f"{base_ip}{i} slots={ppn}\n")
-
-            # Copy everything inside `my_files` to the shared dir inside the Cluster
-            shared_dir_path = None
-            if cluster_config.fsx:
-                shared_dir_path = "/fsx"
-            elif cluster_config.nfs:
-                shared_dir_path = "/var/nfs_dir"
-
-            if shared_dir_path:
-                self.stdout.write(
-                    self.style.SUCCESS(f"Transfering `/my_files` to `{shared_dir_path}`...")
-                )
-                subprocess.run(
-                    [
-                        "scp",
-                        "-r",
-                        "./my_files",
-                        f"{user}@{ip}:/var/nfs_dir/my_files",
-                    ],
-                    check=True,
-                )
-            else:
-                self.stdout.write(
-                    self.style.ERROR(f"Files in `/my_files` won't be transferred to the cluster (no shared directory)")
-                )
-
-            self.stdout.write(
-                self.style.SUCCESS(
-                    textwrap.dedent(
-                        f"""                
-                        To access your cluster over the command-line, use SSH:
-                        ssh {user}@{ip}
-
-                        Total Nodes: {cluster_config.nodes}
-                        Total vCPU cores: {cluster_config.vcpus}
-                        Maximum MPI ranks per node: {ppn}
-                        """
-                    )
-                )
-            )
+        )

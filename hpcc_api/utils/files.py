@@ -1,0 +1,50 @@
+import os
+import subprocess
+import yaml
+
+
+def load_yaml(yaml_file_path: str) -> dict:
+    # Ensure the input YAML file exists
+    if not os.path.exists(yaml_file_path):
+        raise FileNotFoundError(f"{yaml_file_path} does not exist")
+
+    # Read YAML definitions
+    with open(yaml_file_path, "r") as file:
+        yaml_data = yaml.safe_load(file)
+    
+    return yaml_data
+
+
+def generate_hostfile(
+    number_of_nodes: int,
+    processes_per_node: int,
+    hostfile_path: str
+) -> None:
+    base_host = "10.0.0.1"
+
+    # Delete hostfile if existing
+    if os.path.exists(hostfile_path):
+        os.remove(hostfile_path)
+
+    # Write new hostfile (OpenMPI)
+    with open(hostfile_path, "w") as file:
+        for i in range(number_of_nodes):
+            file.write(f"{base_host}{i} slots={processes_per_node}\n")
+
+
+def transfer_folder_over_ssh(
+    local_folder_path: str,
+    remote_destination_path: str,
+    ip: str,
+    user: str,
+) -> None:
+    # Transfer folder with scp
+    subprocess.run(
+        [
+            "scp",
+            "-r",
+            local_folder_path,
+            f"{user}@{ip}:{remote_destination_path}",
+        ],
+        check=True,
+    )

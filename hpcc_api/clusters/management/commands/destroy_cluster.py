@@ -16,9 +16,13 @@ def destroy_cluster():
 class Command(BaseCommand):
     help = "Spawns a Cluster from a previously created ClusterConfiguration."
 
+    def print_success(self, message):
+        self.stdout.write(self.style.SUCCESS(message))
+
+    def print_error(self, message):
+        self.stdout.write(self.style.ERROR(message))
+
     def handle(self, *args, **options):
         destroy_cluster()
 
-        self.stdout.write(
-            self.style.SUCCESS(f"Successfully DESTROYED all created cloud resources.")
-        )
+        self.print_error(f"All cluster cloud resources were deleted.")

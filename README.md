@@ -87,7 +87,7 @@ and rename it to `mpi_run.yaml`. Edit the file as you like, and then run
 from the command-line:
 
 ```shell
-make mpi-launch
+make launch-mpi-jobs
 ```
 
 # Publications
@@ -95,6 +95,8 @@ make mpi-launch
 Please, find bellow the list of publications related to the HPC@Cloud Toolkit. If you need to cite HPC@Cloud Toolkit, please reference [*HPC@Cloud: A Provider-Agnostic Software Framework for Enabling HPC in Public Cloud Platforms*](https://doi.org/10.5753/wscad.2022.226528) for a general presentation.
 
 - Vanderlei Munhoz, Márcio Castro, Odorico Mendizabal. *Strategies for Fault-Tolerant Tightly-coupled HPC Workloads Running on Low-Budget Spot Cloud Infrastructures*. **International Symposium on Computer Architecture and High Performance Computing (SBAC-PAD)**. Bordeaux, France: IEEE Computer Society, 2022. [[link]](https://doi.org/10.1109/SBAC-PAD55451.2022.00037) [[bib]](http://www.inf.ufsc.br/~marcio.castro/bibs/2022_sbacpad.bib)
+
+- Vanderlei Munhoz, Márcio Castro. *Enabling the execution of HPC applications on public clouds with HPC@Cloud toolkit*. **Concurrency and Computation Practice and Experience (CCPE)**, 2023. [[link]](https://doi.org/10.1002/cpe.7976)
 
 - Vanderlei Munhoz, Márcio Castro. *HPC@Cloud: A Provider-Agnostic Software Framework for Enabling HPC in Public Cloud Platforms*. **Simpósio em Sistemas Computacionais de Alto Desempenho (WSCAD)**. Florianópolis, Brazil: SBC, 2022. [[link]](https://doi.org/10.5753/wscad.2022.226528) [[bib]](http://www.inf.ufsc.br/~marcio.castro/bibs/2022_wscad.bib)
 
