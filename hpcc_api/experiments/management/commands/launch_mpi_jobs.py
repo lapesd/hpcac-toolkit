@@ -7,7 +7,7 @@ from django.core.management.base import BaseCommand
 from hpcc_api.clusters.models import ClusterConfiguration
 from hpcc_api.clusters.management.commands.create_cluster import create_cluster
 from hpcc_api.clusters.management.commands.destroy_cluster import destroy_cluster
-from hpcc_api.utils.files import load_yaml
+from hpcc_api.utils.files import load_yaml, delete_remote_folder_over_ssh, transfer_folder_over_ssh
 from hpcc_api.utils.process import launch_over_ssh
 
 
@@ -44,13 +44,33 @@ class Command(BaseCommand):
             for n, mpi_job in enumerate(mpi_jobs):
                 self.print_success(f"Starting  MPI job {n+1} of {len(mpi_jobs)}: {mpi_job['label']}")
 
-                # Setup
+                # Make sure cluster is healthy before launching MPI job
+                if n > 0:
+                    self.print_success("Checking Cluster health...")
+                    time.sleep(25)  # wait while the provider updates the terraform state
+
+                # Start setup timer
                 setup_start = time.time()
 
-                # Make sure cluster is healthy before launching MPI job
-                self.print_success("Checking Cluster health...")
-                time.sleep(25)  # wait while the provider updates the terraform state
+                # Restore cluster and re-copy my_files
                 create_cluster(cluster_config)
+                shared_dir_path = None
+                if cluster_config.fsx:
+                    shared_dir_path = "/fsx"
+                elif cluster_config.nfs:
+                    shared_dir_path = "/var/nfs_dir"
+                if shared_dir_path is not None:
+                    delete_remote_folder_over_ssh(
+                        remote_folder_path=f"{shared_dir_path}/my_files",
+                        ip=ip,
+                        user=user,
+                    )
+                    transfer_folder_over_ssh(
+                        local_folder_path="./my_files",
+                        remote_destination_path=shared_dir_path,
+                        ip=ip,
+                        user=user,
+                    )
 
                 setup_status = launch_over_ssh(mpi_job['setup_command'], ip=ip, user=user, track_output=True)
                 setup_end = time.time()
@@ -63,6 +83,7 @@ class Command(BaseCommand):
                 if run_status == 0:  # successful execution in first try
                     run_end = time.time()
                     run_dt = run_end - run_start
+                    run_failures = 1
                 elif mpi_job.get("restore_command") is not None:
                     self.print_error("Failure occurred during MPI Job! Running restore command...")
                     # Retry until success or after maximum retries are reached

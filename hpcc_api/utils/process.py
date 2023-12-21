@@ -18,8 +18,8 @@ def launch_over_ssh(
         text=True,
     )
     
+    last_line = ""
     if track_output:
-        last_line = ""
         for line in iter(process.stdout.readline, ""):
             print(line, end="")
             last_line = line if line.strip() != "" else last_line
@@ -28,5 +28,9 @@ def launch_over_ssh(
 
     # Wait until completion
     return_code = process.wait()
+
+    # Check for specific error message in output
+    if "closed by remote host." in last_line:
+        return -1
 
     return return_code

@@ -48,3 +48,18 @@ def transfer_folder_over_ssh(
         ],
         check=True,
     )
+
+def delete_remote_folder_over_ssh(
+    remote_folder_path: str,
+    ip: str,
+    user: str,
+) -> None:
+    # Delete the remote folder using SSH
+    subprocess.run(
+        [
+            "ssh",
+            f"{user}@{ip}",
+            f"rm -r {remote_folder_path}"
+        ],
+        check=True,
+    )
