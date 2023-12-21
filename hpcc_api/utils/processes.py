@@ -12,7 +12,11 @@ def launch_over_ssh(
 
     # Launch process
     process = subprocess.Popen(
-        ["ssh", f"{user}@{ip}", remote_command],
+        [
+            "ssh", "-o", "StrictHostKeyChecking=no",
+            f"{user}@{ip}",
+            remote_command,
+        ],
         stdout=stdout_setting,
         stderr=subprocess.STDOUT,
         text=True,
@@ -31,6 +35,8 @@ def launch_over_ssh(
 
     # Check for specific error message in output
     if "closed by remote host." in last_line:
+        return -1
+    elif "--------------------------------------------------------------------------" in last_line:
         return -1
 
     return return_code

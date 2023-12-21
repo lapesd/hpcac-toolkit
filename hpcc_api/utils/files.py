@@ -42,8 +42,8 @@ def transfer_folder_over_ssh(
     subprocess.run(
         [
             "scp",
-            "-r",
-            local_folder_path,
+            "-o", "StrictHostKeyChecking=no",
+            "-r", local_folder_path,
             f"{user}@{ip}:{remote_destination_path}",
         ],
         check=True,
@@ -58,6 +58,7 @@ def delete_remote_folder_over_ssh(
     subprocess.run(
         [
             "ssh",
+            "-o", "StrictHostKeyChecking=no",
             f"{user}@{ip}",
             f"rm -r {remote_folder_path}"
         ],

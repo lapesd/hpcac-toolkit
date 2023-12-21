@@ -8,8 +8,8 @@ from hpcc_api.clusters.models import ClusterConfiguration
 from hpcc_api.clusters.management.commands.create_cluster import create_cluster
 from hpcc_api.clusters.management.commands.destroy_cluster import destroy_cluster
 from hpcc_api.utils.files import load_yaml, delete_remote_folder_over_ssh, transfer_folder_over_ssh
-from hpcc_api.utils.process import launch_over_ssh
-
+from hpcc_api.utils.processes import launch_over_ssh
+from hpcc_api.utils.timers import ExecutionTimer
 
 class Command(BaseCommand):
     help = "Run an MPI workload."
@@ -44,15 +44,18 @@ class Command(BaseCommand):
             for n, mpi_job in enumerate(mpi_jobs):
                 self.print_success(f"Starting  MPI job {n+1} of {len(mpi_jobs)}: {mpi_job['label']}")
 
+                job_setup_timer = ExecutionTimer()
+                checkpointing_timer = ExecutionTimer()
+                restoring_timer = ExecutionTimer()
+                exec_timer = ExecutionTimer()
+                
                 # Make sure cluster is healthy before launching MPI job
+                job_setup_timer.start()
                 if n > 0:
+                    job_setup_timer.stop()
                     self.print_success("Checking Cluster health...")
                     time.sleep(25)  # wait while the provider updates the terraform state
-
-                # Start setup timer
-                setup_start = time.time()
-
-                # Restore cluster and re-copy my_files
+                    job_setup_timer.resume()
                 create_cluster(cluster_config)
                 shared_dir_path = None
                 if cluster_config.fsx:
@@ -71,51 +74,118 @@ class Command(BaseCommand):
                         ip=ip,
                         user=user,
                     )
-
                 setup_status = launch_over_ssh(mpi_job['setup_command'], ip=ip, user=user, track_output=True)
-                setup_end = time.time()
-                setup_dt = setup_end - setup_start
+                job_setup_timer.stop()
 
-                run_failures = 0
-                run_start = time.time()
-                run_status = launch_over_ssh(mpi_job['run_command'], ip=ip, user=user, track_output=True)
+                if setup_status != 0:
+                    log = {
+                        "label": mpi_job["label"],
+                        "pipeline_steps": {
+                            "cluster_health_check": "SUCCESS!",
+                            "job_setup": "SUCCESS!",
+                            "job_execution": "SUCCESS!",
+                        },
+                        "timers": {
+                            "cluster_spawn": cluster_config.spawn_time,
+                            "job_setup": job_setup_timer.get_elapsed_time(),
+                            "system_wide_checkpointing": checkpointing_timer.get_elapsed_time(),
+                            "cluster_restoring": restoring_timer.get_elapsed_time(),
+                            "execution": exec_timer.get_elapsed_time(),
+                        },
+                        "retries": 0
+                    }
+                    log["timers"]["total"] = sum(log["timers"].values())
+                    mpi_jobs_logs.append(log)
+                    continue
 
-                if run_status == 0:  # successful execution in first try
-                    run_end = time.time()
-                    run_dt = run_end - run_start
-                    run_failures = 1
-                elif mpi_job.get("restore_command") is not None:
+                # Start execution
+                retries = 0
+                run_status = -1
+                exec_timer.start()
+                run_status = launch_over_ssh(
+                    mpi_job['run_command'], 
+                    ip=ip, 
+                    user=user, 
+                    track_output=True
+                )
+                exec_timer.stop()
+                if run_status == 0:
+                    log = {
+                        "label": mpi_job["label"],
+                        "pipeline_steps": {
+                            "cluster_health_check": "SUCCESS!",
+                            "job_setup": "SUCCESS!",
+                            "job_execution": "SUCCESS!",
+                        },
+                        "timers": {
+                            "cluster_spawn": cluster_config.spawn_time,
+                            "job_setup": job_setup_timer.get_elapsed_time(),
+                            "system_wide_checkpointing": checkpointing_timer.get_elapsed_time(),
+                            "cluster_restoring": restoring_timer.get_elapsed_time(),
+                            "execution": exec_timer.get_elapsed_time(),
+                        },
+                        "retries": retries,
+                    }
+                    log["timers"]["total"] = sum(log["timers"].values())
+                    mpi_jobs_logs.append(log)
+                    continue
+
+                # If no restore command available, return failure
+                if mpi_job.get("restore_command") is None:
+                    log = {
+                        "label": mpi_job["label"],
+                        "pipeline_steps": {
+                            "cluster_health_check": "SUCCESS!",
+                            "job_setup": "SUCCESS!",
+                            "job_execution": "FAILURE, no restore command available!",
+                        },
+                        "timers": {
+                            "cluster_spawn": cluster_config.spawn_time,
+                            "job_setup": job_setup_timer.get_elapsed_time(),
+                            "system_wide_checkpointing": checkpointing_timer.get_elapsed_time(),
+                            "cluster_restoring": restoring_timer.get_elapsed_time(),
+                            "execution": exec_timer.get_elapsed_time(),
+                        },
+                        "retries": retries
+                    }
+                    log["timers"]["total"] = sum(log["timers"].values())
+                    mpi_jobs_logs.append(log)
+                    continue
+
+                # If first run fails, retry until success or maximum_retries reached
+                while run_status != 0 and retries < mpi_job['maximum_retries']:
                     self.print_error("Failure occurred during MPI Job! Running restore command...")
-                    # Retry until success or after maximum retries are reached
-                    while run_status != 0 and run_failures < mpi_job['maximum_retries']:
-                        time.sleep(25)  # wait while the provider updates the terraform state
+                    retries += 1
+                    restoring_timer.start()
+                    # wait while the provider updates the terraform state
+                    time.sleep(15)
+                    self.print_success("Checking Cluster health...")
+                    create_cluster(cluster_config)
+                    restoring_timer.stop()
 
-                        # Make sure cluster is healthy before launching MPI job
-                        self.print_success("Checking Cluster health...")
-                        create_cluster(cluster_config)
-
-                        run_status = launch_over_ssh(mpi_job['restore_command'], ip=ip, user=user, track_output=True)
-                        if run_status != 0:
-                            run_failures += 1  # increase failure counter
-                    run_end = time.time()
-                    run_dt = run_end - run_start
-                else:
-                    run_end = time.time()
-                    run_dt = run_end - run_start
-                    run_status = -1
-                    run_failures = 1
+                    exec_timer.start()
+                    run_status = launch_over_ssh(mpi_job['restore_command'], ip=ip, user=user, track_output=True)
+                    exec_timer.stop()
 
                 # Append timing results
-                mpi_jobs_logs.append(
-                    {
-                        "label": mpi_job["label"],
-                        "setup_status": "SUCCESS" if setup_status == 0 else "FAILURE",
-                        "setup_duration": setup_dt,
-                        "run_status": "SUCCESS" if run_status == 0 else "FAILURE",
-                        "run_duration": run_dt,
-                        "run_failures": run_failures,
-                    }
-                )
+                log = {
+                    "label": mpi_job["label"],
+                    "pipeline_steps": {
+                        "cluster_health_check": "SUCCESS!",
+                        "job_setup": "SUCCESS!",
+                        "job_execution": "SUCCESS!" if run_status == 0 else "FAILURE.",
+                    },
+                    "timers": {
+                        "cluster_spawn": cluster_config.spawn_time,
+                        "job_setup": job_setup_timer.get_elapsed_time(),
+                        "system_wide_checkpointing": checkpointing_timer.get_elapsed_time(),
+                        "cluster_restoring": restoring_timer.get_elapsed_time(),
+                        "execution": exec_timer.get_elapsed_time(),
+                    },
+                    "retries": retries,
+                }
+                log["timers"]["total"] = sum(log["timers"].values())
+                mpi_jobs_logs.append(log)
 
         except Exception as error:
             self.print_error(f"CommandError: {error}")

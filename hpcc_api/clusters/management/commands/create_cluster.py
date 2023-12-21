@@ -8,7 +8,7 @@ from minio import Minio
 
 from hpcc_api.clusters.models import ClusterConfiguration
 from hpcc_api.utils.files import generate_hostfile, transfer_folder_over_ssh
-
+from hpcc_api.utils.timers import ExecutionTimer
 
 TF_DIR = "./tmp_terraform_dir"
 
@@ -77,6 +77,10 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         config_label = options["config_label"]
 
+        # Track setup time
+        timer = ExecutionTimer()
+        timer.start()
+
         # Read ClusterConfiguration
         cluster_config = ClusterConfiguration.objects.get(label=config_label)
         
@@ -121,6 +125,12 @@ class Command(BaseCommand):
                 f"Files in `/my_files` won't be transferred to the cluster (no shared directory)"
             )
 
+        timer.stop()
+
+        # Update cluster_config.spawn_time
+        cluster_config.spawn_time = timer.get_elapsed_time()
+        cluster_config.save()
+
         self.print_success(
             textwrap.dedent(
                 f"""                
@@ -130,6 +140,7 @@ class Command(BaseCommand):
                 Total Nodes: {cluster_config.nodes}
                 Total vCPU cores: {cluster_config.vcpus}
                 Maximum MPI ranks per node: {ppn}
+                Cluster spawn time: {timer.get_elapsed_time()} seconds
                 """
             )
         )
