@@ -18,4 +18,4 @@ mpi_jobs:
     checkpoint_command: null  # use only for system-level checkpointing
     restore_command: null  # this command will be executed when retrying the execution after a failure
     maximum_retries: 3  # maximum number of retries before exiting execution
-    remote_outputs_dir: "/var/nfs_dir/my_files/hello_world"  # this remote folder will be saved at ./results
+    remote_outputs_dir: null  # set as null if you don't want to download results to your machine

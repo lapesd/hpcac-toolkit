@@ -71,21 +71,27 @@ def download_experiment_results(
     ip: str,
     user: str,
 ) -> None:
-    try:
-        # Check if the ./results directory exists, create it if not
-        results_dir = os.path.join('.', 'results')
-        if not os.path.exists(results_dir):
-            os.makedirs(results_dir)
+    if remote_folder_path is None:
+        # do nothing
+        pass
+    else:
+        try:
+            print("Downloading experiment result files...")
 
-        # Download folder with scp
-        subprocess.run(
-            [
-                "scp",
-                "-o", "StrictHostKeyChecking=no",
-                "-r", f"{user}@{ip}:{remote_folder_path}",
-                os.path.join(results_dir, local_destination_path),
-            ],
-            check=True,
-        )
-    except Exception as e:
-        print(f"Error trying to download remote folder {remote_folder_path}: {e}")
+            # Check if the ./results directory exists, create it if not
+            results_dir = os.path.join('.', 'results')
+            if not os.path.exists(results_dir):
+                os.makedirs(results_dir)
+
+            # Download folder with scp
+            subprocess.run(
+                [
+                    "scp",
+                    "-o", "StrictHostKeyChecking=no",
+                    "-r", f"{user}@{ip}:{remote_folder_path}",
+                    os.path.join(results_dir, local_destination_path),
+                ],
+                check=True,
+            )
+        except Exception as e:
+            print(f"Error trying to download remote folder {remote_folder_path}: {e}")

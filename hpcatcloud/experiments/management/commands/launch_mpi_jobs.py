@@ -156,7 +156,6 @@ class Command(BaseCommand):
                     log["timers"]["total_time_spent"] = sum(log["timers"].values())
                     mpi_jobs_logs.append(log)
                     self.update_mpi_job_experiment_record(job_db_record, log)
-                    self.print_success("Downloading experiment result files...")
                     download_experiment_results(
                         remote_folder_path=mpi_job["remote_outputs_dir"],
                         local_destination_path=f"{timezone.now().strftime('%d-%m-%Y_%H-%M-%S')}-{mpi_job['experiment_label']}".replace(" ", "_").lower(),
@@ -222,7 +221,6 @@ class Command(BaseCommand):
                 }
                 log["timers"]["total_time_spent"] = sum(log["timers"].values())
                 self.update_mpi_job_experiment_record(job_db_record, log)
-                self.print_success("Downloading experiment result files...")
                 download_experiment_results(
                     remote_folder_path=mpi_job["remote_outputs_dir"],
                     local_destination_path=f"{timezone.now().strftime('%d-%m-%Y_%H-%M-%S')}-{mpi_job['experiment_label']}".replace(" ", "_").lower(),
