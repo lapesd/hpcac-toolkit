@@ -37,7 +37,7 @@ COPY --from=requirements-stage /tmp/requirements.txt /code/requirements.txt
 
 RUN pip install --no-cache-dir --upgrade -r /code/requirements.txt
 
-COPY ./hpcc_api/ /code/hpcc_api/
+COPY ./hpcatcloud/ /code/hpcatcloud/
 
 COPY ./manage.py /code/manage.py
 
@@ -45,4 +45,4 @@ ENV WORKERS=2
 
 EXPOSE 8000
 
-CMD gunicorn --bind 0.0.0.0:8000 hpcc_api.wsgi --workers=$WORKERS --access-logfile -
+CMD gunicorn --bind 0.0.0.0:8000 hpcatcloud.wsgi --workers=$WORKERS --access-logfile -

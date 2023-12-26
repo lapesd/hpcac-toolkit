@@ -11,3 +11,5 @@ mpi_run.yaml
 /tmp_terraform_dir
 
 /minio
+/results
+exported_results.csv

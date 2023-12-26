@@ -1,6 +1,6 @@
 import pytest
 
-from hpcc_api.clusters.models import ClusterConfiguration
+from hpcatcloud.clusters.models import ClusterConfiguration
 
 
 @pytest.mark.django_db(databases=["default"])

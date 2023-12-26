@@ -6,8 +6,8 @@ import yaml
 from django.core.management.base import BaseCommand
 from minio import Minio
 
-from hpcc_api.clusters.models import ClusterConfiguration
-from hpcc_api.exceptions import ConfigurationError
+from hpcatcloud.clusters.models import ClusterConfiguration
+from hpcatcloud.exceptions import ConfigurationError
 
 
 def generate_cluster_blueprint_from_yaml_definitions(
@@ -43,6 +43,7 @@ def generate_cluster_blueprint_from_yaml_definitions(
     master_instance_type = cluster_options.get("master_instance_type")
     worker_instance_type = cluster_options.get("worker_instance_type")
     worker_count = cluster_options.get("worker_count")
+    instance_type = cluster_options.get("master_instance_type")
 
     # Generate the terraform.tfvars file
     os.makedirs(os.path.dirname("./tmp_terraform_dir/"), exist_ok=True)
@@ -115,6 +116,7 @@ def generate_cluster_blueprint_from_yaml_definitions(
             "fsx": True if use_fsx.lower() == "true" else False,
             "minio_bucket_name": minio_bucket_name,
             "vcpus": total_vcpus,
+            "instance_type": instance_type,
         },
     )
 

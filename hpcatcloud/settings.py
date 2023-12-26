@@ -36,9 +36,9 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "rest_framework",
     "django_filters",
-    "hpcc_api",
-    "hpcc_api.clusters",
-    "hpcc_api.experiments",
+    "hpcatcloud",
+    "hpcatcloud.clusters",
+    "hpcatcloud.experiments",
 ]
 
 
@@ -58,7 +58,7 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
-ROOT_URLCONF = "hpcc_api.urls"
+ROOT_URLCONF = "hpcatcloud.urls"
 
 TEMPLATES = [
     {
@@ -76,7 +76,7 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = "hpcc_api.wsgi.application"
+WSGI_APPLICATION = "hpcatcloud.wsgi.application"
 
 # Database
 # https://docs.djangoproject.com/en/4.1/ref/settings/#databases

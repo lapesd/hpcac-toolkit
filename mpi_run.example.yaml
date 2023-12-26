@@ -1,13 +1,21 @@
 delete_cluster_after: false
 mpi_jobs:
-  - label: "Hello World | Ranks=1"
+  - experiment_label: "hello-world-1"  # This is just a label
+    fault_tolerance_technology_label: "No FT"  # This is just a label
+    checkpoint_strategy_label: "No FT"  # This is just a label
     setup_command: "cd /var/nfs_dir/my_files/hello_world && mpicc -o exec main.c"
-    run_command: "mpiexec -np 1 --hostfile /var/nfs_dir/my_files/hostfile /var/nfs_dir/my_files/hello_world/exec"
-    checkpoint_command: null
-    restore_command: null
+    run_command: "mpiexec -np 4 --hostfile /var/nfs_dir/my_files/hostfile /var/nfs_dir/my_files/hello_world/exec"
+    checkpoint_command: null  # use only for system-level checkpointing
+    restore_command: null  # this command will be executed when retrying the execution after a failure
+    maximum_retries: 3  # maximum number of retries before exiting execution
+    remote_outputs_dir: "/var/nfs_dir/my_files/hello_world"  # this remote folder will be saved at ./results
 
-  - label: "Hello World | Ranks=2"
+  - experiment_label: "hello-world-2"  # This is just a label
+    fault_tolerance_technology_label: "No FT"  # This is just a label
+    checkpoint_strategy_label: "No FT"  # This is just a label
     setup_command: "cd /var/nfs_dir/my_files/hello_world && mpicc -o exec main.c"
-    run_command: "mpiexec -np 2 --hostfile /var/nfs_dir/my_files/hostfile /var/nfs_dir/my_files/hello_world/exec"
-    checkpoint_command: null
-    restore_command: null
+    run_command: "mpiexec -np 4 --hostfile /var/nfs_dir/my_files/hostfile /var/nfs_dir/my_files/hello_world/exec"
+    checkpoint_command: null  # use only for system-level checkpointing
+    restore_command: null  # this command will be executed when retrying the execution after a failure
+    maximum_retries: 3  # maximum number of retries before exiting execution
+    remote_outputs_dir: "/var/nfs_dir/my_files/hello_world"  # this remote folder will be saved at ./results

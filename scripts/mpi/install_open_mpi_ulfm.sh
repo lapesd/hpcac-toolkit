@@ -4,7 +4,7 @@
 git clone --recursive https://github.com/open-mpi/ompi.git
 cd ompi || exit
 sudo ./autogen.pl
-sudo ./configure --disable-io-romio CFLAGS='-O0 -g' --disable-man-pages
+sudo ./configure --disable-io-romio --enable-debug CFLAGS='-O0 -g' --disable-man-pages
 sudo make install
 sudo git clean -fdx
 sudo rm -rf 3rd-party

@@ -6,9 +6,9 @@ import textwrap
 from django.core.management.base import BaseCommand
 from minio import Minio
 
-from hpcc_api.clusters.models import ClusterConfiguration
-from hpcc_api.utils.files import generate_hostfile, transfer_folder_over_ssh
-from hpcc_api.utils.timers import ExecutionTimer
+from hpcatcloud.clusters.models import ClusterConfiguration
+from hpcatcloud.utils.files import generate_hostfile, transfer_folder_over_ssh
+from hpcatcloud.utils.timers import ExecutionTimer
 
 TF_DIR = "./tmp_terraform_dir"
 

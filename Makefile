@@ -21,3 +21,6 @@ destroy-cluster:  ## destroy the test_cluster
 
 launch-mpi-jobs:  ## launch all MPI jobs configured in mpi_run.yaml
 	python manage.py launch_mpi_jobs --cluster-config-id test_cluster
+
+export:  ## export experiment results in CSV format
+	python manage.py export_results

@@ -1,8 +1,8 @@
 [tool.poetry]
-name = "hpcc_services"
+name = "hpcatcloud"
 version = "0.1.0"
 description = "HPC@Cloud Toolkit"
-authors = ["Vanderlei <munhoz@protonmail.ch>"]
+authors = ["Vanderlei <vanderlei.filho@proton.me>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
@@ -22,7 +22,7 @@ pytest = "^7.3.1"
 pytest-django = "^4.5.2"
 
 [tool.pytest.ini_options]
-DJANGO_SETTINGS_MODULE = "hpcc_api.settings"
+DJANGO_SETTINGS_MODULE = "hpcatcloud.settings"
 testpaths = ["tests"]
 
 [build-system]

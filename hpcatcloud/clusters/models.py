@@ -78,6 +78,9 @@ class ClusterConfiguration(models.Model):
     vcpus = models.IntegerField(
         null=False,
     )
+    instance_type = models.TextField(
+        null=False,
+    )
     spawn_time = models.IntegerField(
         default=0,
     )
