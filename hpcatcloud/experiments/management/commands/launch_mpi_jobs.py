@@ -198,9 +198,26 @@ class Command(BaseCommand):
                     create_cluster(cluster_config)
                     restoring_timer.stop()
 
+                    # Setup app again after restoring cluster
                     job_setup_timer.resume()
-                    time.sleep(20)  # wait while the provider updates the terraform state
-                    run_status = launch_over_ssh(mpi_job['setup_command'], ip=ip, user=user, track_output=True)
+                    shared_dir_path = None
+                    if cluster_config.fsx:
+                        shared_dir_path = "/fsx"
+                    elif cluster_config.nfs:
+                        shared_dir_path = "/var/nfs_dir"
+                    if shared_dir_path is not None:
+                        delete_remote_folder_over_ssh(
+                            remote_folder_path=f"{shared_dir_path}/my_files",
+                            ip=ip,
+                            user=user,
+                        )
+                        transfer_folder_over_ssh(
+                            local_folder_path="./my_files",
+                            remote_destination_path=shared_dir_path,
+                            ip=ip,
+                            user=user,
+                        )
+                    setup_status = launch_over_ssh(mpi_job['setup_command'], ip=ip, user=user, track_output=True)
                     job_setup_timer.stop()
 
                     exec_timer.start()
