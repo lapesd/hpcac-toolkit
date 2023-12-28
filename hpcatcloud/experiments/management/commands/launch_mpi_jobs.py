@@ -198,6 +198,11 @@ class Command(BaseCommand):
                     create_cluster(cluster_config)
                     restoring_timer.stop()
 
+                    job_setup_timer.resume()
+                    time.sleep(20)  # wait while the provider updates the terraform state
+                    run_status = launch_over_ssh(mpi_job['setup_command'], ip=ip, user=user, track_output=True)
+                    job_setup_timer.stop()
+
                     exec_timer.start()
                     run_status = launch_over_ssh(mpi_job['restore_command'], ip=ip, user=user, track_output=True)
                     exec_timer.stop()
