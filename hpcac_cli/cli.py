@@ -1,15 +1,15 @@
 import argparse
 
-from tortoise import run_async
+import asyncio
 
 from hpcac_cli.db import init_db
 from hpcac_cli.utils.logger import error, info
 from hpcac_cli.commands.cluster import create_cluster, destroy_cluster
 
 
-def main():
+async def main_async():
     info("Welcome to HPC@Cloud!")
-    run_async(init_db())
+    await init_db()
 
     parser = argparse.ArgumentParser(description="HPC@Cloud CLI tool")
     subparsers = parser.add_subparsers(dest="command")
@@ -27,15 +27,23 @@ def main():
     parser_destroy.set_defaults(func=destroy_cluster)
 
     args = parser.parse_args()
+
     if args.command is None:
         parser.print_help()
     else:
         try:
-            args.func()
+            # Check if the command function is asynchronous
+            if asyncio.iscoroutinefunction(args.func):
+                await args.func()
+            else:
+                args.func()
         except Exception as e:
             error(e)
 
-    # try:
-    #    run_config = yaml_parser()
-    # except Exception as e:
-    #    error(e)
+
+def main():
+    asyncio.run(main_async())
+
+
+if __name__ == "__main__":
+    main()

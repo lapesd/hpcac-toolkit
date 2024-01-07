@@ -1,14 +1,15 @@
+from hpcac_cli.models.cluster import upsert_cluster
 from hpcac_cli.utils.logger import error, info, print_map
 from hpcac_cli.utils.parser import parse_yaml
 from hpcac_cli.utils.prompt import prompt_text, prompt_confirmation
-from hpcac_cli.utils.providers.aws import get_instance_types
+from hpcac_cli.utils.providers.aws import get_instance_type_details
 from hpcac_cli.utils.terraform import (
     generate_cluster_tfvars_file,
     save_cluster_terraform_files,
 )
 
 
-def create_cluster():
+async def create_cluster():
     info("Reading `cluster_config.yaml`...")
     cluster_config = parse_yaml("cluster_config.yaml")
     print_map(cluster_config)
@@ -21,8 +22,8 @@ def create_cluster():
         )
         while cluster_tag == "":
             cluster_tag = prompt_text(text="`cluster_tag` can't be empty:")
-        cluster_config["cluster_tag"] = cluster_tag
-        
+        cluster_config["tag"] = cluster_tag
+
         # Prompt for confirmation:
         continue_creation = prompt_confirmation(
             text=f"Confirm creation of Cluster: `{cluster_tag}`?"
@@ -34,7 +35,7 @@ def create_cluster():
             )
         else:
             error("Cluster creation CANCELLED by the user.")
-            return        
+            return
 
         # Generate terraform files:
         info(f"Generating terraform.tfvars file for Cluster `{cluster_tag}`...")
@@ -46,9 +47,11 @@ def create_cluster():
         save_cluster_terraform_files(cluster_config=cluster_config)
 
         # Save cluster_config to Postgres:
-        instance_types = get_instance_types()
-        for instance_type, vcpus in instance_types.items():
-            print(f"{instance_type}: {vcpus} vCPUs")
+        instance_details = await get_instance_type_details(
+            cluster_config["node_instance_type"]
+        )
+        cluster_config.update(instance_details)
+        await upsert_cluster(cluster_data=cluster_config)
 
     except KeyboardInterrupt:
         error("\nCluster creation CANCELLED by the user.")

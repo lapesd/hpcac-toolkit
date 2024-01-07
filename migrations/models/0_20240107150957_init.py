@@ -4,10 +4,15 @@ from tortoise import BaseDBAsyncClient
 async def upgrade(db: BaseDBAsyncClient) -> str:
     return """
         CREATE TABLE IF NOT EXISTS "cluster" (
-    "id" SERIAL NOT NULL PRIMARY KEY,
+    "tag" VARCHAR(50) NOT NULL  PRIMARY KEY,
+    "provider" VARCHAR(50) NOT NULL,
     "instance_type" VARCHAR(50) NOT NULL,
     "nodes" INT NOT NULL,
-    "is_transient" BOOL NOT NULL  DEFAULT False
+    "vcpus_per_node" INT NOT NULL,
+    "memory_per_node" INT NOT NULL,
+    "is_transient" BOOL NOT NULL  DEFAULT False,
+    "use_efs" BOOL NOT NULL  DEFAULT True,
+    "use_fsx" BOOL NOT NULL  DEFAULT False
 );
 CREATE TABLE IF NOT EXISTS "aerich" (
     "id" SERIAL NOT NULL PRIMARY KEY,

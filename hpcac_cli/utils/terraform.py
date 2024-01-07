@@ -13,7 +13,7 @@ def generate_cluster_tfvars_file(cluster_config: dict) -> str:
             if key not in [
                 "provider",
                 "cluster_tag",
-            ]:  # provider and cluster_tag aren't tfvars
+            ]:  # provider and tag aren't tfvars
                 if isinstance(value, (int, float)) or (
                     isinstance(value, str) and value.isdigit()
                 ):
@@ -24,7 +24,7 @@ def generate_cluster_tfvars_file(cluster_config: dict) -> str:
 
 def save_cluster_terraform_files(cluster_config: dict):
     # Create MinIO bucket for cluster files:
-    cluster_bucket_name = cluster_config["cluster_tag"].replace(" ", "").replace("_", "-")
+    cluster_bucket_name = cluster_config["tag"].replace(" ", "").replace("_", "-")
     create_minio_bucket(cluster_bucket_name)
 
     # Upload Cluster terraform.tfvars file to MinIO bucket:
