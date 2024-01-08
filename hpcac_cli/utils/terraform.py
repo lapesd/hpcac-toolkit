@@ -1,4 +1,5 @@
 import os
+import subprocess
 
 from hpcac_cli.utils.minio import create_minio_bucket, upload_file_to_minio_bucket
 
@@ -41,3 +42,17 @@ def save_cluster_terraform_files(cluster_config: dict):
             file_name_in_bucket=file_name,
             bucket_name=cluster_bucket_name,
         )
+
+
+def terraform_init():
+    subprocess.run(
+        ["terraform", "init"],
+        cwd="./tmp_terraform_dir",
+        check=True,
+    )
+
+def terraform_plan():
+    pass
+
+def terraform_apply():
+    pass

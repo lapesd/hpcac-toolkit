@@ -37,10 +37,11 @@ async def create_cluster():
             error("Cluster creation CANCELLED by the user.")
             return
 
-        # Generate terraform files:
+        # Generate terraform.tfvars file:
         info(f"Generating terraform.tfvars file for Cluster `{cluster_tag}`...")
         generate_cluster_tfvars_file(cluster_config=cluster_config)
 
+        # Copy cloud blueprints and save terraform files in a MinIO bucket:
         info(
             f"Saving cloud blueprints in a MinIO bucket for Cluster `{cluster_tag}`..."
         )
