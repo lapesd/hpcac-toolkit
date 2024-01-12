@@ -33,6 +33,13 @@ def info_prompt(text: str) -> None:
     )
 
 
+def info_terraform(text: str) -> None:
+    print(
+        f"{Fore.RESET}[{Fore.MAGENTA}TERRAFORM{Fore.RESET}] {Fore.LIGHTMAGENTA_EX}{text}{Fore.RESET}",
+        end="",
+    )
+
+
 def print_map(map: dict) -> None:
     info("Your config is:")
     print(json.dumps(map, indent=4, sort_keys=True))

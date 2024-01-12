@@ -6,6 +6,11 @@ from hpcac_cli.utils.providers.aws import get_instance_type_details
 from hpcac_cli.utils.terraform import (
     generate_cluster_tfvars_file,
     save_cluster_terraform_files,
+    get_cluster_terraform_files,
+    terraform_init,
+    terraform_apply,
+    terraform_destroy,
+    TF_DIR,
 )
 
 
@@ -22,7 +27,7 @@ async def create_cluster():
         )
         while cluster_tag == "":
             cluster_tag = prompt_text(text="`cluster_tag` can't be empty:")
-        cluster_config["tag"] = cluster_tag
+        cluster_config["cluster_tag"] = cluster_tag
 
         # Prompt for confirmation:
         continue_creation = prompt_confirmation(
@@ -51,12 +56,28 @@ async def create_cluster():
         instance_details = await get_instance_type_details(
             cluster_config["node_instance_type"]
         )
-        cluster_config.update(instance_details)
+        cluster_config.update(instance_details)  # add instance details keys
         await upsert_cluster(cluster_data=cluster_config)
+
+        # Download terraform files to TF_DIR:
+        info(f"Downloading terraform blueprints for Cluster `{cluster_tag}`...")
+        get_cluster_terraform_files(cluster_config=cluster_config)
 
     except KeyboardInterrupt:
         error("\nCluster creation CANCELLED by the user.")
 
+    try:
+        # Terraform init and apply
+        terraform_init()
+        terraform_apply()
+
+        info("Your cluster is ready! Remember to destroy it after using!!!")
+
+    except Exception as e:
+        terraform_destroy()
+        raise Exception(f"Terraform subprocess error: {e}")
+
 
 def destroy_cluster():
     info("Destroying cluster...")
+    terraform_destroy()

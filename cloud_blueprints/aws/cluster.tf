@@ -13,10 +13,12 @@ variable "node_rbs_iops" {}
 
 variable "use_spot" {}
 variable "use_efa" {}
+variable "use_efs" {}
 variable "use_fsx" {}
 variable "spot_maximum_rate" {}
+variable "spot_maximum_timeout" {}
 
-variable "experiment_tag" {}
+variable "cluster_tag" {}
 variable "instance_username" {}
 
 
@@ -25,7 +27,7 @@ resource "aws_vpc" "cluster_vpc" {
   enable_dns_support   = true
   enable_dns_hostnames = true
   tags = {
-    "cost_allocation_tag" = var.experiment_tag
+    "cost_allocation_tag" = var.cluster_tag
   }
 }
 
@@ -35,21 +37,32 @@ resource "aws_subnet" "cluster_subnet" {
   availability_zone       = var.availability_zone
   map_public_ip_on_launch = true
   tags = {
-    "cost_allocation_tag" = var.experiment_tag
+    "cost_allocation_tag" = var.cluster_tag
+  }
+}
+
+resource "aws_efs_file_system" "cluster_efs" {
+  count = var.use_efs ? 1 : 0
+
+  creation_token = "cluster-efs"
+
+  tags = {
+    Name                  = "Cluster EFS"
+    "cost_allocation_tag" = var.cluster_tag
   }
 }
 
 resource "aws_internet_gateway" "cluster_ig" {
   vpc_id = aws_vpc.cluster_vpc.id
   tags = {
-    "cost_allocation_tag" = var.experiment_tag
+    "cost_allocation_tag" = var.cluster_tag
   }
 }
 
 resource "aws_route_table" "cluster_rt" {
   vpc_id = aws_vpc.cluster_vpc.id
   tags = {
-    "cost_allocation_tag" = var.experiment_tag
+    "cost_allocation_tag" = var.cluster_tag
   }
 }
 
@@ -149,12 +162,19 @@ resource "aws_key_pair" "deployer_key" {
   public_key = file(var.public_rsa_key_path)
 }
 
+resource "aws_efs_mount_target" "efs_mt" {
+  count           = var.use_efs ? 1 : 0
+  file_system_id  = aws_efs_file_system.cluster_efs[0].id
+  subnet_id       = aws_subnet.cluster_subnet.id
+  security_groups = [aws_security_group.allow_nfs.id]
+}
+
 resource "aws_placement_group" "cluster_pg" {
   name     = "cluster-placement-group"
   strategy = "cluster"
   tags = {
     Name                  = "Cluster Placement Group"
-    "cost_allocation_tag" = var.experiment_tag
+    "cost_allocation_tag" = var.cluster_tag
   }
 }
 
@@ -166,7 +186,7 @@ resource "aws_network_interface" "cluster_node_eni" {
   interface_type  = var.use_efa ? "efa" : null
   tags = {
     Name                  = "Cluster Node ${count.index + 1} ENI"
-    "cost_allocation_tag" = var.experiment_tag
+    "cost_allocation_tag" = var.cluster_tag
   }
 }
 
@@ -179,7 +199,7 @@ resource "aws_instance" "cluster_node" {
   depends_on      = [aws_network_interface.cluster_node_eni]
   tags = {
     Name                  = "Node ${count.index + 1}"
-    "cost_allocation_tag" = var.experiment_tag
+    "cost_allocation_tag" = var.cluster_tag
   }
 
   root_block_device {
@@ -189,7 +209,7 @@ resource "aws_instance" "cluster_node" {
     iops                  = var.node_rbs_iops
     tags = {
       Name                  = "Worker ${count.index + 1} RBS"
-      "cost_allocation_tag" = var.experiment_tag
+      "cost_allocation_tag" = var.cluster_tag
     }
   }
 
@@ -220,7 +240,7 @@ resource "aws_spot_instance_request" "spot_cluster_node" {
   monitoring                     = true
   tags = {
     Name                  = "Worker ${count.index + 1}"
-    "cost_allocation_tag" = var.experiment_tag
+    "cost_allocation_tag" = var.cluster_tag
   }
 
   root_block_device {
@@ -230,7 +250,7 @@ resource "aws_spot_instance_request" "spot_cluster_node" {
     iops                  = var.node_rbs_iops
     tags = {
       Name                  = "Worker ${count.index + 1} RBS"
-      "cost_allocation_tag" = var.experiment_tag
+      "cost_allocation_tag" = var.cluster_tag
     }
   }
 }
@@ -277,13 +297,30 @@ resource "null_resource" "setup_cluster_nodes_ssh" {
       "/tmp/cluster_init.sh",
     ]
   }
+}
 
-  # DISABLE HT
+resource "null_resource" "setup_cluster_nodes_efs" {
+  count = var.use_efs ? var.node_count : 0
+  connection {
+    type        = "ssh"
+    host        = var.use_spot ? aws_spot_instance_request.spot_cluster_node[count.index].public_ip : aws_instance.cluster_node[count.index].public_ip
+    user        = "ec2-user"
+    private_key = file(var.private_rsa_key_path)
+  }
+
+  # Setup AWS EFS
   provisioner "remote-exec" {
     inline = [
-      "sudo sh -c 'for cpunum in $(cat /sys/devices/system/cpu/cpu*/topology/thread_siblings_list | cut -s -d, -f2- | tr \",\" \"\\n\" | sort -un); do echo 0 > /sys/devices/system/cpu/cpu$cpunum/online; done'"
+      "sudo yum install -y nfs-utils",
+      "sudo mkdir -p /var/nfs_dir",
+      "sleep 120",
+      "sudo mount -t nfs ${aws_efs_file_system.cluster_efs[0].dns_name}:/ /var/nfs_dir",
+      "sudo chmod ugo+rwx /var/nfs_dir",
+      "sudo bash -c 'echo \"${aws_efs_file_system.cluster_efs[0].dns_name}:/ /var/nfs_dir nfs defaults,_netdev 0 0\" >> /etc/fstab'",
     ]
   }
+
+  depends_on = [aws_efs_file_system.cluster_efs, aws_efs_mount_target.efs_mt[0], null_resource.setup_cluster_nodes_ssh]
 }
 
 resource "aws_ec2_tag" "spot_cluster_node_tags" {
@@ -301,7 +338,7 @@ resource "aws_ec2_tag" "spot_cluster_node_cost_tags" {
 
   resource_id = aws_spot_instance_request.spot_cluster_node[count.index].spot_instance_id
   key         = "cost_allocation_tag"
-  value       = var.experiment_tag
+  value       = var.cluster_tag
 
   depends_on = [aws_spot_instance_request.spot_cluster_node]
 }
@@ -311,11 +348,10 @@ resource "aws_fsx_lustre_file_system" "lustre_fsx" {
   storage_capacity   = 1200
   subnet_ids         = [aws_subnet.cluster_subnet.id]
   security_group_ids = [aws_security_group.allow_lustre.id]
-  depends_on         = [null_resource.setup_cluster_nodes_nfs]
 
   tags = {
     Name                  = "FSx Lustre Filesystem"
-    "cost_allocation_tag" = var.experiment_tag
+    "cost_allocation_tag" = var.cluster_tag
   }
 }
 
