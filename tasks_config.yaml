@@ -1,0 +1,15 @@
+delete_cluster_after_execution: false
+overwrite_tasks: true  # overwrite tasks with the same tag?
+tasks:
+  - task_tag: "4-ranks-hello-world"  # must be unique
+    # Execution commands:
+    setup_command: "cd /var/nfs_dir/my_files/hello_world && mpicc -o exec main.c"
+    run_command: "mpiexec -np 4 --hostfile /var/nfs_dir/my_files/hostfile /var/nfs_dir/my_files/hello_world/exec"
+    ckpt_command: null  # use only for system-level checkpointing
+    restart_command: null  # this command will be executed when retrying the execution after a failure
+    # FT tags and options:
+    ft_technology: "No FT"  # this is just a label
+    ckpt_strategy: "No FT"  # this is just a label
+    retries_before_aborting: 3  # maximum number of retries before aborting execution
+    # Outputs:
+    remote_outputs_dir: "/var/nfs_dir/my_files/hello_world"  # this remote folder will be saved at ./results

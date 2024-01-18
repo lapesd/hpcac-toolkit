@@ -5,7 +5,11 @@ TORTOISE_ORM = {
     "connections": {"default": "postgres://local:local@127.0.0.1:5432/postgres"},
     "apps": {
         "models": {
-            "models": ["hpcac_cli.models.cluster", "aerich.models"],
+            "models": [
+                "hpcac_cli.models.cluster",
+                "hpcac_cli.models.task",
+                "aerich.models",
+            ],
             "default_connection": "default",
         },
     },

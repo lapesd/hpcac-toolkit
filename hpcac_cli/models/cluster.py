@@ -1,3 +1,4 @@
+from tortoise.queryset import QuerySet
 from tortoise.models import Model
 from tortoise import fields
 
@@ -9,6 +10,8 @@ BOOLEANS = ["use_spot", "use_efs", "use_fsx", "use_efa"]
 
 class Cluster(Model):
     cluster_tag = fields.CharField(pk=True, unique=True, max_length=50)
+    created_at = fields.DatetimeField(auto_now_add=True)
+    is_online = fields.BooleanField(default=False)
     provider = fields.CharField(max_length=50)
     node_instance_type = fields.CharField(max_length=50)
     instance_username = fields.CharField(max_length=50)
@@ -20,6 +23,7 @@ class Cluster(Model):
     use_efs = fields.BooleanField(default=True)
     use_fsx = fields.BooleanField(default=False)
     use_efa = fields.BooleanField(default=False)
+    time_spent_spawning_cluster = fields.IntField(default=0)
 
     def __str__(self):
         return (
@@ -27,7 +31,12 @@ class Cluster(Model):
         )
 
 
-async def upsert_cluster(cluster_data: dict):
+async def is_cluster_tag_alredy_used(cluster_tag: str) -> bool:
+    existing_cluster = await Cluster.filter(cluster_tag=cluster_tag).first()
+    return True if existing_cluster else False
+
+
+async def insert_cluster_record(cluster_data: dict) -> Cluster:
     # Ensure all required keys are present in the dictionary
     required_keys = {
         "cluster_tag",
@@ -43,19 +52,20 @@ async def upsert_cluster(cluster_data: dict):
             "Missing required keys in cluster_data. "
             f"Required keys are: {required_keys}"
         )
-
-    cluster_tag = cluster_data["cluster_tag"]
-
-    # Check if a Cluster with the given cluster_tag already exists
-    existing_cluster = await Cluster.filter(cluster_tag=cluster_tag).first()
-    if existing_cluster:
-        # If exists, delete the existing record
-        await existing_cluster.delete()
-        info(f"Deleted existing `{cluster_tag}` Cluster details from Postgres.")
-
-    # Create a new record
     for key in BOOLEANS:
         cluster_data[key] = True if cluster_data[key] == "true" else False
 
-    await Cluster.create(**cluster_data)
-    info(f"Inserted new `{cluster_tag}` Cluster details into Postgres!")
+    # Create new Cluster record:
+    cluster = await Cluster.create(**cluster_data)
+    info(f"Inserted new `{cluster_data['cluster_tag']}` Cluster details into Postgres!")
+    return cluster
+
+
+async def fetch_latest_online_cluster() -> QuerySet[Cluster]:
+    latest_cluster = (
+        await Cluster.filter(is_online=True).order_by("-created_at").first()
+    )
+    if latest_cluster:
+        return latest_cluster
+    else:
+        raise Exception("No online clusters available.")

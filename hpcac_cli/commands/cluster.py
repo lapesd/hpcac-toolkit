@@ -1,5 +1,10 @@
-from hpcac_cli.models.cluster import upsert_cluster
-from hpcac_cli.utils.logger import error, info, print_map
+from hpcac_cli.models.cluster import (
+    insert_cluster_record,
+    is_cluster_tag_alredy_used,
+    fetch_latest_online_cluster,
+)
+from hpcac_cli.utils.chronometer import Chronometer
+from hpcac_cli.utils.logger import info, print_map
 from hpcac_cli.utils.parser import parse_yaml
 from hpcac_cli.utils.prompt import prompt_text, prompt_confirmation
 from hpcac_cli.utils.providers.aws import get_instance_type_details
@@ -19,65 +24,72 @@ async def create_cluster():
     cluster_config = parse_yaml("cluster_config.yaml")
     print_map(cluster_config)
 
-    try:
-        # Prompt for cluster_tag:
-        cluster_tag = ""
-        cluster_tag = prompt_text(
-            text="Enter a `cluster_tag` or CTRL+C to cancel cluster creation:"
-        )
-        while cluster_tag == "":
+    # Prompt for cluster_tag:
+    cluster_tag = ""
+    cluster_tag = prompt_text(
+        text="Enter a `cluster_tag` or CTRL+C to cancel cluster creation:"
+    )
+    while cluster_tag == "" or await is_cluster_tag_alredy_used(cluster_tag):
+        if cluster_tag == "":
             cluster_tag = prompt_text(text="`cluster_tag` can't be empty:")
-        cluster_config["cluster_tag"] = cluster_tag
-
-        # Prompt for confirmation:
-        continue_creation = prompt_confirmation(
-            text=f"Confirm creation of Cluster: `{cluster_tag}`?"
-        )
-        if continue_creation:
-            info(
-                f"Attempting creation of Cluster `{cluster_tag}` at Cloud "
-                f"Provider: `{cluster_config['provider']}`"
+        if await is_cluster_tag_alredy_used(cluster_tag):
+            cluster_tag = prompt_text(
+                text=f"cluster_tag `{cluster_tag}` is already used, choose another one:"
             )
-        else:
-            error("Cluster creation CANCELLED by the user.")
-            return
+    cluster_config["cluster_tag"] = cluster_tag
 
-        # Generate terraform.tfvars file:
-        info(f"Generating terraform.tfvars file for Cluster `{cluster_tag}`...")
-        generate_cluster_tfvars_file(cluster_config=cluster_config)
-
-        # Copy cloud blueprints and save terraform files in a MinIO bucket:
+    # Prompt for confirmation:
+    continue_creation = prompt_confirmation(
+        text=f"Confirm creation of Cluster: `{cluster_tag}`?"
+    )
+    if continue_creation:
         info(
-            f"Saving cloud blueprints in a MinIO bucket for Cluster `{cluster_tag}`..."
+            f"Attempting creation of Cluster `{cluster_tag}` at Cloud "
+            f"Provider: `{cluster_config['provider']}`"
         )
-        save_cluster_terraform_files(cluster_config=cluster_config)
+    else:
+        info("Cluster creation CANCELLED by the user.")
+        return
 
-        # Save cluster_config to Postgres:
-        instance_details = await get_instance_type_details(
-            cluster_config["node_instance_type"]
-        )
-        cluster_config.update(instance_details)  # add instance details keys
-        await upsert_cluster(cluster_data=cluster_config)
+    # Start Chronometer
+    cluster_spawn_chronometer = Chronometer()
+    cluster_spawn_chronometer.start()
 
-        # Download terraform files to TF_DIR:
-        info(f"Downloading terraform blueprints for Cluster `{cluster_tag}`...")
-        get_cluster_terraform_files(cluster_config=cluster_config)
+    # Generate terraform.tfvars file:
+    info(f"Generating terraform.tfvars file for Cluster `{cluster_tag}`...")
+    generate_cluster_tfvars_file(cluster_config=cluster_config)
 
-    except KeyboardInterrupt:
-        error("\nCluster creation CANCELLED by the user.")
+    # Copy cloud blueprints and save terraform files in a MinIO bucket:
+    info(f"Saving cloud blueprints in a MinIO bucket for Cluster `{cluster_tag}`...")
+    save_cluster_terraform_files(cluster_config=cluster_config)
 
-    try:
-        # Terraform init and apply
-        terraform_init()
-        terraform_apply()
+    # Save cluster_config to Postgres:
+    instance_details = await get_instance_type_details(
+        cluster_config["node_instance_type"]
+    )
+    cluster_config.update(instance_details)  # add instance details keys
+    cluster = await insert_cluster_record(cluster_data=cluster_config)
 
-        info("Your cluster is ready! Remember to destroy it after using!!!")
+    # Download terraform files to TF_DIR:
+    info(f"Downloading terraform blueprints for Cluster `{cluster_tag}`...")
+    get_cluster_terraform_files(cluster_config=cluster_config)
 
-    except Exception as e:
-        terraform_destroy()
-        raise Exception(f"Terraform subprocess error: {e}")
+    # Terraform init and apply
+    terraform_init()
+    terraform_apply()
+
+    # Stop Chronometer
+    cluster_spawn_chronometer.stop()
+    
+    info("Your cluster is ready! Remember to destroy it after using!!!")
+    cluster.is_online = True
+    cluster.time_spent_spawning_cluster = cluster_spawn_chronometer.get_elapsed_time()
+    await cluster.save()
 
 
-def destroy_cluster():
+async def destroy_cluster():
     info("Destroying cluster...")
+    latest_cluster = await fetch_latest_online_cluster()
+    latest_cluster.is_online = False
+    await latest_cluster.save()
     terraform_destroy()

@@ -5,6 +5,7 @@ import asyncio
 from hpcac_cli.db import init_db
 from hpcac_cli.utils.logger import error, info
 from hpcac_cli.commands.cluster import create_cluster, destroy_cluster
+from hpcac_cli.commands.tasks import run_tasks
 
 
 async def main_async():
@@ -26,6 +27,12 @@ async def main_async():
     )
     parser_destroy.set_defaults(func=destroy_cluster)
 
+    parser_create = subparsers.add_parser(
+        "run-tasks",
+        help="Run tasks in a cluster",
+    )
+    parser_create.set_defaults(func=run_tasks)
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -37,6 +44,8 @@ async def main_async():
                 await args.func()
             else:
                 args.func()
+        except KeyboardInterrupt:
+            error("\nCommand CANCELLED by the user.")
         except Exception as e:
             error(e)
 
