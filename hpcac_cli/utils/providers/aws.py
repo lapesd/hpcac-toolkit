@@ -2,10 +2,13 @@ import json
 
 import boto3
 
+from hpcac_cli.utils.logger import info
+
 
 async def get_instance_type_details(
     instance_type: str, region: str = "us-east-1"
 ) -> dict:
+    info(f"Getting details for AWS instance_type `{instance_type}`...")
     ec2 = boto3.client("ec2", region_name=region)
     pricing = boto3.client("pricing", region_name=region)
 
@@ -42,9 +45,34 @@ async def get_instance_type_details(
     # Get Spot price (Note: Spot price varies frequently. This is a more complex task and might not be as straightforward)
     # For simplicity, we are not including spot pricing here. It's generally retrieved from EC2 Spot Price history.
 
+    info(f"Details for AWS instance_type: `{instance_type}` found!")
     return {
         "vcpus_per_node": vcpus,
         "memory_per_node": memory,
         "on_demand_price_per_hour": on_demand_price,
         # 'spot_price_per_hour': spot_price  # Spot price retrieval can be added here
     }
+
+
+def get_cluster_nodes_ip_addresses(cluster_tag: str, region: str) -> list[str]:
+    # TODO: check if this function works with spot instances
+    ec2 = boto3.client('ec2', region_name=region)
+
+    # Define the filter for instances with the specified tag
+    filters = [{
+        'Name': 'tag:cost_allocation_tag',
+        'Values': [cluster_tag]
+    }]
+
+    # Retrieve the instances that match the filter
+    response = ec2.describe_instances(Filters=filters)
+
+    # Extract the public IP addresses
+    ip_addresses = []
+    for reservation in response['Reservations']:
+        for instance in reservation['Instances']:
+            # Check if the instance has a public IP address
+            if 'PublicIpAddress' in instance:
+                ip_addresses.append(instance['PublicIpAddress'])
+
+    return ip_addresses

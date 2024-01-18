@@ -7,7 +7,7 @@ from hpcac_cli.utils.chronometer import Chronometer
 from hpcac_cli.utils.logger import info, print_map
 from hpcac_cli.utils.parser import parse_yaml
 from hpcac_cli.utils.prompt import prompt_text, prompt_confirmation
-from hpcac_cli.utils.providers.aws import get_instance_type_details
+from hpcac_cli.utils.providers.aws import get_instance_type_details, get_cluster_nodes_ip_addresses
 from hpcac_cli.utils.terraform import (
     generate_cluster_tfvars_file,
     save_cluster_terraform_files,
@@ -68,6 +68,7 @@ async def create_cluster():
         cluster_config["node_instance_type"]
     )
     cluster_config.update(instance_details)  # add instance details keys
+    cluster_config.update({"node_ips": []})  # add empty ip address list
     cluster = await insert_cluster_record(cluster_data=cluster_config)
 
     # Download terraform files to TF_DIR:
@@ -84,6 +85,7 @@ async def create_cluster():
     info("Your cluster is ready! Remember to destroy it after using!!!")
     cluster.is_online = True
     cluster.time_spent_spawning_cluster = cluster_spawn_chronometer.get_elapsed_time()
+    cluster.node_ips = get_cluster_nodes_ip_addresses(cluster_tag=cluster.cluster_tag, region=cluster.region)
     await cluster.save()
 
 

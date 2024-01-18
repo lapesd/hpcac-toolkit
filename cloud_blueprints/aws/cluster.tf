@@ -360,7 +360,7 @@ output "fsx_lustre_dns_name" {
   value       = var.use_fsx ? aws_fsx_lustre_file_system.lustre_fsx[0].dns_name : "No Lustre FSx"
 }
 
-output "node_zero_public_ip" {
+output "cluster_entrypoint_ip" {
   description = "Entrypoint node public IP"
   value       = aws_instance.cluster_node[0].public_ip
 }

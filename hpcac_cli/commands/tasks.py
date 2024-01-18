@@ -19,15 +19,16 @@ async def run_tasks():
     info(f"Found latest Cluster `{cluster.cluster_tag}` configuration!")
 
     # Make sure tasks have unique tags, aborting if not:
-    for task_data in tasks_config["tasks"]:
-        if await is_task_tag_alredy_used(task_tag=task_data["task_tag"]):
-            raise Exception(f"Task record `{task_data['task_tag']}` already exists!")
+    if not tasks_config["overwrite_tasks"]:
+        for task_data in tasks_config["tasks"]:
+            if await is_task_tag_alredy_used(task_tag=task_data["task_tag"]):
+                raise Exception(f"Task record `{task_data['task_tag']}` already exists!")
 
     # Insert new task records:
     task_objects = []
     for task_data in tasks_config["tasks"]:
         task_data["cluster_id"] = cluster.cluster_tag
-        task = await insert_task_record(task_data=task_data)
+        task = await insert_task_record(task_data=task_data, overwrite=tasks_config["overwrite_tasks"])
         task_objects.append(task)
 
     # Run tasks serially:
@@ -39,6 +40,9 @@ async def run_tasks():
         execution_chronometer = Chronometer()
 
         # Check that Cluster is ready
+        if not cluster.is_healthy():
+            raise Exception(f"Cluster is not healthy!")
+
         # TODO: clear the /var/nfs_dir folder
 
         # Setup task:

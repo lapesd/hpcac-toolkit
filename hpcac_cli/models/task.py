@@ -34,8 +34,16 @@ async def is_task_tag_alredy_used(task_tag: str) -> bool:
     return True if existing_task else False
 
 
-async def insert_task_record(task_data: dict) -> Task:
+async def insert_task_record(task_data: dict, overwrite: bool = False) -> Task:
+    # Delete existing Task if overwrite == True:
+    if overwrite and await is_task_tag_alredy_used(task_tag=task_data["task_tag"]):
+        await Task.filter(task_tag=task_data["task_tag"]).delete()
+
     # Create new Task record:
     task = await Task.create(**task_data)
-    info(f"Inserted Task `{task.task_tag}` details into Postgres!")
+    if overwrite:
+        info(f"Overwritten Task `{task.task_tag}` details into Postgres!")
+    else:
+        info(f"Inserted Task `{task.task_tag}` details into Postgres!")
+
     return task
