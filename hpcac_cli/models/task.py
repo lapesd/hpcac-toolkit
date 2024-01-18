@@ -27,6 +27,11 @@ class Task(Model):
     approximate_costs = fields.DecimalField(
         max_digits=12, decimal_places=4, default=Decimal(0.0)
     )
+    setup_command = fields.TextField()
+    run_command = fields.TextField()
+    ckpt_command = fields.TextField(null=True)
+    restart_command = fields.TextField(null=True)
+    remote_outputs_dir = fields.TextField()
 
 
 async def is_task_tag_alredy_used(task_tag: str) -> bool:

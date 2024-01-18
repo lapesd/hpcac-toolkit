@@ -1,3 +1,4 @@
+import os
 from decimal import Decimal
 
 from tortoise.queryset import QuerySet
@@ -5,7 +6,7 @@ from tortoise.models import Model
 from tortoise import fields
 
 from hpcac_cli.utils.logger import info
-from hpcac_cli.utils.ssh import ping
+from hpcac_cli.utils.ssh import ping, remote_command, scp_transfer_file
 
 
 DECIMALS = ["on_demand_price_per_hour"]
@@ -29,14 +30,22 @@ class Cluster(Model):
     use_efa = fields.BooleanField(default=False)
     node_ips = fields.JSONField(default=list)
     time_spent_spawning_cluster = fields.IntField(default=0)
-    on_demand_price_per_hour = fields.DecimalField(max_digits=12, decimal_places=4, default=Decimal(0.0))
+    on_demand_price_per_hour = fields.DecimalField(
+        max_digits=12, decimal_places=4, default=Decimal(0.0)
+    )
 
     def __str__(self):
         return (
             f"Cluster {self.cluster_tag}: {self.node_count}x {self.node_instance_type}"
         )
-    
+
+    def run_command(self, command: str):
+        remote_command(
+            ip=self.node_ips[0], username=self.instance_username, command=command
+        )
+
     def is_healthy(self) -> bool:
+        info(f"Checking Cluster `{self.cluster_tag}` health...")
         for ip in self.node_ips:
             is_alive = ping(ip=ip, username=self.instance_username)
             if not is_alive:
@@ -44,6 +53,27 @@ class Cluster(Model):
                 return False
         info(f"Cluster `{self.cluster_tag}` is healthy!")
         return True
+
+    def upload_my_files(self):
+        info(f"Transfering `my_files` contents to Cluster `{self.cluster_tag}`")
+        # First make sure the remote `my_files` directory exists:
+        self.run_command("mkdir -p /var/nfs_dir/my_files")
+
+        # Then upload the local my_files contents:
+        my_files = "./my_files"
+        for filename in os.listdir(my_files):
+            local_file_path = os.path.join(my_files, filename)
+            if os.path.isfile(local_file_path):
+                scp_transfer_file(
+                    local_path=local_file_path,
+                    remote_path=f"/var/nfs_dir/my_files/{filename}",
+                    ip=self.node_ips[0],
+                    username=self.instance_username,
+                )
+
+    def clean_my_files(self):
+        info(f"Cleaning remote contents at `/var/nfs_dir/my_files`...")
+        self.run_command("rm -r /var/nfs_dir/my_files")
 
 
 async def is_cluster_tag_alredy_used(cluster_tag: str) -> bool:
@@ -54,7 +84,9 @@ async def is_cluster_tag_alredy_used(cluster_tag: str) -> bool:
 async def insert_cluster_record(cluster_data: dict) -> Cluster:
     # Filter out keys not in the Cluster model
     cluster_model_fields = {f for f in Cluster._meta.fields_map}
-    filtered_cluster_data = {k: v for k, v in cluster_data.items() if k in cluster_model_fields}
+    filtered_cluster_data = {
+        k: v for k, v in cluster_data.items() if k in cluster_model_fields
+    }
 
     # Ensure all required keys are present in the dictionary
     required_keys = {
@@ -79,7 +111,9 @@ async def insert_cluster_record(cluster_data: dict) -> Cluster:
 
     # Convert booleans:
     for key in BOOLEANS:
-        filtered_cluster_data[key] = True if filtered_cluster_data[key] == "true" else False
+        filtered_cluster_data[key] = (
+            True if filtered_cluster_data[key] == "true" else False
+        )
 
     # Create new Cluster record:
     cluster = await Cluster.create(**filtered_cluster_data)

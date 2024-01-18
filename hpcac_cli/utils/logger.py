@@ -27,6 +27,10 @@ def info(text: str) -> None:
     print(f"[{Fore.BLUE}INFO{Fore.RESET}] {Fore.LIGHTBLUE_EX}{text}{Fore.RESET}")
 
 
+def info_remote(ip:str, text: str) -> None:
+    print(f"[{Fore.GREEN}SSH {ip}{Fore.RESET}] {Fore.LIGHTGREEN_EX}{text}{Fore.RESET}")
+
+
 def info_prompt(text: str) -> None:
     print(
         f"[{Fore.MAGENTA}PROMPT{Fore.RESET}] {Fore.LIGHTMAGENTA_EX}{text}{Fore.RESET}"

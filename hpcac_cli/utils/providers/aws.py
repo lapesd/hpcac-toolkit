@@ -56,23 +56,20 @@ async def get_instance_type_details(
 
 def get_cluster_nodes_ip_addresses(cluster_tag: str, region: str) -> list[str]:
     # TODO: check if this function works with spot instances
-    ec2 = boto3.client('ec2', region_name=region)
+    ec2 = boto3.client("ec2", region_name=region)
 
     # Define the filter for instances with the specified tag
-    filters = [{
-        'Name': 'tag:cost_allocation_tag',
-        'Values': [cluster_tag]
-    }]
+    filters = [{"Name": "tag:cost_allocation_tag", "Values": [cluster_tag]}]
 
     # Retrieve the instances that match the filter
     response = ec2.describe_instances(Filters=filters)
 
     # Extract the public IP addresses
     ip_addresses = []
-    for reservation in response['Reservations']:
-        for instance in reservation['Instances']:
+    for reservation in response["Reservations"]:
+        for instance in reservation["Instances"]:
             # Check if the instance has a public IP address
-            if 'PublicIpAddress' in instance:
-                ip_addresses.append(instance['PublicIpAddress'])
+            if "PublicIpAddress" in instance:
+                ip_addresses.append(instance["PublicIpAddress"])
 
     return ip_addresses
