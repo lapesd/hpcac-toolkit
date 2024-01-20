@@ -6,7 +6,7 @@ setup(
     packages=find_packages(),
     entry_points={
         "console_scripts": [
-            "hpcc = hpcac_cli.cli:main",
+            "hpcac = hpcac_cli.cli:main",
         ],
     },
 )

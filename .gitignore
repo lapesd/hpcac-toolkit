@@ -161,8 +161,8 @@ cython_debug/
 
 # HPC@Cloud configuration files
 cluster_config.yaml
-mpi_run.yaml
 tasks_config.yaml
+mpi_run.yaml
 cluster_init.sh
 
 # HPC@Cloud results

@@ -78,7 +78,25 @@ def scp_transfer_directory(local_path: str, remote_path: str, ip: str, username:
             )
     except Exception as e:
         error(
-            f"STDERR: ```\n{e}\n``` while transfering directory `{local_path}` to `{ip}`:`{remote_path}`"
+            f"EXCEPTION: ```\n{e}\n``` while transfering directory `{local_path}` to `{ip}`:`{remote_path}`"
+        )
+    finally:
+        ssh.close()
+
+
+def scp_download_directory(remote_path: str, local_path: str, ip: str, username: str):
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        ssh.connect(ip, username=username, timeout=3)
+        with SCPClient(ssh.get_transport()) as scp:
+            scp.get(remote_path, local_path, recursive=True)
+            info_remote(
+                ip=ip, text=f"Directory `{remote_path}` downloaded to `{local_path}`"
+            )
+    except Exception as e:
+        error(
+            f"EXCEPTION: ```\n{e}\n``` while downloading directory `{remote_path}` from `{ip}` to `{local_path}`"
         )
     finally:
         ssh.close()

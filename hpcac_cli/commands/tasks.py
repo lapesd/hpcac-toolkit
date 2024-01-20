@@ -62,7 +62,7 @@ async def run_tasks():
         completed = False
         failures_during_execution = 0
         while not completed and (
-            failures_during_execution < task.retries_before_aborting
+            failures_during_execution <= task.retries_before_aborting
         ):
             try:
                 # Check if Cluster is ready
@@ -98,7 +98,7 @@ async def run_tasks():
             finally:
                 execution_chronometer.stop()
 
-        # TODO Download task results
+        cluster.download_directory(remote_path=task.remote_outputs_dir, local_path=f"./results/{task.task_tag}")
 
         task.time_spent_spawning_cluster = cluster.time_spent_spawning_cluster
         task.time_spent_setting_up_task = setup_task_chronometer.get_elapsed_time()
@@ -109,8 +109,8 @@ async def run_tasks():
 
         total_execution_chronometer.stop()
 
-        if failures_during_execution >= task.retries_before_aborting:
-            info(
+        if failures_during_execution > task.retries_before_aborting:
+            error(
                 f"!!! Task `{task.task_tag}` aborted after {failures_during_execution} failures !!!"
             )
         else:

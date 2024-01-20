@@ -6,7 +6,7 @@ from tortoise.models import Model
 from tortoise import fields
 
 from hpcac_cli.utils.logger import info, info_remote
-from hpcac_cli.utils.ssh import ping, remote_command, scp_transfer_directory
+from hpcac_cli.utils.ssh import ping, remote_command, scp_transfer_directory, scp_download_directory
 from hpcac_cli.utils.terraform import terraform_init, terraform_apply, terraform_destroy
 
 DECIMALS = ["on_demand_price_per_hour"]
@@ -92,11 +92,11 @@ class Cluster(Model):
         self.run_command("mkdir -p /var/nfs_dir/my_files")
 
         # Then upload the local my_files contents:
-        local_my_files_path = "./my_files"
-        remote_my_files_path = "/var/nfs_dir/"
+        LOCAL_MY_FILES_PATH = "./my_files"
+        REMOTE_MY_FILES_PATH = "/var/nfs_dir/"
         scp_transfer_directory(
-            local_path=local_my_files_path,
-            remote_path=remote_my_files_path,
+            local_path=LOCAL_MY_FILES_PATH,
+            remote_path=REMOTE_MY_FILES_PATH,
             ip=self.node_ips[0],
             username=self.instance_username,
         )
@@ -104,6 +104,14 @@ class Cluster(Model):
     def clean_my_files(self):
         info(f"Cleaning remote contents at `/var/nfs_dir/my_files`...")
         self.run_command("rm -r /var/nfs_dir/my_files")
+
+    def download_directory(self, remote_path: str, local_path: str):
+        scp_download_directory(
+            local_path=local_path,
+            remote_path=remote_path,
+            ip=self.node_ips[0],
+            username=self.instance_username,
+        )
 
     def repair(self):
         if not self.is_healthy():

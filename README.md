@@ -40,11 +40,6 @@ It should create the file `~/.aws/configure` with the `default` profile.
 
 You are now ready to use HPC@Cloud!
 
-### The `cluster_init.sh` file
-
-Copy the `cluster_init.example.sh` file and rename it to `cluster_init.sh`. Edit
-this file as you like (it will be executed in every cluster node after spawn).
-
 ### The `cluster_config.yaml` file
 
 To create a cluster configuration, copy the `cluster_config.example.yaml` file
@@ -52,7 +47,7 @@ and rename it to `cluster_config.yaml`. Edit the file as you like, and then run
 from the command-line:
 
 ```shell
-make create-cluster
+hpcac create-cluster
 ```
 
 After the execution completes, the cluster will be available over SSH
@@ -61,28 +56,19 @@ connection.
 To destroy your cluster, run:
 
 ```shell
-make destroy-cluster
+hpcac destroy-cluster
 ```
 
-### The `mpi_run.yaml` file and the `my_files` directory
+### The `tasks_config.yaml` file and the `my_files` directory
 
 Place all the files you want to transfer to the cluster inside the `my_files` folder.
-To setup a MPI workload to be executed, copy the `mpi_run.example.yaml` file
-and rename it to `mpi_run.yaml`. Edit the file as you like, and then run
+To setup a task to be executed in the cluster, copy the `tasks_config.example.yaml` file
+and rename it to `tasks_config.yaml`. Edit the file as you like, and then run
 from the command-line:
 
 ```shell
-make launch-mpi-jobs
+hpcac run-tasks
 ```
-
-After running your experiments, execute the following to export results in CSV format:
-
-```shell
-make export
-```
-
-Results will be saved at: `./exported_results.csv`
-
 
 # Publications
 
