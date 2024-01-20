@@ -1,8 +1,7 @@
 # HPC@Cloud Toolkit
 
 This repository contains a dockerized environment and source code for the
-HPC@Cloud toolkit, comprised of a command-line interface for generating
-Terraform plans for Cloud HPC clusters.
+HPC@Cloud toolkit, comprised of a command-line interface for managing cloud infrastructure  for HPC applications.
 
 # Contributing
 
@@ -15,34 +14,20 @@ recommended to use a Linux distro or MacOS.
 - Install [docker](https://www.docker.com/)
 - Install [terraform](https://developer.hashicorp.com/terraform/install?product_intent=terraform)
 - Install [aws cli](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html), if you plan to use AWS
-- Install [pyenv](https://github.com/pyenv/pyenv#installation) and set a virtual environment
-  for Python 3.11 (you'll need a bunch of other dependencies to successfully use pyenv, refer to it's own documentation or install any package required if you get errors during pyenv's installation)
-- Install [poetry](https://python-poetry.org/)
+- Install [python](https://www.python.org/downloads/) version 3.11 or higher (ideally, install [pyenv](https://github.com/pyenv/pyenv#installation) and setup a virtual environment for HPC@Cloud)
 
 ### First time setup
 
-1. Run Docker and launch the dev containers:
+1. Run Docker and launch the dev containers with the following:
 
 ```shell
 make init
 ```
 
-2. Launch a Python environment with Poetry:
+3. You then can install HPC@Cloud and its dependencies with the command below. You may need to install `libpq-dev` or other packages to be able to compile `psycopg2`:
 
 ```shell
-poetry shell
-```
-
-3. You then can install the dependencies with the command below. You may need to install `libpq-dev` or other packages to be able to compile `psycopg2`:
-
-```shell
-poetry install
-```
-
-3. Run Django migrations:
-
-```shell
-python manage.py migrate
+make install
 ```
 
 4. If you plan to use AWS, generate credentials (ACCESS and SECRET keys) and run the following to create a default profile:

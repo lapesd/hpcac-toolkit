@@ -5,9 +5,9 @@ from tortoise.queryset import QuerySet
 from tortoise.models import Model
 from tortoise import fields
 
-from hpcac_cli.utils.logger import info
-from hpcac_cli.utils.ssh import ping, remote_command, scp_transfer_file
-
+from hpcac_cli.utils.logger import info, info_remote
+from hpcac_cli.utils.ssh import ping, remote_command, scp_transfer_directory
+from hpcac_cli.utils.terraform import terraform_init, terraform_apply, terraform_destroy
 
 DECIMALS = ["on_demand_price_per_hour"]
 BOOLEANS = ["use_spot", "use_efs", "use_fsx", "use_efa"]
@@ -39,10 +39,25 @@ class Cluster(Model):
             f"Cluster {self.cluster_tag}: {self.node_count}x {self.node_instance_type}"
         )
 
-    def run_command(self, command: str):
-        remote_command(
-            ip=self.node_ips[0], username=self.instance_username, command=command
-        )
+    def run_command(
+        self,
+        command: str,
+        raise_exception: bool = False,
+        run_in_all_nodes: bool = False,
+    ):
+        if run_in_all_nodes:
+            for node_ip in self.node_ips:
+                result = remote_command(
+                    ip=node_ip, username=self.instance_username, command=command
+                )
+                if raise_exception and not result:
+                    raise Exception(f"Aborting...")
+        else:
+            result = remote_command(
+                ip=self.node_ips[0], username=self.instance_username, command=command
+            )
+            if raise_exception and not result:
+                raise Exception(f"Aborting...")
 
     def is_healthy(self) -> bool:
         info(f"Checking Cluster `{self.cluster_tag}` health...")
@@ -54,26 +69,51 @@ class Cluster(Model):
         info(f"Cluster `{self.cluster_tag}` is healthy!")
         return True
 
+    def generate_hostfile(self, mpi_distribution: str):
+        info(
+            f"Generating {mpi_distribution} hostfile for Cluster `{self.cluster_tag}`..."
+        )
+        if mpi_distribution.lower() != "openmpi":
+            raise NotImplementedError(
+                f"Hostfile generation for {mpi_distribution} not implemented."
+            )
+
+        # Generate Hostfile for OpenMPI:
+        base_host = "10.0.0.1"
+        HOSTFILE_PATH = "./my_files/hostfile"
+        if os.path.exists(HOSTFILE_PATH):
+            os.remove(HOSTFILE_PATH)
+        with open(HOSTFILE_PATH, "w") as file:
+            for i in range(self.node_count):
+                file.write(f"{base_host}{i} slots={self.vcpus_per_node}\n")
+
     def upload_my_files(self):
-        info(f"Transfering `my_files` contents to Cluster `{self.cluster_tag}`")
         # First make sure the remote `my_files` directory exists:
         self.run_command("mkdir -p /var/nfs_dir/my_files")
 
         # Then upload the local my_files contents:
-        my_files = "./my_files"
-        for filename in os.listdir(my_files):
-            local_file_path = os.path.join(my_files, filename)
-            if os.path.isfile(local_file_path):
-                scp_transfer_file(
-                    local_path=local_file_path,
-                    remote_path=f"/var/nfs_dir/my_files/{filename}",
-                    ip=self.node_ips[0],
-                    username=self.instance_username,
-                )
+        local_my_files_path = "./my_files"
+        remote_my_files_path = "/var/nfs_dir/"
+        scp_transfer_directory(
+            local_path=local_my_files_path,
+            remote_path=remote_my_files_path,
+            ip=self.node_ips[0],
+            username=self.instance_username,
+        )
 
     def clean_my_files(self):
         info(f"Cleaning remote contents at `/var/nfs_dir/my_files`...")
         self.run_command("rm -r /var/nfs_dir/my_files")
+
+    def repair(self):
+        if not self.is_healthy():
+            info(f"Repairing Cluster `{self.cluster_tag}`...")
+            terraform_init()
+            terraform_destroy()
+            terraform_apply()
+            info(f"Repaired cluster `{self.cluster_tag}!")
+        else:
+            info(f"Cluster `{self.cluster_tag}` is already repaired!")
 
 
 async def is_cluster_tag_alredy_used(cluster_tag: str) -> bool:

@@ -4,7 +4,7 @@ import asyncio
 
 from hpcac_cli.db import init_db
 from hpcac_cli.utils.logger import error, info
-from hpcac_cli.commands.cluster import create_cluster, destroy_cluster
+from hpcac_cli.commands.clusters import create_cluster, destroy_cluster
 from hpcac_cli.commands.tasks import run_tasks
 
 

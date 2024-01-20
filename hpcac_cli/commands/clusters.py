@@ -54,6 +54,15 @@ async def create_cluster():
         info("Cluster creation CANCELLED by the user.")
         return
 
+    # Check if there is already a cluster online and mark it as offline
+    try:
+        cluster = await fetch_latest_online_cluster()
+    except:
+        pass
+    else:
+        cluster.is_online = False
+        await cluster.save()
+
     # Start Chronometer
     cluster_spawn_chronometer = Chronometer()
     cluster_spawn_chronometer.start()
@@ -82,16 +91,23 @@ async def create_cluster():
     terraform_init()
     terraform_apply()
 
-    # Stop Chronometer
-    cluster_spawn_chronometer.stop()
-
-    info("Your cluster is ready! Remember to destroy it after using!!!")
     cluster.is_online = True
-    cluster.time_spent_spawning_cluster = cluster_spawn_chronometer.get_elapsed_time()
     cluster.node_ips = get_cluster_nodes_ip_addresses(
         cluster_tag=cluster.cluster_tag, region=cluster.region
     )
     await cluster.save()
+
+    # Run cluster init commands:
+    for command in cluster_config["init_commands"]:
+        cluster.run_command(command=command, run_in_all_nodes=True)
+
+    # Stop Chronometer
+    cluster_spawn_chronometer.stop()
+    cluster.time_spent_spawning_cluster = cluster_spawn_chronometer.get_elapsed_time()
+    await cluster.save()
+
+    info("Your cluster is ready! Remember to destroy it after using!!!")
+    info(f"Your Cluster public IP addresses: {cluster.node_ips}")
 
 
 async def destroy_cluster():

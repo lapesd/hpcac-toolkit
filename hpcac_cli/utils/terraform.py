@@ -21,8 +21,12 @@ def generate_cluster_tfvars_file(cluster_config: dict) -> str:
     # Generate terraform.tfvars file:
     with open(f"{TF_DIR}/terraform.tfvars", "w") as output_tfvars_file:
         for key, value in cluster_config.items():
-            if key not in ["provider"]:  # provider is not a tfvar
-                if isinstance(value, (int, float)) or (
+            if key not in ["provider", "init_commands"]:  # provider is not a tfvar
+                if isinstance(value, bool):
+                    output_tfvars_file.write(
+                        f'{key} = {"true" if value else "false"}\n'
+                    )
+                elif isinstance(value, (int, float)) or (
                     isinstance(value, str) and value.isdigit()
                 ):
                     output_tfvars_file.write(f"{key} = {value}\n")

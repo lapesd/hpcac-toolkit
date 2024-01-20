@@ -285,18 +285,6 @@ resource "null_resource" "setup_cluster_nodes_ssh" {
       "chmod 600 /home/ec2-user/.ssh/id_rsa"
     ]
   }
-
-  # RUN cluster-init script
-  provisioner "file" {
-    source      = "../cluster_init.sh"
-    destination = "/tmp/cluster_init.sh"
-  }
-  provisioner "remote-exec" {
-    inline = [
-      "chmod +x /tmp/cluster_init.sh",
-      "/tmp/cluster_init.sh",
-    ]
-  }
 }
 
 resource "null_resource" "setup_cluster_nodes_efs" {
@@ -360,7 +348,7 @@ output "fsx_lustre_dns_name" {
   value       = var.use_fsx ? aws_fsx_lustre_file_system.lustre_fsx[0].dns_name : "No Lustre FSx"
 }
 
-output "cluster_entrypoint_ip" {
-  description = "Entrypoint node public IP"
-  value       = aws_instance.cluster_node[0].public_ip
-}
+# output "cluster_entrypoint_ip" {
+#   description = "Entrypoint node public IP"
+#   value       = aws_instance.cluster_node[0].public_ip
+# }

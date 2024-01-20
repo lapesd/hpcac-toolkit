@@ -38,19 +38,82 @@ async def run_tasks():
     # Run tasks serially:
     for i, task in enumerate(task_objects):
         # Create chronometers for task:
-        setup_chronometer = Chronometer()
-        checkpoint_chronometer = Chronometer()
-        restoration_chronometer = Chronometer()
+        setup_task_chronometer = Chronometer()
         execution_chronometer = Chronometer()
-
-        # Check that Cluster is ready:
-        if not cluster.is_healthy():
-            raise Exception(f"Cluster is not healthy!")
+        _checkpoint_chronometer = (
+            Chronometer()
+        )  # TODO: add logic for periodic/preemptive checkpointing (system-level)
+        restoration_chronometer = Chronometer()
+        total_execution_chronometer = Chronometer()
+        total_execution_chronometer.start()
 
         # Setup task:
-        setup_chronometer.start()
+        setup_task_chronometer.start()
         # Re-upload my_files:
         cluster.clean_my_files()
+        cluster.generate_hostfile(mpi_distribution="openmpi")
         cluster.upload_my_files()
         # Run Task setup command
-        cluster.run_command(task.setup_command)
+        cluster.run_command(task.setup_command, raise_exception=True)
+        setup_task_chronometer.stop()
+
+        # Run Task:
+        first_run = True
+        completed = False
+        failures_during_execution = 0
+        while not completed and (
+            failures_during_execution < task.retries_before_aborting
+        ):
+            try:
+                # Check if Cluster is ready
+                if not cluster.is_healthy():
+                    # Repair Cluster
+                    restoration_chronometer.start()
+                    cluster.repair()
+                    restoration_chronometer.stop()
+
+                    # Setup task:
+                    setup_task_chronometer.resume()
+                    # Re-upload my_files:
+                    cluster.clean_my_files()
+                    cluster.generate_hostfile(mpi_distribution="openmpi")
+                    cluster.upload_my_files()
+                    # Run Task setup command
+                    cluster.run_command(task.setup_command, raise_exception=True)
+                    setup_task_chronometer.stop()
+
+                if first_run:
+                    # Execute run command:
+                    execution_chronometer.start()
+                    cluster.run_command(task.run_command, raise_exception=True)
+                else:
+                    # Execute restart command:
+                    execution_chronometer.resume()
+                    cluster.run_command(task.restart_command, raise_exception=True)
+
+            except:
+                failures_during_execution += 1
+            else:
+                completed = True
+            finally:
+                execution_chronometer.stop()
+
+        # TODO Download task results
+
+        task.time_spent_spawning_cluster = cluster.time_spent_spawning_cluster
+        task.time_spent_setting_up_task = setup_task_chronometer.get_elapsed_time()
+        task.time_spent_restoring_cluster = restoration_chronometer.get_elapsed_time()
+        task.time_spent_executing_task = execution_chronometer.get_elapsed_time()
+        task.time_spent_checkpointing = _checkpoint_chronometer.get_elapsed_time()
+        await task.save()
+
+        total_execution_chronometer.stop()
+
+        if failures_during_execution >= task.retries_before_aborting:
+            info(
+                f"!!! Task `{task.task_tag}` aborted after {failures_during_execution} failures !!!"
+            )
+        else:
+            info(
+                f"!!! Task `{task.task_tag}` completed in {total_execution_chronometer.get_elapsed_time()} seconds !!!\n\n"
+            )
