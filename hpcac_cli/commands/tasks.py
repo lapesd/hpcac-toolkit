@@ -1,10 +1,8 @@
-import time
-
 from hpcac_cli.models.cluster import Cluster, fetch_latest_online_cluster
 from hpcac_cli.models.task import Task, insert_task_record, is_task_tag_alredy_used
 
 from hpcac_cli.utils.chronometer import Chronometer
-from hpcac_cli.utils.logger import error, info, print_map
+from hpcac_cli.utils.logger import error, info, print_map, info_task
 from hpcac_cli.utils.parser import parse_yaml
 
 
@@ -47,58 +45,104 @@ async def run_tasks():
         total_execution_chronometer = Chronometer()
         total_execution_chronometer.start()
 
-        # Setup task:
+        # Upload task files:
         setup_task_chronometer.start()
-        # Re-upload my_files:
+        info_task(
+            task_tag=task.task_tag,
+            text="Uploading Task files and generating hostfile...",
+        )
         cluster.clean_my_files()
         cluster.generate_hostfile(mpi_distribution="openmpi")
         cluster.upload_my_files()
-        # Run Task setup command
-        cluster.run_command(task.setup_command, raise_exception=True)
         setup_task_chronometer.stop()
 
         # Run Task:
+        attempt = 1
         first_run = True
         completed = False
         failures_during_execution = 0
         while not completed and (
             failures_during_execution <= task.retries_before_aborting
         ):
+            info_task(
+                task_tag=task.task_tag,
+                text=f"Starting Task loop | attempt number `{attempt}`",
+            )
             try:
                 # Check if Cluster is ready
                 if not cluster.is_healthy():
+                    info_task(
+                        task_tag=task.task_tag,
+                        text=f"Cluster is in bad condition, starting repairs | attempt number `{attempt}`",
+                    )
                     # Repair Cluster
                     restoration_chronometer.start()
-                    cluster.repair()
+                    await cluster.repair()
                     restoration_chronometer.stop()
 
-                    # Setup task:
-                    setup_task_chronometer.resume()
-                    # Re-upload my_files:
-                    cluster.clean_my_files()
-                    cluster.generate_hostfile(mpi_distribution="openmpi")
-                    cluster.upload_my_files()
-                    # Run Task setup command
-                    cluster.run_command(task.setup_command, raise_exception=True)
-                    setup_task_chronometer.stop()
+                # Setup task:
+                setup_task_chronometer.start()
+                info_task(
+                    task_tag=task.task_tag,
+                    text=f"Starting Task setup | attempt number `{attempt}`",
+                )
+                cluster.run_command(
+                    task.setup_command,
+                    ip_list_to_run=[cluster.node_ips[0]],
+                    raise_exception=True,
+                )
+                info_task(
+                    task_tag=task.task_tag,
+                    text=f"Task setup completed! | attempt number `{attempt}`",
+                )
+                setup_task_chronometer.stop()
 
                 if first_run:
                     # Execute run command:
+                    info_task(
+                        task_tag=task.task_tag,
+                        text=f"Starting Task execution | attempt number `{attempt}`",
+                    )
                     execution_chronometer.start()
-                    cluster.run_command(task.run_command, raise_exception=True)
+                    cluster.run_command(
+                        task.run_command,
+                        ip_list_to_run=[cluster.node_ips[0]],
+                        raise_exception=True,
+                    )
                 else:
                     # Execute restart command:
+                    info_task(
+                        task_tag=task.task_tag,
+                        text=f"Resuming Task execution | attempt number `{attempt}`",
+                    )
                     execution_chronometer.resume()
-                    cluster.run_command(task.restart_command, raise_exception=True)
+                    cluster.run_command(
+                        task.restart_command,
+                        ip_list_to_run=[cluster.node_ips[0]],
+                        raise_exception=True,
+                    )
 
-            except:
+            except Exception as e:
+                info_task(f"Exception detected: {e}")
+                info_task(
+                    task_tag=task.task_tag, text=f"Task attempt `{attempt}` failed! :("
+                )
                 failures_during_execution += 1
             else:
+                info_task(
+                    task_tag=task.task_tag,
+                    text=f"Task completed successfully at attempt `{attempt}` !!!",
+                )
                 completed = True
             finally:
+                attempt += 1
                 execution_chronometer.stop()
 
-        cluster.download_directory(remote_path=task.remote_outputs_dir, local_path=f"./results/{task.task_tag}")
+        info_task(task_tag=task.task_tag, text=f"Starting download of Task results...")
+        cluster.download_directory(
+            remote_path=task.remote_outputs_dir, local_path=f"./results/{task.task_tag}"
+        )
+        info_task(task_tag=task.task_tag, text=f"Completed download of tasks results!")
 
         task.time_spent_spawning_cluster = cluster.time_spent_spawning_cluster
         task.time_spent_setting_up_task = setup_task_chronometer.get_elapsed_time()

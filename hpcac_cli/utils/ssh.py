@@ -50,16 +50,17 @@ def remote_command(ip: str, username: str, command: str) -> bool:
                 warning(
                     f"STDERR: ```\n{stderr_text}\n``` while running remote command `{command}` at Node: `{ip}`"
                 )
+            if "PRTE has lost communication with a remote daemon" in stderr_text:
+                success = False
+                error(f"Node {ip} just crashed!!!")
         else:
             error(
                 f"STDERR: ```\n{stderr_text}\n``` while running remote command `{command}` at Node: `{ip}`"
             )
-
     except Exception as e:
         error(
             f"EXCEPTION: ```\n{e}\n``` while running remote command `{command}` at Node: `{ip}"
         )
-
     finally:
         ssh.close()
 

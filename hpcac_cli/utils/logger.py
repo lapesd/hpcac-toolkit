@@ -48,6 +48,12 @@ def info_terraform(text: str) -> None:
     )
 
 
+def info_task(task_tag: str, text: str) -> None:
+    print(
+        f"{Fore.RESET}[{Fore.GREEN}INFO{Fore.RESET}] {Fore.RESET}[{Fore.CYAN}TASK `{task_tag}`{Fore.RESET}] {Fore.LIGHTCYAN_EX}{text}{Fore.RESET}",
+    )
+
+
 def print_map(map: dict) -> None:
     info("Your config is:")
     print(json.dumps(map, indent=4, sort_keys=True))

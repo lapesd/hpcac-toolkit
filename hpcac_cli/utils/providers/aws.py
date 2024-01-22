@@ -1,8 +1,9 @@
 import json
+import time
 
 import boto3
 
-from hpcac_cli.utils.logger import info
+from hpcac_cli.utils.logger import info, warning
 
 
 async def get_instance_type_details(
@@ -52,6 +53,31 @@ async def get_instance_type_details(
         "on_demand_price_per_hour": on_demand_price,
         # 'spot_price_per_hour': spot_price  # Spot price retrieval can be added here
     }
+
+
+def get_cluster_efs_dns_name(cluster_tag: str, region: str) -> str:
+    info(f"Searching for EFS with cluster tag `{cluster_tag}` in region `{region}`...")
+    efs_client = boto3.client("efs", region_name=region)
+    file_systems = efs_client.describe_file_systems()
+    for fs in file_systems["FileSystems"]:
+        tags = efs_client.describe_tags(FileSystemId=fs["FileSystemId"])["Tags"]
+        if any(tag["Value"] == cluster_tag for tag in tags):
+            info(f"EFS with cluster tag `{cluster_tag}` found: {fs['FileSystemId']}")
+
+            efs_id = fs["FileSystemId"]
+            efs_state = fs["LifeCycleState"]
+            while efs_state != "available":
+                info("Cluster EFS is not ready yet...")
+                time.sleep(10)
+                efs_state = efs_client.describe_file_systems(FileSystemId=efs_id)[
+                    "FileSystems"
+                ][0]["LifeCycleState"]
+
+            dns_name = f"{efs_id}.efs.{region}.amazonaws.com"
+            info(f"Amazon EFS `{dns_name}` is ready!")
+            return dns_name
+
+    warning(f"No EFS found with cluster tag `{cluster_tag}`.")
 
 
 def get_cluster_nodes_ip_addresses(cluster_tag: str, region: str) -> list[str]:

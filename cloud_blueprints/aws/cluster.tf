@@ -287,30 +287,6 @@ resource "null_resource" "setup_cluster_nodes_ssh" {
   }
 }
 
-resource "null_resource" "setup_cluster_nodes_efs" {
-  count = var.use_efs ? var.node_count : 0
-  connection {
-    type        = "ssh"
-    host        = var.use_spot ? aws_spot_instance_request.spot_cluster_node[count.index].public_ip : aws_instance.cluster_node[count.index].public_ip
-    user        = "ec2-user"
-    private_key = file(var.private_rsa_key_path)
-  }
-
-  # Setup AWS EFS
-  provisioner "remote-exec" {
-    inline = [
-      "sudo yum install -y nfs-utils",
-      "sudo mkdir -p /var/nfs_dir",
-      "sleep 120",
-      "sudo mount -t nfs ${aws_efs_file_system.cluster_efs[0].dns_name}:/ /var/nfs_dir",
-      "sudo chmod ugo+rwx /var/nfs_dir",
-      "sudo bash -c 'echo \"${aws_efs_file_system.cluster_efs[0].dns_name}:/ /var/nfs_dir nfs defaults,_netdev 0 0\" >> /etc/fstab'",
-    ]
-  }
-
-  depends_on = [aws_efs_file_system.cluster_efs, aws_efs_mount_target.efs_mt[0], null_resource.setup_cluster_nodes_ssh]
-}
-
 resource "aws_ec2_tag" "spot_cluster_node_tags" {
   count = var.use_spot ? var.node_count : 0
 

@@ -1,13 +1,24 @@
-import os
+import concurrent.futures
 from decimal import Decimal
+import os
+import time
 
 from tortoise.queryset import QuerySet
 from tortoise.models import Model
 from tortoise import fields
 
-from hpcac_cli.utils.logger import info, info_remote
-from hpcac_cli.utils.ssh import ping, remote_command, scp_transfer_directory, scp_download_directory
-from hpcac_cli.utils.terraform import terraform_init, terraform_apply, terraform_destroy
+from hpcac_cli.utils.logger import info
+from hpcac_cli.utils.providers.aws import (
+    get_cluster_efs_dns_name,
+    get_cluster_nodes_ip_addresses,
+)
+from hpcac_cli.utils.ssh import (
+    ping,
+    remote_command,
+    scp_transfer_directory,
+    scp_download_directory,
+)
+from hpcac_cli.utils.terraform import terraform_refresh, terraform_apply
 
 DECIMALS = ["on_demand_price_per_hour"]
 BOOLEANS = ["use_spot", "use_efs", "use_fsx", "use_efa"]
@@ -42,31 +53,36 @@ class Cluster(Model):
     def run_command(
         self,
         command: str,
+        ip_list_to_run: list[str],
         raise_exception: bool = False,
-        run_in_all_nodes: bool = False,
     ):
-        if run_in_all_nodes:
-            for node_ip in self.node_ips:
-                result = remote_command(
-                    ip=node_ip, username=self.instance_username, command=command
-                )
+        def task(ip):
+            return remote_command(
+                ip=ip, username=self.instance_username, command=command
+            )
+
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future_to_ip = {executor.submit(task, ip): ip for ip in ip_list_to_run}
+            for future in concurrent.futures.as_completed(future_to_ip):
+                _ip = future_to_ip[future]
+                result = future.result()
                 if raise_exception and not result:
                     raise Exception(f"Aborting...")
-        else:
-            result = remote_command(
-                ip=self.node_ips[0], username=self.instance_username, command=command
-            )
-            if raise_exception and not result:
-                raise Exception(f"Aborting...")
 
     def is_healthy(self) -> bool:
-        info(f"Checking Cluster `{self.cluster_tag}` health...")
-        for ip in self.node_ips:
-            is_alive = ping(ip=ip, username=self.instance_username)
-            if not is_alive:
-                info(f"Cluster `{self.cluster_tag}` is NOT healthy!")
-                return False
-        info(f"Cluster `{self.cluster_tag}` is healthy!")
+        def ping_node(ip):
+            return ping(ip=ip, username=self.instance_username)
+
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future_to_ip = {executor.submit(ping_node, ip): ip for ip in self.node_ips}
+            for future in concurrent.futures.as_completed(future_to_ip):
+                ip = future_to_ip[future]
+                is_alive = future.result()
+                if not is_alive:
+                    info(
+                        f"Cluster `{self.cluster_tag}` is NOT healthy due to node: {ip}"
+                    )
+                    return False
         return True
 
     def generate_hostfile(self, mpi_distribution: str):
@@ -89,7 +105,9 @@ class Cluster(Model):
 
     def upload_my_files(self):
         # First make sure the remote `my_files` directory exists:
-        self.run_command("mkdir -p /var/nfs_dir/my_files")
+        self.run_command(
+            "mkdir -p /var/nfs_dir/my_files", ip_list_to_run=[self.node_ips[0]]
+        )
 
         # Then upload the local my_files contents:
         LOCAL_MY_FILES_PATH = "./my_files"
@@ -101,9 +119,53 @@ class Cluster(Model):
             username=self.instance_username,
         )
 
+    def setup_efs(self, ip_list_to_run: list[str]):
+        if self.provider != "aws":
+            raise NotImplementedError(
+                "Setup EFS is currently only implemented for AWS."
+            )
+
+        efs_dns_name = get_cluster_efs_dns_name(
+            cluster_tag=self.cluster_tag, region=self.region
+        )
+        commands = [
+            "sudo yum install -y nfs-utils",
+            "sudo mkdir -p /var/nfs_dir",
+        ]
+        for command in commands:
+            self.run_command(
+                command=command,
+                ip_list_to_run=ip_list_to_run,
+                raise_exception=True,
+            )
+
+        # Mount EFS to /var/nfs_dir
+        mount_command = f"sudo mount -t nfs {efs_dns_name}:/ /var/nfs_dir"
+        mounted = False
+        while not mounted:
+            for ip in self.node_ips:
+                mounted = remote_command(
+                    ip=ip, username=self.instance_username, command=mount_command
+                )
+                time.sleep(5)
+
+        commands = [
+            "sudo chmod ugo+rwx /var/nfs_dir",
+            f"sudo bash -c 'echo \"{efs_dns_name}:/ /var/nfs_dir nfs defaults,_netdev 0 0\" >> /etc/fstab'",
+        ]
+        for command in commands:
+            self.run_command(
+                command=command,
+                ip_list_to_run=ip_list_to_run,
+                raise_exception=True,
+            )
+
     def clean_my_files(self):
         info(f"Cleaning remote contents at `/var/nfs_dir/my_files`...")
-        self.run_command("rm -r /var/nfs_dir/my_files")
+        self.run_command(
+            "if [ -d /var/nfs_dir/my_files ]; then rm -r /var/nfs_dir/my_files; fi",
+            ip_list_to_run=[self.node_ips[0]],
+        )
 
     def download_directory(self, remote_path: str, local_path: str):
         scp_download_directory(
@@ -113,15 +175,24 @@ class Cluster(Model):
             username=self.instance_username,
         )
 
-    def repair(self):
-        if not self.is_healthy():
-            info(f"Repairing Cluster `{self.cluster_tag}`...")
-            terraform_init()
-            terraform_destroy()
+    async def repair(self):
+        info(f"Repairing Cluster `{self.cluster_tag}`...")
+        old_ips = self.node_ips
+        while not self.is_healthy():
+            terraform_refresh()
             terraform_apply()
-            info(f"Repaired cluster `{self.cluster_tag}!")
-        else:
-            info(f"Cluster `{self.cluster_tag}` is already repaired!")
+            new_ips = get_cluster_nodes_ip_addresses(
+                cluster_tag=self.cluster_tag, region=self.region
+            )
+            self.node_ips = new_ips
+            await self.save()
+
+        new_nodes_ips = [ip for ip in new_ips if ip not in old_ips]
+        if self.use_efs:
+            # Reconnect destroyed nodes to EFS:
+            self.setup_efs(ip_list_to_run=new_nodes_ips)
+
+        info(f"Repaired cluster `{self.cluster_tag}!")
 
 
 async def is_cluster_tag_alredy_used(cluster_tag: str) -> bool:

@@ -97,9 +97,13 @@ async def create_cluster():
     )
     await cluster.save()
 
+    # Setup EFS in all nodes:
+    if cluster.use_efs:
+        cluster.setup_efs(ip_list_to_run=cluster.node_ips)
+
     # Run cluster init commands:
     for command in cluster_config["init_commands"]:
-        cluster.run_command(command=command, run_in_all_nodes=True)
+        cluster.run_command(command=command, ip_list_to_run=cluster.node_ips)
 
     # Stop Chronometer
     cluster_spawn_chronometer.stop()
