@@ -123,9 +123,8 @@ async def run_tasks():
                     )
 
             except Exception as e:
-                info_task(f"Exception detected: {e}")
                 info_task(
-                    task_tag=task.task_tag, text=f"Task attempt `{attempt}` failed! :("
+                    task_tag=task.task_tag, text=f"Task attempt `{attempt}` failed! with exception: {e} :("
                 )
                 failures_during_execution += 1
             else:

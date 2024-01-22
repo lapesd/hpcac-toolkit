@@ -7,7 +7,7 @@ from tortoise.queryset import QuerySet
 from tortoise.models import Model
 from tortoise import fields
 
-from hpcac_cli.utils.logger import info
+from hpcac_cli.utils.logger import info, info_remote, warning, error
 from hpcac_cli.utils.providers.aws import (
     get_cluster_efs_dns_name,
     get_cluster_nodes_ip_addresses,
@@ -18,7 +18,8 @@ from hpcac_cli.utils.ssh import (
     scp_transfer_directory,
     scp_download_directory,
 )
-from hpcac_cli.utils.terraform import terraform_refresh, terraform_apply
+from hpcac_cli.utils.terraform import terraform_refresh
+
 
 DECIMALS = ["on_demand_price_per_hour"]
 BOOLEANS = ["use_spot", "use_efs", "use_fsx", "use_efa"]
@@ -40,6 +41,7 @@ class Cluster(Model):
     use_fsx = fields.BooleanField(default=False)
     use_efa = fields.BooleanField(default=False)
     node_ips = fields.JSONField(default=list)
+    init_commands = fields.JSONField(default=list)
     time_spent_spawning_cluster = fields.IntField(default=0)
     on_demand_price_per_hour = fields.DecimalField(
         max_digits=12, decimal_places=4, default=Decimal(0.0)
@@ -79,7 +81,7 @@ class Cluster(Model):
                 ip = future_to_ip[future]
                 is_alive = future.result()
                 if not is_alive:
-                    info(
+                    error(
                         f"Cluster `{self.cluster_tag}` is NOT healthy due to node: {ip}"
                     )
                     return False
@@ -125,6 +127,10 @@ class Cluster(Model):
                 "Setup EFS is currently only implemented for AWS."
             )
 
+        # Need to just add a brief sleep condition here to make sure EFS dns is propagated through the VPN
+        # https://docs.aws.amazon.com/efs/latest/ug/troubleshooting-efs-mounting.html#mount-fails-propegation
+        time.sleep(120)
+
         efs_dns_name = get_cluster_efs_dns_name(
             cluster_tag=self.cluster_tag, region=self.region
         )
@@ -141,13 +147,17 @@ class Cluster(Model):
 
         # Mount EFS to /var/nfs_dir
         mount_command = f"sudo mount -t nfs {efs_dns_name}:/ /var/nfs_dir"
-        mounted = False
-        while not mounted:
-            for ip in self.node_ips:
+        for ip in self.node_ips:
+            mounted = False
+            while not mounted:
                 mounted = remote_command(
                     ip=ip, username=self.instance_username, command=mount_command
                 )
-                time.sleep(5)
+                if mounted:
+                    info_remote(ip=ip, text=f"Mounted EFS!")
+                else:
+                    warning(text=f"Couldn't mount EFS for node yet...")
+                    time.sleep(5)
 
         commands = [
             "sudo chmod ugo+rwx /var/nfs_dir",
@@ -156,6 +166,14 @@ class Cluster(Model):
         for command in commands:
             self.run_command(
                 command=command,
+                ip_list_to_run=ip_list_to_run,
+                raise_exception=True,
+            )
+
+    def run_init_commands(self, ip_list_to_run: list[str]):
+        for command in self.init_commands:
+            self.run_command(
+                command=command.strip(),
                 ip_list_to_run=ip_list_to_run,
                 raise_exception=True,
             )
@@ -178,19 +196,32 @@ class Cluster(Model):
     async def repair(self):
         info(f"Repairing Cluster `{self.cluster_tag}`...")
         old_ips = self.node_ips
-        while not self.is_healthy():
-            terraform_refresh()
-            terraform_apply()
-            new_ips = get_cluster_nodes_ip_addresses(
-                cluster_tag=self.cluster_tag, region=self.region
-            )
-            self.node_ips = new_ips
-            await self.save()
+        repaired = False
+        while not repaired:
+            if self.is_healthy():
+                repaired = True
+            else:
+                info(text="Refreshing Terraform state...")
+                time.sleep(60)  # Give some time so the terraform state is refreshed
+                terraform_refresh()
+                new_ips = get_cluster_nodes_ip_addresses(
+                    cluster_tag=self.cluster_tag, region=self.region
+                )
+                info(text=f"Old Cluster IPs = `{self.node_ips}`")
+                info(text=f"New Cluster IPs: `{new_ips}`")
+                if len(new_ips) == len(self.node_ips):
+                    self.node_ips = new_ips
+                    await self.save()
+                    repaired = True
 
         new_nodes_ips = [ip for ip in new_ips if ip not in old_ips]
+
+        # Reconnect destroyed nodes to EFS, if required:
         if self.use_efs:
-            # Reconnect destroyed nodes to EFS:
             self.setup_efs(ip_list_to_run=new_nodes_ips)
+
+        # Re-run init commands in the new node:
+        self.run_init_commands(ip_list_to_run=new_nodes_ips)
 
         info(f"Repaired cluster `{self.cluster_tag}!")
 

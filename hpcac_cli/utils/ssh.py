@@ -1,8 +1,9 @@
 from socket import timeout
+import select
 
-from scp import SCPClient
 import paramiko
 from paramiko.ssh_exception import NoValidConnectionsError, SSHException
+from scp import SCPClient
 
 from hpcac_cli.utils.logger import info_remote, error, warning
 
@@ -36,31 +37,32 @@ def remote_command(ip: str, username: str, command: str) -> bool:
         info_remote(ip=ip, text=f"Running command: `{command}`")
         ssh.connect(ip, username=username, timeout=3)
         stdin, stdout, stderr = ssh.exec_command(command)
-        exit_status = stdout.channel.recv_exit_status()
 
+        # Continuously read and print stdout as it becomes available
+        while not stdout.channel.exit_status_ready():
+            if stdout.channel.recv_ready():
+                rl, _, _ = select.select([stdout.channel], [], [], 0.0)
+                if rl:
+                    print(stdout.channel.recv(1024).decode('utf-8'), end='')
         stdout_text = stdout.read().decode().strip()
-        if stdout_text != "":
-            info_remote(ip=ip, text=stdout_text)
-
         stderr_text = stderr.read().decode().strip()
 
+        if stdout_text:
+            info_remote(ip=ip, text=stdout_text)
+
+        exit_status = stdout.channel.recv_exit_status()
         if exit_status == 0:
             success = True
-            if stderr_text != "":
-                warning(
-                    f"STDERR: ```\n{stderr_text}\n``` while running remote command `{command}` at Node: `{ip}`"
-                )
-            if "PRTE has lost communication with a remote daemon" in stderr_text:
-                success = False
-                error(f"Node {ip} just crashed!!!")
+            if stderr_text:
+                warning(f"STDERR: ```\n{stderr_text}\n``` while running remote command `{command}` at Node: `{ip}`")
+                if "PRTE has lost communication with a remote daemon" in stderr_text:
+                    success = False
+                    error(f"Node {ip} just crashed!!!")
         else:
-            error(
-                f"STDERR: ```\n{stderr_text}\n``` while running remote command `{command}` at Node: `{ip}`"
-            )
+            error(f"STDERR: ```\n{stderr_text}\n``` while running remote command `{command}` at Node: `{ip}`")
+
     except Exception as e:
-        error(
-            f"EXCEPTION: ```\n{e}\n``` while running remote command `{command}` at Node: `{ip}"
-        )
+        error(f"EXCEPTION: ```\n{e}\n``` while running remote command `{command}` at Node: `{ip}")
     finally:
         ssh.close()
 

@@ -19,6 +19,7 @@ async def upgrade(db: BaseDBAsyncClient) -> str:
     "use_fsx" BOOL NOT NULL  DEFAULT False,
     "use_efa" BOOL NOT NULL  DEFAULT False,
     "node_ips" JSONB NOT NULL,
+    "init_commands" JSONB NOT NULL,
     "time_spent_spawning_cluster" INT NOT NULL  DEFAULT 0,
     "on_demand_price_per_hour" DECIMAL(12,4) NOT NULL  DEFAULT 0
 );

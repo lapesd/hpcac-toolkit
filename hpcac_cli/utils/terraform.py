@@ -87,6 +87,8 @@ def terraform_init():
 
 def terraform_refresh():
     launch_subprocess(commands=["terraform", "refresh"])
+    launch_subprocess(commands=["terraform", "plan"])
+    launch_subprocess(commands=["terraform", "apply", "-auto-approve"])
 
 
 def terraform_apply():
