@@ -3,7 +3,10 @@ from decimal import Decimal
 from tortoise.models import Model
 from tortoise import fields
 
-from hpcac_cli.utils.logger import info
+from hpcac_cli.utils.logger import Logger
+
+
+log = Logger()
 
 
 class Task(Model):
@@ -47,8 +50,8 @@ async def insert_task_record(task_data: dict, overwrite: bool = False) -> Task:
     # Create new Task record:
     task = await Task.create(**task_data)
     if overwrite:
-        info(f"Overwritten Task `{task.task_tag}` details into Postgres!")
+        log.info(f"Overwritten Task `{task.task_tag}` details into Postgres!")
     else:
-        info(f"Inserted Task `{task.task_tag}` details into Postgres!")
+        log.info(f"Inserted Task `{task.task_tag}` details into Postgres!")
 
     return task

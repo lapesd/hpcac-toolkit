@@ -1,8 +1,7 @@
 import os
-import re
 import subprocess
 
-from hpcac_cli.utils.logger import info_terraform
+from hpcac_cli.utils.logger import Logger
 from hpcac_cli.utils.minio import (
     create_minio_bucket,
     upload_file_to_minio_bucket,
@@ -10,6 +9,7 @@ from hpcac_cli.utils.minio import (
 )
 
 
+log = Logger()
 TF_DIR = "./tmp_terraform_dir"
 TERRAFORM_FILES = ["versions.tf", "provider.tf", "cluster.tf"]
 
@@ -63,7 +63,7 @@ def get_cluster_terraform_files(cluster_config: dict):
         )
 
 
-def launch_subprocess(commands: list[str]):
+def launch_subprocess(commands: list[str], detail: str, verbose: bool = False):
     process = subprocess.Popen(
         commands,
         cwd=TF_DIR,
@@ -72,28 +72,48 @@ def launch_subprocess(commands: list[str]):
         text=True,
     )
 
-    last_line = ""
+    log.debug(text="Please wait...", detail=detail)
     for line in iter(process.stdout.readline, ""):
-        info_terraform(line)
-        last_line = line if line.strip() != "" else last_line
+        if verbose:
+            log.debug(text=line.strip(), detail=detail)
+        else:
+            pass
 
     process.stdout.close()
     process.wait()
 
 
-def terraform_init():
-    launch_subprocess(commands=["terraform", "init"])
+def terraform_init(verbose: bool = False):
+    launch_subprocess(
+        commands=["terraform", "init"], detail="terraform init", verbose=verbose
+    )
 
 
-def terraform_refresh():
-    launch_subprocess(commands=["terraform", "refresh"])
-    launch_subprocess(commands=["terraform", "plan"])
-    launch_subprocess(commands=["terraform", "apply", "-auto-approve"])
+def terraform_refresh(verbose: bool = False):
+    launch_subprocess(
+        commands=["terraform", "refresh"], detail="terraform refresh", verbose=verbose
+    )
+    launch_subprocess(
+        commands=["terraform", "plan"], detail="terraform plan", verbose=verbose
+    )
+    launch_subprocess(
+        commands=["terraform", "apply", "-auto-approve"],
+        detail="terraform apply",
+        verbose=verbose,
+    )
 
 
-def terraform_apply():
-    launch_subprocess(commands=["terraform", "apply", "-auto-approve"])
+def terraform_apply(verbose: bool = False):
+    launch_subprocess(
+        commands=["terraform", "apply", "-auto-approve"],
+        detail="terraform apply",
+        verbose=verbose,
+    )
 
 
-def terraform_destroy():
-    launch_subprocess(commands=["terraform", "destroy", "-auto-approve"])
+def terraform_destroy(verbose: bool = False):
+    launch_subprocess(
+        commands=["terraform", "destroy", "-auto-approve"],
+        detail="terraform destroy",
+        verbose=verbose,
+    )

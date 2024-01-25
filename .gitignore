@@ -164,7 +164,6 @@ cluster_config.yaml
 tasks_config.yaml
 mpi_run.yaml
 cluster_init.sh
-./my_files
 
 # HPC@Cloud results
 /results
@@ -176,3 +175,6 @@ exported_results.csv
 
 # Minio files
 /minio
+
+.python-version
+.DS_Store

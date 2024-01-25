@@ -1,4 +1,5 @@
 import json
+from typing import Optional
 
 from colorama import init, Fore
 
@@ -6,54 +7,55 @@ from colorama import init, Fore
 init()
 
 
-def log(text: str, color: str) -> None:
-    color_dict = {
+class Logger:
+    COLOR_DICT = {
         "red": Fore.RED,
-        "green": Fore.GREEN,
-        "yellow": Fore.YELLOW,
         "blue": Fore.BLUE,
-        "magenta": Fore.MAGENTA,
         "cyan": Fore.CYAN,
+        "green": Fore.GREEN,
         "white": Fore.WHITE,
+        "black": Fore.BLACK,
+        "yellow": Fore.YELLOW,
+        "magenta": Fore.MAGENTA,
+        "light_red": Fore.LIGHTRED_EX,
+        "light_cyan": Fore.LIGHTCYAN_EX,
+        "light_blue": Fore.LIGHTBLUE_EX,
+        "light_white": Fore.LIGHTWHITE_EX,
+        "light_green": Fore.LIGHTGREEN_EX,
+        "light_black": Fore.LIGHTBLACK_EX,
+        "light_yellow": Fore.LIGHTYELLOW_EX,
+        "light_magenta": Fore.LIGHTMAGENTA_EX,
     }
-    print(f"{color_dict.get(color, Fore.WHITE)}{text}{Fore.RESET}")
 
+    @staticmethod
+    def _colorize(text: str, color: str) -> str:
+        return f"{Logger.COLOR_DICT.get(color, Fore.WHITE)}{text}{Fore.RESET}"
 
-def error(text: str) -> None:
-    print(f"[{Fore.RED}ERROR{Fore.RESET}] {Fore.LIGHTRED_EX}{text}{Fore.RESET}")
+    @classmethod
+    def _log(
+        cls,
+        level: str,
+        text: str,
+        level_color: str,
+        text_color: str,
+        detail: Optional[str] = None,
+    ):
+        prefix = cls._colorize(level, level_color)
+        message = cls._colorize(text, text_color)
+        detail_msg = cls._colorize(detail, level_color)
+        if detail is not None:
+            print(f"[{prefix}] ({detail_msg}) {message}")
+        else:
+            print(f"[{prefix}] {message}")
 
+    def info(self, text: str, detail: Optional[str] = None):
+        self._log("INFO", text, "green", "light_green", detail)
 
-def warning(text: str) -> None:
-    print(f"[{Fore.YELLOW}WARNING{Fore.RESET}] {Fore.LIGHTYELLOW_EX}{text}{Fore.RESET}")
+    def error(self, text: str, detail: Optional[str] = None):
+        self._log("ERROR", text, "red", "light_red", detail)
 
+    def warning(self, text: str, detail: Optional[str] = None):
+        self._log("WARNING", text, "yellow", "light_yellow", detail)
 
-def info(text: str) -> None:
-    print(f"[{Fore.GREEN}INFO{Fore.RESET}] {Fore.WHITE}{text}{Fore.RESET}")
-
-
-def info_remote(ip: str, text: str) -> None:
-    print(
-        f"[{Fore.GREEN}INFO{Fore.RESET}] [{Fore.LIGHTGREEN_EX}{ip}{Fore.RESET}] {Fore.WHITE}{text}{Fore.RESET}"
-    )
-
-
-def info_prompt(text: str) -> None:
-    print(f"[{Fore.BLUE}PROMPT{Fore.RESET}] {Fore.LIGHTBLUE_EX}{text}{Fore.RESET}")
-
-
-def info_terraform(text: str) -> None:
-    print(
-        f"{Fore.RESET}[{Fore.GREEN}INFO{Fore.RESET}] {Fore.RESET}[{Fore.MAGENTA}TF{Fore.RESET}] {Fore.LIGHTMAGENTA_EX}{text}{Fore.RESET}",
-        end="",
-    )
-
-
-def info_task(task_tag: str, text: str) -> None:
-    print(
-        f"{Fore.RESET}[{Fore.GREEN}INFO{Fore.RESET}] {Fore.RESET}[{Fore.CYAN}TASK `{task_tag}`{Fore.RESET}] {Fore.LIGHTCYAN_EX}{text}{Fore.RESET}",
-    )
-
-
-def print_map(map: dict) -> None:
-    info("Your config is:")
-    print(json.dumps(map, indent=4, sort_keys=True))
+    def debug(self, text: str, detail: Optional[str] = None):
+        self._log("DEBUG", text, "light_black", "light_black", detail)
