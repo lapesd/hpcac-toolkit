@@ -3,13 +3,15 @@ import time
 
 import boto3
 
-from hpcac_cli.utils.logger import info, warning
+from hpcac_cli.utils.logger import Logger
+
+
+log = Logger()
 
 
 async def get_instance_type_details(
     instance_type: str, region: str = "us-east-1"
 ) -> dict:
-    info(f"Getting details for AWS instance_type `{instance_type}`...")
     ec2 = boto3.client("ec2", region_name=region)
     pricing = boto3.client("pricing", region_name=region)
 
@@ -46,7 +48,6 @@ async def get_instance_type_details(
     # Get Spot price (Note: Spot price varies frequently. This is a more complex task and might not be as straightforward)
     # For simplicity, we are not including spot pricing here. It's generally retrieved from EC2 Spot Price history.
 
-    info(f"Details for AWS instance_type: `{instance_type}` found!")
     return {
         "vcpus_per_node": vcpus,
         "memory_per_node": memory,
@@ -56,28 +57,40 @@ async def get_instance_type_details(
 
 
 def get_cluster_efs_dns_name(cluster_tag: str, region: str) -> str:
-    info(f"Searching for EFS with cluster tag `{cluster_tag}` in region `{region}`...")
+    log.debug(
+        text=f"Searching for EFS with cluster tag `{cluster_tag}` in region `{region}`...",
+        detail="get_cluster_efs_dns_name",
+    )
     efs_client = boto3.client("efs", region_name=region)
     file_systems = efs_client.describe_file_systems()
     for fs in file_systems["FileSystems"]:
         tags = efs_client.describe_tags(FileSystemId=fs["FileSystemId"])["Tags"]
         if any(tag["Value"] == cluster_tag for tag in tags):
-            info(f"EFS with cluster tag `{cluster_tag}` found: {fs['FileSystemId']}")
+            log.debug(
+                text=f"EFS with cluster tag `{cluster_tag}` found: {fs['FileSystemId']}",
+                detail="get_cluster_efs_dns_name",
+            )
 
             efs_id = fs["FileSystemId"]
             efs_state = fs["LifeCycleState"]
             while efs_state != "available":
-                info("Cluster EFS is not ready yet...")
+                log.warning(
+                    f"Couldn't reach the Cluster EFS for some reason, retrying in 10s...",
+                    detail="get_cluster_efs_dns_name",
+                )
                 time.sleep(10)
                 efs_state = efs_client.describe_file_systems(FileSystemId=efs_id)[
                     "FileSystems"
                 ][0]["LifeCycleState"]
 
             dns_name = f"{efs_id}.efs.{region}.amazonaws.com"
-            info(f"Amazon EFS `{dns_name}` is ready!")
+            log.debug(
+                text=f"Amazon EFS `{dns_name}` is ready!",
+                detail="get_cluster_efs_dns_name",
+            )
             return dns_name
 
-    warning(f"No EFS found with cluster tag `{cluster_tag}`.")
+    raise Exception(f"No EFS found with cluster_tag = `{cluster_tag}`.")
 
 
 def get_cluster_nodes_ip_addresses(cluster_tag: str, region: str) -> list[str]:

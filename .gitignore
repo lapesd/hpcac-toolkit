@@ -176,3 +176,5 @@ exported_results.csv
 
 # Minio files
 /minio
+
+.DS_Store

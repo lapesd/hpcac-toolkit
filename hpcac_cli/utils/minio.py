@@ -2,7 +2,10 @@ import os
 
 from minio import Minio
 
-from hpcac_cli.utils.logger import info
+from hpcac_cli.utils.logger import Logger
+
+
+log = Logger()
 
 
 minio = Minio(
@@ -24,9 +27,9 @@ def upload_file_to_minio_bucket(file_path: str, object_name: str, bucket_name: s
         object_name=object_name,
         file_path=os.path.abspath(file_path),
     )
-    info(
-        f"Created `{minio_response.object_name}` object with etag: `{minio_response.etag}` "
-        f"in MinIO bucket: `{bucket_name}`"
+    log.debug(
+        text=f"Created `{minio_response.object_name}` object with etag: `{minio_response.etag}` in MinIO bucket: `{bucket_name}`",
+        detail="upload_file_to_minio_bucket",
     )
 
 
@@ -36,7 +39,7 @@ def download_file_from_minio_bucket(file_path: str, object_name: str, bucket_nam
         object_name=object_name,
         file_path=file_path,
     )
-    info(
-        f"Downloaded `{minio_response.object_name}` object with etag: `{minio_response.etag}` "
-        f"in MinIO bucket: `{bucket_name}`"
+    log.debug(
+        text=f"Downloaded `{minio_response.object_name}` object with etag: `{minio_response.etag}` from MinIO bucket: `{bucket_name}`",
+        detail="download_file_from_minio_bucket",
     )

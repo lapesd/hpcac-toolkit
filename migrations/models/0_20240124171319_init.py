@@ -4,7 +4,7 @@ from tortoise import BaseDBAsyncClient
 async def upgrade(db: BaseDBAsyncClient) -> str:
     return """
         CREATE TABLE IF NOT EXISTS "cluster" (
-    "cluster_tag" VARCHAR(50) NOT NULL  PRIMARY KEY,
+    "cluster_tag" VARCHAR(128) NOT NULL  PRIMARY KEY,
     "created_at" TIMESTAMPTZ NOT NULL  DEFAULT CURRENT_TIMESTAMP,
     "is_online" BOOL NOT NULL  DEFAULT False,
     "provider" VARCHAR(50) NOT NULL,
@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS "task" (
     "checkpoint_command" TEXT,
     "restart_command" TEXT,
     "remote_outputs_dir" TEXT NOT NULL,
-    "cluster_id" VARCHAR(50) NOT NULL REFERENCES "cluster" ("cluster_tag") ON DELETE CASCADE
+    "cluster_id" VARCHAR(128) NOT NULL REFERENCES "cluster" ("cluster_tag") ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS "aerich" (
     "id" SERIAL NOT NULL PRIMARY KEY,
