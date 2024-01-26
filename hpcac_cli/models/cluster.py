@@ -121,7 +121,7 @@ class Cluster(Model):
             username=self.instance_username,
         )
 
-    def setup_efs(self, ip_list_to_run: list[str]):
+    def setup_efs(self, ip_list_to_run: list[str], wait_time: int = 120):
         if self.provider != "aws":
             raise NotImplementedError(
                 "Setup EFS is currently only implemented for AWS."
@@ -129,12 +129,11 @@ class Cluster(Model):
 
         # Need to just add a brief sleep condition here to make sure EFS dns is propagated through the VPN
         # https://docs.aws.amazon.com/efs/latest/ug/troubleshooting-efs-mounting.html#mount-fails-propegation
-        wait_time = 120  # 2 minutes
         log.debug(
             text=f"Waiting {wait_time} seconds for AWS Elastic File System DNS to be reachable...",
             detail="setup_efs",
         )
-        time.sleep(120)
+        time.sleep(wait_time)
         log.debug(text=f"Wait of {wait_time} seconds completed.", detail="setup_efs")
 
         efs_dns_name = get_cluster_efs_dns_name(
@@ -235,7 +234,7 @@ class Cluster(Model):
 
         # Reconnect destroyed nodes to EFS, if required:
         if self.use_efs:
-            self.setup_efs(ip_list_to_run=new_nodes_ips)
+            self.setup_efs(ip_list_to_run=new_nodes_ips, wait_time=0)
 
         # Re-run init commands in the new node:
         self.run_init_commands(ip_list_to_run=new_nodes_ips)

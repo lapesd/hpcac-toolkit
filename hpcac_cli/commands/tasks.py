@@ -4,6 +4,7 @@ from hpcac_cli.models.task import Task, insert_task_record, is_task_tag_alredy_u
 from hpcac_cli.utils.chronometer import Chronometer
 from hpcac_cli.utils.logger import Logger
 from hpcac_cli.utils.parser import parse_yaml
+from hpcac_cli.utils.providers.aws import get_cluster_nodes_ip_addresses
 
 
 log = Logger()
@@ -63,11 +64,12 @@ async def run_tasks():
         cluster.clean_my_files()
         cluster.generate_hostfile(mpi_distribution="openmpi")
         cluster.upload_my_files()
+        entrypoint_ip = get_cluster_nodes_ip_addresses(
+            cluster_tag=cluster.cluster_tag, region=cluster.region
+        )[0]
         cluster.run_command(
             task.setup_command,
-            ip_list_to_run=[
-                cluster.node_ips[0]
-            ],  # TODO: check if the node selection affects execution time
+            ip_list_to_run=[entrypoint_ip],
             raise_exception=True,
         )
         setup_task_chronometer.stop()
@@ -79,9 +81,7 @@ async def run_tasks():
         try:
             cluster.run_command(
                 task.run_command,
-                ip_list_to_run=[
-                    cluster.node_ips[0]
-                ],  # TODO: check if the node selection affects execution time
+                ip_list_to_run=[entrypoint_ip],
                 raise_exception=True,
             )
         except:
@@ -114,15 +114,16 @@ async def run_tasks():
             log.info(
                 f"Cluster `{cluster.cluster_tag}` repaired successfully!", detail=detail
             )
+            entrypoint_ip = get_cluster_nodes_ip_addresses(
+                cluster_tag=cluster.cluster_tag, region=cluster.region
+            )[0]
 
             log.info(f"Retrying execution of Task `{task.task_tag}`...", detail=detail)
             execution_chronometer.resume()
             try:
                 cluster.run_command(
                     task.restart_command,
-                    ip_list_to_run=[
-                        cluster.node_ips[0]
-                    ],  # TODO: check if the node selection affects execution time
+                    ip_list_to_run=[entrypoint_ip],
                     raise_exception=True,
                 )
             except:

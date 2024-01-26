@@ -1,5 +1,6 @@
 from socket import timeout
 import select
+import time
 
 import paramiko
 from paramiko.ssh_exception import NoValidConnectionsError, SSHException
@@ -41,6 +42,8 @@ def remote_command(ip: str, username: str, command: str) -> bool:
 
         # Continuously read and print stdout as it becomes available
         while not stdout.channel.exit_status_ready():
+            log.debug(f"Waiting for ssh command: `{command}` stdout, stderr...")
+            time.sleep(0.1)
             if stdout.channel.recv_ready():
                 rl, _, _ = select.select([stdout.channel], [], [], 0.0)
                 if rl:
