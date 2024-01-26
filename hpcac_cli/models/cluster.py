@@ -58,10 +58,11 @@ class Cluster(Model):
         command: str,
         ip_list_to_run: list[str],
         raise_exception: bool = False,
+        retries: int = 0,
     ):
         def task(ip):
             return remote_command(
-                ip=ip, username=self.instance_username, command=command
+                ip=ip, username=self.instance_username, command=command, retries=retries
             )
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
@@ -152,6 +153,7 @@ class Cluster(Model):
                 command=command,
                 ip_list_to_run=ip_list_to_run,
                 raise_exception=True,
+                retries=5,
             )
 
         # Mount EFS to /var/nfs_dir
@@ -184,6 +186,7 @@ class Cluster(Model):
                 command=command,
                 ip_list_to_run=ip_list_to_run,
                 raise_exception=True,
+                retries=5,
             )
 
     def run_init_commands(self, ip_list_to_run: list[str]):
@@ -192,6 +195,7 @@ class Cluster(Model):
                 command=command.strip(),
                 ip_list_to_run=ip_list_to_run,
                 raise_exception=True,
+                retries=5,
             )
 
     def clean_my_files(self):

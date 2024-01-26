@@ -30,57 +30,66 @@ def ping(ip: str, username: str) -> bool:
     return is_healthy
 
 
-def remote_command(ip: str, username: str, command: str) -> bool:
+def remote_command(ip: str, username: str, command: str, retries: int = 0) -> bool:
+    import paramiko
+    import select
+    import time
+
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     success = False
 
-    try:
-        log.debug(text=f"Running command: `{command}`", detail=ip)
-        ssh.connect(ip, username=username, timeout=300)
-        _stdin, stdout, stderr = ssh.exec_command(command)
+    attempt = 1
+    while attempt <= retries + 1:
+        try:
+            log.debug(text=f"Running command: `{command}`", detail=f"{ip} | attempt: {attempt}")
+            ssh.connect(ip, username=username, timeout=15)
+            _stdin, stdout, stderr = ssh.exec_command(command)
 
-        # Continuously read and print stdout as it becomes available
-        while not stdout.channel.exit_status_ready():
-            if stdout.channel.recv_ready():
-                rl, _, _ = select.select([stdout.channel], [], [], 0.0)
-                if rl:
-                    print(stdout.channel.recv(1024).decode("utf-8"), end="")
+            while not stdout.channel.exit_status_ready():
+                if stdout.channel.recv_ready():
+                    rl, _, _ = select.select([stdout.channel], [], [], 0.0)
+                    if rl:
+                        print(stdout.channel.recv(1024).decode("utf-8"), end="")
+                else:
+                    log.debug(f"Waiting for remote command stdout, stderr…")
+                    time.sleep(0.5)
+
+            _stdout_text = stdout.read().decode().strip()
+            stderr_text = stderr.read().decode().strip()
+
+            exit_status = stdout.channel.recv_exit_status()
+            if exit_status == 0:
+                success = True
+                if stderr_text:
+                    log.warning(
+                        f"STDERR: ```\n{stderr_text}\n``` while running remote command `{command}` at Node: `{ip}`"
+                    )
+                    if "PRTE has lost communication with a remote daemon" in stderr_text:
+                        success = False
+                        continue  # Retry if this specific error is encountered
+                break  # Exit loop on success
             else:
-                log.debug(f"Waiting for remote command stdout, stderr...")
-                time.sleep(0.1)
+                if (
+                    "unreachable: [Errno None] Unable to connect" in stderr_text
+                    or "PRTE has lost communication with a remote daemon" in stderr_text
+                ):
+                    log.warning(
+                        f"STDERR: ```\n{stderr_text}\n``` while running remote command `{command}` at Node: `{ip}`"
+                    )
+                else:
+                    log.error(
+                        f"STDERR: ```\n{stderr_text}\n``` while running remote command `{command}` at Node: `{ip}`"
+                    )
 
-        _stdout_text = stdout.read().decode().strip()
-        stderr_text = stderr.read().decode().strip()
+        except Exception as e:
+            log.error(
+                f"EXCEPTION: ```\n{e}\n``` while running remote command `{command}` at Node: `{ip}"
+            )
+        finally:
+            ssh.close()
 
-        exit_status = stdout.channel.recv_exit_status()
-        if exit_status == 0:
-            success = True
-            if stderr_text:
-                log.warning(
-                    f"STDERR: ```\n{stderr_text}\n``` while running remote command `{command}` at Node: `{ip}`"
-                )
-                if "PRTE has lost communication with a remote daemon" in stderr_text:
-                    success = False
-        else:
-            if (
-                "unreachable: [Errno None] Unable to connect" in stderr_text
-                or "PRTE has lost communication with a remote daemon" in stderr_text
-            ):
-                log.warning(
-                    f"STDERR: ```\n{stderr_text}\n``` while running remote command `{command}` at Node: `{ip}`"
-                )
-            else:
-                log.error(
-                    f"STDERR: ```\n{stderr_text}\n``` while running remote command `{command}` at Node: `{ip}`"
-                )
-
-    except Exception as e:
-        log.error(
-            f"EXCEPTION: ```\n{e}\n``` while running remote command `{command}` at Node: `{ip}"
-        )
-    finally:
-        ssh.close()
+        attempt += 1
 
     return success
 
