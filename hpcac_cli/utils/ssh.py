@@ -23,7 +23,7 @@ def ping(ip: str, username: str) -> bool:
         _stdin, _stdout, _stderr = ssh.exec_command('echo "I\'m alive!"')
         is_healthy = True
     except (NoValidConnectionsError, SSHException, timeout) as e:
-        log.error(f"Node `{ip}` unreachable: {e}")
+        log.warning(f"Node `{ip}` unreachable...")
     finally:
         ssh.close()
 
@@ -37,17 +37,19 @@ def remote_command(ip: str, username: str, command: str) -> bool:
 
     try:
         log.debug(text=f"Running command: `{command}`", detail=ip)
-        ssh.connect(ip, username=username, timeout=3)
-        stdin, stdout, stderr = ssh.exec_command(command)
+        ssh.connect(ip, username=username, timeout=300)
+        _stdin, stdout, stderr = ssh.exec_command(command)
 
         # Continuously read and print stdout as it becomes available
         while not stdout.channel.exit_status_ready():
-            log.debug(f"Waiting for ssh command: `{command}` stdout, stderr...")
-            time.sleep(0.1)
             if stdout.channel.recv_ready():
                 rl, _, _ = select.select([stdout.channel], [], [], 0.0)
                 if rl:
                     print(stdout.channel.recv(1024).decode("utf-8"), end="")
+            else:
+                log.debug(f"Waiting for remote command stdout, stderr...")
+                time.sleep(0.1)
+
         _stdout_text = stdout.read().decode().strip()
         stderr_text = stderr.read().decode().strip()
 
@@ -60,7 +62,6 @@ def remote_command(ip: str, username: str, command: str) -> bool:
                 )
                 if "PRTE has lost communication with a remote daemon" in stderr_text:
                     success = False
-                    # log.warning(f"Node {ip} just crashed!!!")
         else:
             if (
                 "unreachable: [Errno None] Unable to connect" in stderr_text
