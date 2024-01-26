@@ -1,4 +1,7 @@
-from hpcac_cli.models.cluster import Cluster, fetch_latest_online_cluster
+import csv
+import os
+
+from hpcac_cli.models.cluster import fetch_latest_online_cluster
 from hpcac_cli.models.task import Task, insert_task_record, is_task_tag_alredy_used
 
 from hpcac_cli.utils.chronometer import Chronometer
@@ -164,3 +167,73 @@ async def run_tasks():
             log.info(
                 f"!!! Task `{task.task_tag}` completed in {total_execution_chronometer.get_elapsed_time()} seconds !!!\n\n"
             )
+
+
+async def export_tasks():
+    log.info("Invoked `export_tasks` command...")
+    RESULTS_PATH = "./results"
+    RESULTS_CSV_FILE_NAME = "task_results.csv"
+    csv_file_path = os.path.join(RESULTS_PATH, RESULTS_CSV_FILE_NAME)
+
+    # Ensure the results directory exists
+    if not os.path.exists(RESULTS_PATH):
+        os.makedirs(RESULTS_PATH)
+        log.info(f"Created directory: {RESULTS_PATH}")
+
+    # Remove existing CSV file if it exists
+    if os.path.exists(csv_file_path):
+        os.remove(csv_file_path)
+        log.info(f"Removed existing file: {csv_file_path}")
+
+    tasks = await Task.all()
+    with open(csv_file_path, mode="w", newline="", encoding="utf-8") as file:
+        writer = csv.writer(file)
+
+        # Writing headers
+        headers = [
+            "task_tag",
+            "cluster",
+            "created_at",
+            "started_at",
+            "completed_at",
+            "failures_during_execution",
+            "retries_before_aborting",
+            "fault_tolerance_technology_label",
+            "checkpoint_strategy_label",
+            "task_completed_successfully",
+            "time_spent_spawning_cluster",
+            "time_spent_setting_up_task",
+            "time_spent_checkpointing",
+            "time_spent_restoring_cluster",
+            "time_spent_executing_task",
+            "total_time_spent",
+        ]
+        writer.writerow(headers)
+
+        # Writing rows
+        for task in tasks:
+            row = [
+                task.task_tag,
+                task.cluster_id,
+                task.created_at,
+                task.started_at,
+                task.completed_at,
+                task.failures_during_execution,
+                task.retries_before_aborting,
+                task.fault_tolerance_technology_label,
+                task.checkpoint_strategy_label,
+                task.task_completed_successfully,
+                task.time_spent_spawning_cluster,
+                task.time_spent_setting_up_task,
+                task.time_spent_checkpointing,
+                task.time_spent_restoring_cluster,
+                task.time_spent_executing_task,
+                task.time_spent_spawning_cluster
+                + task.time_spent_checkpointing
+                + task.time_spent_setting_up_task
+                + task.time_spent_executing_task
+                + task.time_spent_restoring_cluster,
+            ]
+            writer.writerow(row)
+
+    log.info("Successfully exported results to `./results/task_results.csv` file!")

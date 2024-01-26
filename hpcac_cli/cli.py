@@ -5,7 +5,7 @@ import asyncio
 from hpcac_cli.db import init_db
 from hpcac_cli.utils.logger import Logger
 from hpcac_cli.commands.clusters import create_cluster, destroy_cluster
-from hpcac_cli.commands.tasks import run_tasks
+from hpcac_cli.commands.tasks import run_tasks, export_tasks
 
 
 log = Logger()
@@ -35,6 +35,12 @@ async def main_async():
         help="Run tasks in a cluster",
     )
     parser_run_tasks.set_defaults(func=run_tasks)
+
+    parser_export_tasks = subparsers.add_parser(
+        "export-tasks",
+        help="Export all Tasks in CSV format",
+    )
+    parser_export_tasks.set_defaults(func=export_tasks)
 
     args = parser.parse_args()
 
