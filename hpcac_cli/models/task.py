@@ -1,4 +1,5 @@
 from decimal import Decimal
+from enum import Enum
 
 from tortoise.models import Model
 from tortoise import fields
@@ -7,6 +8,13 @@ from hpcac_cli.utils.logger import Logger
 
 
 log = Logger()
+
+
+class TaskStatus(Enum):
+    Success = 1
+    NodeEvicted = 2
+    RemoteException = 3
+    NotCompleted = 4
 
 
 class Task(Model):

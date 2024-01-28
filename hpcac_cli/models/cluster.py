@@ -1,20 +1,22 @@
 import concurrent.futures
 from decimal import Decimal
 import os
+import socket
 import time
 
+import paramiko
+from paramiko.ssh_exception import NoValidConnectionsError, SSHException
 from tortoise.queryset import QuerySet
 from tortoise.models import Model
 from tortoise import fields
 
+from hpcac_cli.models.task import TaskStatus
 from hpcac_cli.utils.logger import Logger
 from hpcac_cli.utils.providers.aws import (
     get_cluster_efs_dns_name,
     get_cluster_nodes_ip_addresses,
 )
 from hpcac_cli.utils.ssh import (
-    ping,
-    remote_command,
     scp_transfer_directory,
     scp_download_directory,
 )
@@ -24,6 +26,18 @@ from hpcac_cli.utils.terraform import terraform_refresh
 log = Logger()
 DECIMALS = ["on_demand_price_per_hour"]
 BOOLEANS = ["use_spot", "use_efs", "use_fsx", "use_efa"]
+
+
+class EFSError(Exception):
+    """Base class for exceptions in EFS module."""
+
+    pass
+
+
+class ClusterInitError(Exception):
+    """Base class for cluster_init exceptions."""
+
+    pass
 
 
 class Cluster(Model):
@@ -53,50 +67,12 @@ class Cluster(Model):
             f"Cluster {self.cluster_tag}: {self.node_count}x {self.node_instance_type}"
         )
 
-    def run_command(
-        self,
-        command: str,
-        ip_list_to_run: list[str],
-        raise_exception: bool = False,
-        retries: int = 0,
-    ):
-        def task(ip):
-            return remote_command(
-                ip=ip, username=self.instance_username, command=command, retries=retries
-            )
-
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future_to_ip = {executor.submit(task, ip): ip for ip in ip_list_to_run}
-            for future in concurrent.futures.as_completed(future_to_ip):
-                _ip = future_to_ip[future]
-                result = future.result()
-                if raise_exception and not result:
-                    raise Exception("Remote command stopped with faillure.")
-
-    def is_healthy(self) -> bool:
-        def ping_node(ip):
-            return ping(ip=ip, username=self.instance_username)
-
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future_to_ip = {executor.submit(ping_node, ip): ip for ip in self.node_ips}
-            for future in concurrent.futures.as_completed(future_to_ip):
-                ip = future_to_ip[future]
-                is_alive = future.result()
-                if not is_alive:
-                    log.warning(
-                        f"Cluster `{self.cluster_tag}` is NOT healthy due to node: {ip}"
-                    )
-                    return False
-        return True
-
     def generate_hostfile(self, mpi_distribution: str):
         log.debug(text=f"Generating {mpi_distribution} hostfile...")
         if mpi_distribution.lower() != "openmpi":
             raise NotImplementedError(
                 f"Hostfile generation for {mpi_distribution} not implemented."
             )
-
-        # Generate Hostfile for OpenMPI:
         base_host = "10.0.0.1"
         HOSTFILE_PATH = "./my_files/hostfile"
         if os.path.exists(HOSTFILE_PATH):
@@ -106,13 +82,66 @@ class Cluster(Model):
                 file.write(f"{base_host}{i} slots={self.vcpus_per_node}\n")
         log.debug(text=f"Generation of {mpi_distribution} hostfile complete!")
 
-    def upload_my_files(self):
-        # First make sure the remote `my_files` directory exists:
-        self.run_command(
-            "mkdir -p /var/nfs_dir/my_files", ip_list_to_run=[self.node_ips[0]]
-        )
+    def clean_remote_my_files_directory(self):
+        command = "if [ -d /var/nfs_dir/my_files ]; then rm -r /var/nfs_dir/my_files; fi"
+        raise_text = ""
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        ip = self.node_ips[0]
+        try:
+            ssh.connect(ip, username=self.instance_username, timeout=3)
+        except Exception as err:
+            raise_text = f"Raised `{type(err).__name__}` while connecting to node {ip}."
+            raise ClusterInitError(raise_text)
 
-        # Then upload the local my_files contents:
+        try:
+            log.debug(
+                text=f"Executing command: ```\n{command}\n```",
+                detail=f"clean_remote_my_files_directory@{ip}",
+            )
+            _stdin, stdout, stderr = ssh.exec_command(command=command)
+            exit_status = stdout.channel.recv_exit_status()
+            stdout_text = stdout.read().decode().strip()
+            stderr_text = stderr.read().decode().strip()
+        except (NoValidConnectionsError, SSHException, socket.timeout) as err:
+            log.warning(
+                f"{type(err).__name__} running `{command}`: ```\n{err}\n```",
+                detail=f"clean_remote_my_files_directory@{ip}",
+            )
+            raise_text = (
+                f"Raised `{type(err).__name__}` while cleaning remote `my_files`."
+            )
+        except Exception as err:
+            log.error(
+                f"{type(err).__name__} running `{command}`: ```\n{err}\n```",
+                detail=f"clean_remote_my_files_directory@{ip}",
+            )
+            raise_text = (
+                f"Raised `{type(err).__name__}` while cleaning remote `my_files`."
+            )
+        else:
+            if exit_status == 0:
+                log.info(
+                    f"Command `{command}` executed successfully!",
+                    detail=f"clean_remote_my_files_directory@{ip}",
+                )
+            else:
+                log.error(
+                    f"Failed running command `{command}`: ```\n{stderr_text}\n```",
+                    detail=f"clean_remote_my_files_directory@{ip}",
+                )
+                raise_text = f"Bad exit_code from command `{command}`"
+
+        ssh.close()
+        if stdout_text != "":
+            log.debug(
+                text=f"STDOUT: ```\n{stdout_text}\n```",
+                detail=f"clean_remote_my_files_directory@{ip}",
+            )
+        if raise_text != "":
+            raise ClusterInitError(raise_text)
+
+    def upload_my_files(self):
         LOCAL_MY_FILES_PATH = "./my_files"
         REMOTE_MY_FILES_PATH = "/var/nfs_dir/"
         scp_transfer_directory(
@@ -120,88 +149,6 @@ class Cluster(Model):
             remote_path=REMOTE_MY_FILES_PATH,
             ip=self.node_ips[0],
             username=self.instance_username,
-        )
-
-    def setup_efs(self, ip_list_to_run: list[str], wait_time: int = 120):
-        if self.provider != "aws":
-            raise NotImplementedError(
-                "Setup EFS is currently only implemented for AWS."
-            )
-
-        # Need to just add a brief sleep condition here to make sure EFS dns is propagated through the VPN
-        # https://docs.aws.amazon.com/efs/latest/ug/troubleshooting-efs-mounting.html#mount-fails-propegation
-        log.debug(
-            text=f"Waiting {wait_time} seconds for AWS Elastic File System DNS to be reachable...",
-            detail="setup_efs",
-        )
-        time.sleep(wait_time)
-        log.debug(text=f"Wait of {wait_time} seconds completed.", detail="setup_efs")
-
-        efs_dns_name = get_cluster_efs_dns_name(
-            cluster_tag=self.cluster_tag, region=self.region
-        )
-        commands = [
-            "sudo yum install -y nfs-utils",
-            "sudo mkdir -p /var/nfs_dir",
-        ]
-        for command in commands:
-            log.debug(
-                text=f"Running command {command} in nodes {ip_list_to_run}...",
-                detail="setup_efs",
-            )
-            self.run_command(
-                command=command,
-                ip_list_to_run=ip_list_to_run,
-                raise_exception=True,
-                retries=5,
-            )
-
-        # Mount EFS to /var/nfs_dir
-        mount_command = f"sudo mount -t nfs {efs_dns_name}:/ /var/nfs_dir"
-        log.debug(text=f"Mouting EFS in nodes {ip_list_to_run}...", detail="setup_efs")
-        for ip in ip_list_to_run:
-            mounted = False
-            while not mounted:
-                mounted = remote_command(
-                    ip=ip, username=self.instance_username, command=mount_command
-                )
-                if mounted:
-                    log.debug(
-                        text=f"Mounted EFS successfully in node {ip}!",
-                        detail="setup_efs",
-                    )
-                else:
-                    log.warning(
-                        text=f"Couldn't mount EFS for node {ip} yet, retry in 10s...",
-                        detail="setup_efs",
-                    )
-                    time.sleep(10)
-
-        commands = [
-            "sudo chmod ugo+rwx /var/nfs_dir",
-            f"sudo bash -c 'echo \"{efs_dns_name}:/ /var/nfs_dir nfs defaults,_netdev 0 0\" >> /etc/fstab'",
-        ]
-        for command in commands:
-            self.run_command(
-                command=command,
-                ip_list_to_run=ip_list_to_run,
-                raise_exception=True,
-                retries=5,
-            )
-
-    def run_init_commands(self, ip_list_to_run: list[str]):
-        for command in self.init_commands:
-            self.run_command(
-                command=command.strip(),
-                ip_list_to_run=ip_list_to_run,
-                raise_exception=True,
-                retries=5,
-            )
-
-    def clean_my_files(self):
-        self.run_command(
-            "if [ -d /var/nfs_dir/my_files ]; then rm -r /var/nfs_dir/my_files; fi",
-            ip_list_to_run=[self.node_ips[0]],
         )
 
     def download_directory(self, remote_path: str, local_path: str):
@@ -212,42 +159,262 @@ class Cluster(Model):
             username=self.instance_username,
         )
 
+    def is_healthy(self) -> bool:
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+        unhealthy_nodes = []
+        healthy_nodes = []
+        for ip in self.node_ips:
+            try:
+                ssh.connect(ip, username=self.instance_username, timeout=3)
+                _stdin, _stdout, _stderr = ssh.exec_command('echo "I\'m alive!"')
+            except (NoValidConnectionsError, SSHException, socket.timeout) as err:
+                log.debug(f"Node `{ip}` unreachable: ```\n{err}\n```")
+                unhealthy_nodes.append(ip)
+            else:
+                healthy_nodes.append(ip)
+            ssh.close()
+
+        log.debug(f"Healthy nodes: {healthy_nodes}")
+        if len(unhealthy_nodes) > 0:
+            log.warning(f"Unhealthy nodes: {unhealthy_nodes}")
+            return False
+        return True
+
+    def run_task(self, command: str) -> TaskStatus:
+        ip = self.node_ips[0]
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        task_status = TaskStatus.NotCompleted
+        try:
+            ssh.connect(ip, username=self.instance_username, timeout=3)
+            log.debug(
+                text=f"Executing Task command: ```\n{command}\n```",
+                detail=f"run_task@{ip}",
+            )
+            _stdin, stdout, stderr = ssh.exec_command(command=command)
+            exit_status = stdout.channel.recv_exit_status()
+            stdout_text = stdout.read().decode().strip()
+            stderr_text = stderr.read().decode().strip()
+            if stdout_text != "":
+                log.debug(
+                    text=f"STDOUT: ```\n{stdout_text}\n```", detail=f"run_task@{ip}"
+                )
+        except (NoValidConnectionsError, SSHException, socket.timeout) as err:
+            log.warning(f"```\n{err}\n```", detail="TaskStatus=NodeEvicted")
+            task_status = TaskStatus.NodeEvicted
+        except Exception as err:
+            log.error(f"```\n{err}\n```", detail="TaskStatus=RemoteException")
+            task_status = TaskStatus.RemoteException
+        else:
+            if exit_status == 0:
+                if "PRTE has lost communication" in stderr_text:
+                    log.warning(
+                        f"```\n{stderr_text}\n```", detail="TaskStatus=NodeEvicted"
+                    )
+                    task_status = TaskStatus.NodeEvicted
+                else:
+                    log.info(f"Completed task command `{command}` successfully!!", detail="TaskStatus=Success")
+                    task_status = TaskStatus.Success
+            else:
+                # Check if a node was evicted or not
+                if not self.is_healthy():
+                    log.warning(
+                        f"```\n{stderr_text}\n```", detail="TaskStatus=NodeEvicted"
+                    )
+                    task_status = TaskStatus.NodeEvicted
+                else:
+                    log.error(
+                        f"```\n{stderr_text}\n```", detail="TaskStatus=RemoteException"
+                    )
+                    task_status = TaskStatus.RemoteException
+
+        ssh.close()
+        return task_status
+
+    def setup_efs(self, ip_list_to_run: list[str], wait_time: int = 150):
+        if self.provider != "aws":
+            raise NotImplementedError(
+                "Setup EFS is currently only implemented for AWS."
+            )
+        # Need to just add a brief sleep condition here to make sure EFS dns is propagated through the VPN
+        # https://docs.aws.amazon.com/efs/latest/ug/troubleshooting-efs-mounting.html#mount-fails-propegation
+        log.debug(
+            text=f"Waiting {wait_time} seconds for AWS Elastic File System DNS to be reachable...",
+            detail="setup_efs",
+        )
+        time.sleep(wait_time)
+        log.debug(text=f"Wait of {wait_time} seconds completed.", detail="setup_efs")
+
+        try:
+            efs_dns_name = get_cluster_efs_dns_name(
+                cluster_tag=self.cluster_tag, region=self.region
+            )
+            if efs_dns_name is None:
+                raise EFSError("Couldn't reach EFS by DNS name.")
+        except Exception as err:
+            raise EFSError(f"{type(err).__name__} while setting up EFS.")
+
+        efs_setup_commands = [
+            "sudo yum install -y nfs-utils",
+            "sudo mkdir -p /var/nfs_dir",
+            f"sudo mount -t nfs {efs_dns_name}:/ /var/nfs_dir",
+            "sudo chmod ugo+rwx /var/nfs_dir",
+            f"sudo bash -c 'echo \"{efs_dns_name}:/ /var/nfs_dir nfs defaults,_netdev 0 0\" >> /etc/fstab'",
+        ]
+        raise_text = ""
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        for ip in ip_list_to_run:
+            try:
+                ssh.connect(ip, username=self.instance_username, timeout=3)
+            except Exception as err:
+                raise_text = (
+                    f"Raised `{type(err).__name__}` while connecting to node {ip}."
+                )
+                raise EFSError(raise_text)
+
+            try:
+                for command in efs_setup_commands:
+                    log.debug(
+                        text=f"Executing EFS setup command: ```\n{command}\n```",
+                        detail=f"setup_task@{ip}",
+                    )
+                    _stdin, stdout, stderr = ssh.exec_command(command=command)
+                    exit_status = stdout.channel.recv_exit_status()
+                    stdout_text = stdout.read().decode().strip()
+                    stderr_text = stderr.read().decode().strip()
+            except (NoValidConnectionsError, SSHException, socket.timeout) as err:
+                log.warning(
+                    f"{type(err).__name__} running `{command}`: ```\n{err}\n```",
+                    detail=f"setup_task@{ip}",
+                )
+                raise_text = f"Raised `{type(err).__name__}` while setting up EFS."
+            except Exception as err:
+                log.error(
+                    f"{type(err).__name__} running `{command}`: ```\n{err}\n```",
+                    detail=f"setup_task@{ip}",
+                )
+                raise_text = f"Raised `{type(err).__name__}` while setting up EFS."
+            else:
+                if exit_status == 0:
+                    log.info(
+                        f"EFS setup commands executed successfully!",
+                        detail=f"setup_task@{ip}",
+                    )
+                else:
+                    log.error(
+                        f"Failed running command `{command}`: ```\n{stderr_text}\n```",
+                        detail=f"setup_task@{ip}",
+                    )
+                    raise_text = f"Bad exit_code from command `{command}`"
+
+            ssh.close()
+            if stdout_text != "":
+                log.debug(
+                    text=f"STDOUT: ```\n{stdout_text}\n```", detail=f"setup_task@{ip}"
+                )
+            if raise_text != "":
+                raise EFSError(raise_text)
+
+    def run_init_commands(self, ip_list_to_run: list[str]):
+        raise_text = ""
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        for ip in ip_list_to_run:
+            try:
+                ssh.connect(ip, username=self.instance_username, timeout=3)
+            except Exception as err:
+                raise_text = (
+                    f"Raised `{type(err).__name__}` while connecting to node {ip}."
+                )
+                raise ClusterInitError(raise_text)
+
+            try:
+                for command in self.init_commands:
+                    log.debug(
+                        text=f"Executing cluster init command: ```\n{command}\n```",
+                        detail=f"init_commands@{ip}",
+                    )
+                    _stdin, stdout, stderr = ssh.exec_command(command=command)
+                    exit_status = stdout.channel.recv_exit_status()
+                    stdout_text = stdout.read().decode().strip()
+                    stderr_text = stderr.read().decode().strip()
+            except (NoValidConnectionsError, SSHException, socket.timeout) as err:
+                log.warning(
+                    f"{type(err).__name__} running `{command}`: ```\n{err}\n```",
+                    detail=f"init_commands@{ip}",
+                )
+                raise_text = (
+                    f"Raised `{type(err).__name__}` while running init_commands."
+                )
+            except Exception as err:
+                log.error(
+                    f"{type(err).__name__} running `{command}`: ```\n{err}\n```",
+                    detail=f"init_commands@{ip}",
+                )
+                raise_text = (
+                    f"Raised `{type(err).__name__}` while running init_commands."
+                )
+            else:
+                if exit_status == 0:
+                    log.info(
+                        f"Cluster init commands executed successfully!",
+                        detail=f"init_commands@{ip}",
+                    )
+                else:
+                    log.error(
+                        f"Failed running command `{command}`: ```\n{stderr_text}\n```",
+                        detail=f"init_commands@{ip}",
+                    )
+                    raise_text = f"Bad exit_code from command `{command}`"
+
+            ssh.close()
+            if stdout_text != "":
+                log.debug(
+                    text=f"STDOUT: ```\n{stdout_text}\n```",
+                    detail=f"init_commands@{ip}",
+                )
+            if raise_text != "":
+                raise ClusterInitError(raise_text)
+
     async def repair(self):
         old_ips = self.node_ips
-        repaired = False
         wait_time = 60  # 1 minute
-        while not repaired:
-            if self.is_healthy():
-                repaired = True
-            else:
-                log.debug(
-                    f"Waiting {wait_time} seconds for Terraform to refresh its state...",
-                    detail="cluster repair",
-                )
-                time.sleep(wait_time)
-                terraform_refresh()
-                new_ips = get_cluster_nodes_ip_addresses(
-                    cluster_tag=self.cluster_tag, region=self.region
-                )
-                if len(new_ips) == len(self.node_ips):
-                    self.node_ips = new_ips
-                    await self.save()
-                    repaired = True
 
-        new_nodes_ips = [ip for ip in new_ips if ip not in old_ips]
+        if self.is_healthy():
+            return           
 
-        # Reconnect destroyed nodes to EFS, if required:
-        if self.use_efs:
-            self.setup_efs(ip_list_to_run=new_nodes_ips, wait_time=0)
-
-        # Re-run init commands in the new node:
-        self.run_init_commands(ip_list_to_run=new_nodes_ips)
+        log.debug(
+            f"Waiting {wait_time} seconds for Terraform to refresh its state...",
+            detail="cluster repair",
+        )
+        time.sleep(wait_time)
+        terraform_refresh(verbose=True)
 
 
-async def is_cluster_tag_alredy_used(cluster_tag: str) -> bool:
-    existing_cluster = await Cluster.filter(cluster_tag=cluster_tag).first()
-    return True if existing_cluster else False
+        new_ips = get_cluster_nodes_ip_addresses(
+            cluster_tag=self.cluster_tag, region=self.region
+        )
+        log.debug(f"New ips = {new_ips}")
+        log.debug(f"Old ips = {self.node_ips}")
+        if len(new_ips) == len(self.node_ips):
+            self.node_ips = new_ips
+            await self.save()
 
+        log.debug("Wait 30 seconds while new nodes are ready...")
+        time.sleep(30)
+
+        if self.is_healthy():
+            new_nodes_ips = [ip for ip in new_ips if ip not in old_ips]
+            # Reconnect destroyed nodes to EFS, if required:
+            if self.use_efs:
+                self.setup_efs(ip_list_to_run=new_nodes_ips, wait_time=0)
+            # Re-run init commands in the new node:
+            self.run_init_commands(ip_list_to_run=new_nodes_ips)
+        else:
+            raise ClusterInitError("Failed repairing Cluster")
 
 async def insert_cluster_record(cluster_data: dict) -> Cluster:
     # Filter out keys not in the Cluster model

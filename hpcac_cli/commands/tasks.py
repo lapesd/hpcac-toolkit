@@ -1,8 +1,14 @@
 import csv
+from datetime import datetime
 import os
 
 from hpcac_cli.models.cluster import fetch_latest_online_cluster
-from hpcac_cli.models.task import Task, insert_task_record, is_task_tag_alredy_used
+from hpcac_cli.models.task import (
+    Task,
+    TaskStatus,
+    insert_task_record,
+    is_task_tag_alredy_used,
+)
 
 from hpcac_cli.utils.chronometer import Chronometer
 from hpcac_cli.utils.logger import Logger
@@ -64,85 +70,61 @@ async def run_tasks():
         detail = "first attempt"
         log.info(f"Setting up Task {task.task_tag}...", detail=detail)
         setup_task_chronometer.start()
-        cluster.clean_my_files()
+        cluster.clean_remote_my_files_directory()
         cluster.generate_hostfile(mpi_distribution="openmpi")
         cluster.upload_my_files()
-        entrypoint_ip = get_cluster_nodes_ip_addresses(
-            cluster_tag=cluster.cluster_tag, region=cluster.region
-        )[0]
-        cluster.run_command(
-            task.setup_command,
-            ip_list_to_run=[entrypoint_ip],
-            raise_exception=True,
-        )
+        setup_status = cluster.run_task(task.setup_command)
         setup_task_chronometer.stop()
-        log.info(f"Finished setup of Task `{task.task_tag}`!", detail=detail)
+        if setup_status == TaskStatus.Success:
+            log.info(f"Finished setup of Task `{task.task_tag}`!", detail=detail)
+        else:
+            log.error(f"Task setup failed, aborting...", detail=detail)
+            exit(1)
 
         # Execute Task:
         log.info(f"Starting executing Task `{task.task_tag}`...", detail=detail)
         execution_chronometer.start()
-        try:
-            cluster.run_command(
-                task.run_command,
-                ip_list_to_run=[entrypoint_ip],
-                raise_exception=True,
-            )
-        except:
-            log.warning(
-                f"Exception while executing Task `{task.task_tag}`, aborting...",
-                detail=detail,
-            )
-        else:
+        task_status = cluster.run_task(task.run_command)
+        execution_chronometer.stop()
+
+        # Check TaskStatus:
+        if task_status == TaskStatus.RemoteException:
+            log.error(f"Task execution failed, aborting...", detail=detail)
+            exit(1)
+        elif task_status == TaskStatus.Success:
+            log.info(f"Task {task.task_tag} completed!", detail=detail)
             successfully_executed_task = True
-            log.info(
-                f"Successfully finished execution of Task `{task.task_tag}`!",
-                detail=detail,
-            )
-        finally:
-            execution_chronometer.stop()
+        elif task_status == TaskStatus.NodeEvicted:
+            # Start the retry loop:
+            retries = task.retries_before_aborting
+            failures_during_execution = 0
+            task_retry_status = TaskStatus.NotCompleted
+            for retry in range(1, retries + 1):
+                detail = f"retry {retry}"
+                log.info(f"Repairing Cluster `{cluster.cluster_tag}`...", detail=detail)
 
-        # Start the retry loop:
-        retries = task.retries_before_aborting
-        failures_during_execution = 0
-        for retry in range(1, retries + 1):
-            if successfully_executed_task:
-                break
-
-            detail = f"retry {retry}"
-
-            log.info(f"Repairing Cluster `{cluster.cluster_tag}`...", detail=detail)
-            restoration_chronometer.start()
-            await cluster.repair()
-            restoration_chronometer.stop()
-            log.info(
-                f"Cluster `{cluster.cluster_tag}` repaired successfully!", detail=detail
-            )
-            entrypoint_ip = get_cluster_nodes_ip_addresses(
-                cluster_tag=cluster.cluster_tag, region=cluster.region
-            )[0]
-
-            log.info(f"Retrying execution of Task `{task.task_tag}`...", detail=detail)
-            execution_chronometer.resume()
-            try:
-                cluster.run_command(
-                    task.restart_command,
-                    ip_list_to_run=[entrypoint_ip],
-                    raise_exception=True,
-                )
-            except:
-                failures_during_execution += 1
-                log.warning(
-                    f"Exception while executing Task `{task.task_tag}`, aborting...",
-                    detail=detail,
-                )
-            else:
-                successfully_executed_task = True
+                restoration_chronometer.start()
+                await cluster.repair()
+                restoration_chronometer.stop()
                 log.info(
-                    f"Successfully finished execution of Task `{task.task_tag}`!",
+                    f"Cluster `{cluster.cluster_tag}` repaired successfully!",
                     detail=detail,
                 )
-            finally:
+
+                log.info(
+                    f"Retrying execution of Task `{task.task_tag}`...", detail=detail
+                )
+                execution_chronometer.resume()
+                task_retry_status = cluster.run_task(task.restart_command)
                 execution_chronometer.stop()
+
+                if task_retry_status == TaskStatus.Success:
+                    log.info(f"Task {task.task_tag} completed!", detail=detail)
+                    successfully_executed_task = True
+                    break
+                if task_retry_status == TaskStatus.RemoteException:
+                    log.error(f"Task execution failed, aborting...", detail=detail)
+                    exit(1)
 
         log.info(text=f"Starting download of Task results...", detail=detail)
         cluster.download_directory(
@@ -150,6 +132,8 @@ async def run_tasks():
         )
         log.info(text=f"Completed download of tasks results!", detail=detail)
 
+        task.completed_at = datetime.now()
+        task.task_completed_successfully = successfully_executed_task
         task.time_spent_spawning_cluster = cluster.time_spent_spawning_cluster
         task.time_spent_setting_up_task = setup_task_chronometer.get_elapsed_time()
         task.time_spent_restoring_cluster = restoration_chronometer.get_elapsed_time()

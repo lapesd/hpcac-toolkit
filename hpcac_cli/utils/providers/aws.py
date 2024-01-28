@@ -1,5 +1,6 @@
 import json
 import time
+from typing import Optional
 
 import boto3
 
@@ -56,7 +57,7 @@ async def get_instance_type_details(
     }
 
 
-def get_cluster_efs_dns_name(cluster_tag: str, region: str) -> str:
+def get_cluster_efs_dns_name(cluster_tag: str, region: str) -> Optional[str]:
     log.debug(
         text=f"Searching for EFS with cluster tag `{cluster_tag}` in region `{region}`...",
         detail="get_cluster_efs_dns_name",
@@ -90,7 +91,7 @@ def get_cluster_efs_dns_name(cluster_tag: str, region: str) -> str:
             )
             return dns_name
 
-    raise Exception(f"No EFS found with cluster_tag = `{cluster_tag}`.")
+    return None
 
 
 def get_cluster_nodes_ip_addresses(cluster_tag: str, region: str) -> list[str]:
@@ -102,13 +103,14 @@ def get_cluster_nodes_ip_addresses(cluster_tag: str, region: str) -> list[str]:
 
     # Retrieve the instances that match the filter
     response = ec2.describe_instances(Filters=filters)
-
+    
     # Extract the public IP addresses
     ip_addresses = []
     for reservation in response["Reservations"]:
         for instance in reservation["Instances"]:
+            log.debug(f"AWS Instance: ```\n{instance}\n```", detail="get_cluster_nodes_ip_addresses")
             # Check if the instance has a public IP address
-            if "PublicIpAddress" in instance:
+            if instance["State"]["Name"] == "running" and "PublicIpAddress" in instance:
                 ip_addresses.append(instance["PublicIpAddress"])
 
     return ip_addresses

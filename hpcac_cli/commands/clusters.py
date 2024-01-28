@@ -51,34 +51,6 @@ async def create_cluster():
         text=f"Cluster will be created with tag=`{cluster_config['cluster_tag']}`!"
     )
 
-    """
-    # Prompt for cluster_tag:
-    cluster_tag = ""
-    cluster_tag = prompt_text(
-        text="Enter a `cluster_tag` or CTRL+C to cancel cluster creation:"
-    )
-    while cluster_tag == "" or await is_cluster_tag_alredy_used(cluster_tag):
-        if cluster_tag == "":
-            cluster_tag = prompt_text(text="`cluster_tag` can't be empty:")
-        if await is_cluster_tag_alredy_used(cluster_tag):
-            cluster_tag = prompt_text(
-                text=f"cluster_tag `{cluster_tag}` is already used, choose another one:"
-            )
-
-    # Prompt for confirmation:
-    continue_creation = prompt_confirmation(
-        text=f"Confirm creation of Cluster: `{cluster_tag}`?"
-    )
-    if continue_creation:
-        log.info(
-            f"Attempting creation of Cluster `{cluster_tag}` at Cloud "
-            f"Provider: `{provider}`"
-        )
-    else:
-        log.info("Cluster creation CANCELLED by the user.")
-        return
-    """
-
     # Check if there is already a cluster online and mark it as offline
     log.info(f"Checking existing online Clusters...")
     try:
