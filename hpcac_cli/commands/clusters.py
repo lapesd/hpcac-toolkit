@@ -42,7 +42,7 @@ async def create_cluster():
     # ami_id = cluster_config["node_ami"]
     use_spot = cluster_config["use_spot"]
     use_efs = cluster_config["use_efs"]
-    timestamp = datetime.now().strftime("%S-%H-%M-%d-%m-%Y")
+    timestamp = datetime.now().strftime("%H-%M-%S--%d-%m-%Y")
 
     cluster_tag = f"{provider}-{az}-{node_count}x-{instance_type}{'-spot' if use_spot else ''}{'-efs' if use_efs else ''}-{timestamp}"
 
@@ -105,14 +105,16 @@ async def create_cluster():
     log.info("Terraform is initialized!")
 
     log.info(f"Applying Terraform plans...")
-    terraform_apply(verbose=True)
+    terraform_apply(verbose=True, retry=True)
     log.info(f"Terraform plans were applied!")
 
     # Update cluster Postgres record:
     log.info(f"Updating Cluster record in Postgres...")
     cluster.is_online = True
     cluster.node_ips = get_cluster_nodes_ip_addresses(
-        cluster_tag=cluster.cluster_tag, region=cluster.region
+        cluster_tag=cluster.cluster_tag,
+        number_of_nodes=cluster.node_count,
+        region=cluster.region,
     )
     await cluster.save()
     log.info(f"Updated Cluster record in Postgres!")

@@ -83,7 +83,9 @@ class Cluster(Model):
         log.debug(text=f"Generation of {mpi_distribution} hostfile complete!")
 
     def clean_remote_my_files_directory(self):
-        command = "if [ -d /var/nfs_dir/my_files ]; then rm -r /var/nfs_dir/my_files; fi"
+        command = (
+            "if [ -d /var/nfs_dir/my_files ]; then rm -r /var/nfs_dir/my_files; fi"
+        )
         raise_text = ""
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -215,7 +217,10 @@ class Cluster(Model):
                     )
                     task_status = TaskStatus.NodeEvicted
                 else:
-                    log.info(f"Completed task command `{command}` successfully!!", detail="TaskStatus=Success")
+                    log.info(
+                        f"Completed task command `{command}` successfully!!",
+                        detail="TaskStatus=Success",
+                    )
                     task_status = TaskStatus.Success
             else:
                 # Check if a node was evicted or not
@@ -384,7 +389,7 @@ class Cluster(Model):
         wait_time = 60  # 1 minute
 
         if self.is_healthy():
-            return           
+            return
 
         log.debug(
             f"Waiting {wait_time} seconds for Terraform to refresh its state...",
@@ -393,12 +398,19 @@ class Cluster(Model):
         time.sleep(wait_time)
         terraform_refresh(verbose=True)
 
+        log.debug(
+            f"Waiting 30 seconds while new instance is ready...",
+            detail="cluster repair",
+        )
+        time.sleep(30)
 
         new_ips = get_cluster_nodes_ip_addresses(
-            cluster_tag=self.cluster_tag, region=self.region
+            cluster_tag=self.cluster_tag,
+            number_of_nodes=self.node_count,
+            region=self.region,
         )
-        log.debug(f"New ips = {new_ips}")
-        log.debug(f"Old ips = {self.node_ips}")
+        log.debug(f"Old cluster IPs = {self.node_ips}")
+        log.debug(f"New cluster IPs = {new_ips}")
         if len(new_ips) == len(self.node_ips):
             self.node_ips = new_ips
             await self.save()
@@ -415,6 +427,7 @@ class Cluster(Model):
             self.run_init_commands(ip_list_to_run=new_nodes_ips)
         else:
             raise ClusterInitError("Failed repairing Cluster")
+
 
 async def insert_cluster_record(cluster_data: dict) -> Cluster:
     # Filter out keys not in the Cluster model

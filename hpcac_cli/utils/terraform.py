@@ -63,7 +63,7 @@ def get_cluster_terraform_files(cluster_config: dict):
         )
 
 
-def launch_subprocess(commands: list[str], detail: str, verbose: bool = False):
+def launch_subprocess(commands: list[str], detail: str, verbose: bool = False) -> int:
     process = subprocess.Popen(
         commands,
         cwd=TF_DIR,
@@ -76,11 +76,10 @@ def launch_subprocess(commands: list[str], detail: str, verbose: bool = False):
     for line in iter(process.stdout.readline, ""):
         if verbose:
             log.debug(text=line.strip(), detail=detail)
-        else:
-            pass
-
     process.stdout.close()
-    process.wait()
+    return_code = process.wait()
+
+    return return_code
 
 
 def terraform_init(verbose: bool = False):
@@ -103,12 +102,26 @@ def terraform_refresh(verbose: bool = False):
     )
 
 
-def terraform_apply(verbose: bool = False):
-    launch_subprocess(
-        commands=["terraform", "apply", "-auto-approve"],
-        detail="terraform apply",
-        verbose=verbose,
-    )
+def terraform_apply(verbose: bool = False, retry: bool = False):
+    max_retries = 3  # Define the maximum number of retries
+    retry_count = 0
+
+    while True:
+        exit_code = launch_subprocess(
+            commands=["terraform", "apply", "-auto-approve"],
+            detail="terraform apply",
+            verbose=verbose,
+        )
+
+        if exit_code == 0:
+            break  # Break if successful
+
+        if retry and retry_count < max_retries:
+            retry_count += 1
+            log.debug(text=f"Retrying terraform apply... (Attempt {retry_count}/{max_retries})", detail="terraform apply")
+        else:
+            log.error(text="Terraform apply failed.", detail="terraform apply")
+            break
 
 
 def terraform_destroy(verbose: bool = False):

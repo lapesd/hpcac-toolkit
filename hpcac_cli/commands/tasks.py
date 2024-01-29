@@ -13,7 +13,6 @@ from hpcac_cli.models.task import (
 from hpcac_cli.utils.chronometer import Chronometer
 from hpcac_cli.utils.logger import Logger
 from hpcac_cli.utils.parser import parse_yaml
-from hpcac_cli.utils.providers.aws import get_cluster_nodes_ip_addresses
 
 
 log = Logger()
