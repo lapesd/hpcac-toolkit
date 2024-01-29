@@ -118,7 +118,10 @@ def terraform_apply(verbose: bool = False, retry: bool = False):
 
         if retry and retry_count < max_retries:
             retry_count += 1
-            log.debug(text=f"Retrying terraform apply... (Attempt {retry_count}/{max_retries})", detail="terraform apply")
+            log.debug(
+                text=f"Retrying terraform apply... (Attempt {retry_count}/{max_retries})",
+                detail="terraform apply",
+            )
         else:
             log.error(text="Terraform apply failed.", detail="terraform apply")
             break

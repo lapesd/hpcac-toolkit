@@ -107,12 +107,16 @@ def get_cluster_nodes_ip_addresses(
 
         response = ec2.describe_instances(Filters=filters)
         for reservation in response["Reservations"]:
+            log.debug(
+                f"boto3 ec2 client response: ```\n{reservation}\n```",
+                detail="get_cluster_nodes_ip_addresses",
+            )
             if len(reservation["Instances"]) != 1:
                 raise Exception(
                     "Malformed response in `get_cluster_nodes_ip_addresses`"
                 )
             instance = reservation["Instances"][0]
-            instance_ip = instance.get('PublicIpAddress', None)
+            instance_ip = instance.get("PublicIpAddress", None)
             instance_state = instance["State"]["Name"]
             if instance_state == "running" and instance_ip is not None:
                 log.debug(
