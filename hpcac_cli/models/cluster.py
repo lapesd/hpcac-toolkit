@@ -385,37 +385,41 @@ class Cluster(Model):
                 raise ClusterInitError(raise_text)
 
     async def repair(self):
-        old_ips = self.node_ips
-        wait_time = 60  # 1 minute
-
         if self.is_healthy():
             return
 
-        log.debug(
-            f"Waiting {wait_time} seconds for Terraform to refresh its state...",
-            detail="cluster repair",
-        )
-        time.sleep(wait_time)
-        terraform_refresh(verbose=True)
+        old_ips = self.node_ips
 
-        log.debug(
-            f"Waiting 30 seconds while new instance is ready...",
-            detail="cluster repair",
-        )
-        time.sleep(30)
+        terraform_ready = False
+        while not terraform_ready:
+            log.debug(
+                f"Waiting for Terraform to refresh its state...",
+                detail="cluster repair",
+            )
+            time.sleep(5)
+            terraform_refresh(verbose=True)
+            time.sleep(5)
 
-        new_ips = get_cluster_nodes_ip_addresses(
-            cluster_tag=self.cluster_tag,
-            number_of_nodes=self.node_count,
-            region=self.region,
-        )
-        log.debug(f"Old cluster IPs = {self.node_ips}")
-        log.debug(f"New cluster IPs = {new_ips}")
-        if len(new_ips) == len(self.node_ips):
-            self.node_ips = new_ips
-            await self.save()
+            new_ips = get_cluster_nodes_ip_addresses(
+                cluster_tag=self.cluster_tag,
+                number_of_nodes=self.node_count,
+                region=self.region,
+            )
+            log.debug(f"Old cluster IPs = {self.node_ips}")
+            log.debug(f"New cluster IPs = {new_ips}")
+            if len(new_ips) == len(self.node_ips):
+                self.node_ips = new_ips
+                await self.save()
+                log.info("Unresponsive Cluster Node is respawned!")
+                terraform_ready = True
+            else:
+                log.warning(
+                    f"Replacement Node didn't spawn, retrying application of Terraform plans...",
+                    detail="cluster repair",
+                )
+                time.sleep(5)
 
-        log.debug("Wait 30 seconds while new nodes are ready...")
+        log.debug("Wait for new nodes to get ready for running Tasks...")
         time.sleep(30)
 
         if self.is_healthy():
