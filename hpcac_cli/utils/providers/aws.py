@@ -104,8 +104,9 @@ def get_cluster_nodes_ip_addresses(
         {"Name": "instance-state-code", "Values": ["16"]}
     ]
 
-    cluster_ips = []
     while True:
+        cluster_ips = []
+
         response = ec2.describe_instances(Filters=filters)
         for reservation in response["Reservations"]:
             log.debug(
