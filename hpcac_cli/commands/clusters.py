@@ -1,4 +1,5 @@
 from datetime import datetime
+import time
 
 from hpcac_cli.models.cluster import (
     insert_cluster_record,
@@ -9,7 +10,7 @@ from hpcac_cli.utils.logger import Logger
 from hpcac_cli.utils.parser import parse_yaml
 from hpcac_cli.utils.providers.aws import (
     get_instance_type_details,
-    get_cluster_nodes_ip_addresses,
+    get_running_nodes_ips,
 )
 from hpcac_cli.utils.terraform import (
     TF_DIR,
@@ -110,12 +111,13 @@ async def create_cluster():
 
     # Update cluster Postgres record:
     log.info(f"Updating Cluster record in Postgres...")
+    node_ips = []
+    while len(node_ips) != cluster.node_count:
+        node_ips = get_running_nodes_ips(cluster=cluster)
+        log.warning(f"Nodes not ready yet, retrying in 5s...")
+        time.sleep(5)
+    cluster.node_ips = node_ips
     cluster.is_online = True
-    cluster.node_ips = get_cluster_nodes_ip_addresses(
-        cluster=cluster,
-        number_of_nodes=cluster.node_count,
-        region=cluster.region,
-    )
     await cluster.save()
     log.info(f"Updated Cluster record in Postgres!")
 

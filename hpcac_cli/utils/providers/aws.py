@@ -94,42 +94,32 @@ def get_cluster_efs_dns_name(cluster_tag: str, region: str) -> Optional[str]:
     return None
 
 
-def get_cluster_nodes_ip_addresses(
-    cluster, number_of_nodes: int, region: str
-) -> list[str]:
-    # TODO: check if this function works with spot instances
-    ec2 = boto3.client("ec2", region_name=region)
+def get_running_nodes_ips(cluster) -> list[str]:
+    ec2 = boto3.client("ec2", region_name=cluster.region)
     filters = [
         {"Name": "tag:cost_allocation_tag", "Values": [cluster.cluster_tag]},
         {"Name": "instance-state-code", "Values": ["16"]}
     ]
 
-    while True:
-        cluster_ips = []
+    cluster_ips = []
 
-        response = ec2.describe_instances(Filters=filters)
-        for reservation in response["Reservations"]:
-            log.debug(
-                f"boto3 ec2 client response: ```\n{reservation}\n```",
-                detail="get_cluster_nodes_ip_addresses",
+    response = ec2.describe_instances(Filters=filters)
+    for reservation in response["Reservations"]:
+        log.debug(
+            f"boto3 ec2 client response: ```\n{reservation}\n```",
+            detail="get_running_nodes_ips",
+        )
+        if len(reservation["Instances"]) != 1:
+            raise Exception(
+                "Malformed response in `get_running_nodes_ips`"
             )
-            if len(reservation["Instances"]) != 1:
-                raise Exception(
-                    "Malformed response in `get_cluster_nodes_ip_addresses`"
-                )
-            instance = reservation["Instances"][0]
-            instance_ip = instance.get("PublicIpAddress", None)
-            instance_state = instance["State"]["Name"]
-            log.info(
-                f"Detected AWS Instance: `{instance_ip}` with State: `{instance_state}`",
-            )
-            if instance_state == "running" and instance_ip is not None:
-                cluster_ips.append(instance_ip)
-        if len(cluster_ips) == number_of_nodes:
-            log.info(f"Updated Cluster IPs: {cluster_ips}")
-            return cluster_ips
-        else:
-            log.warning(
-                f"AWS Instances not ready yet. IPs: {cluster_ips}, sleeping for 10s and retrying..."
-            )
-            time.sleep(10)
+        instance = reservation["Instances"][0]
+        instance_ip = instance.get("PublicIpAddress", None)
+        instance_state = instance["State"]["Name"]
+        log.info(
+            f"Detected AWS Instance: `{instance_ip}` with State: `{instance_state}`",
+        )
+        if instance_state == "running" and instance_ip is not None:
+            cluster_ips.append(instance_ip)
+
+    return cluster_ips

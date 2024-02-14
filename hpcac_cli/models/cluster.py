@@ -13,7 +13,7 @@ from hpcac_cli.models.task import TaskStatus
 from hpcac_cli.utils.logger import Logger
 from hpcac_cli.utils.providers.aws import (
     get_cluster_efs_dns_name,
-    get_cluster_nodes_ip_addresses,
+    get_running_nodes_ips,
 )
 from hpcac_cli.utils.ssh import (
     scp_transfer_directory,
@@ -399,17 +399,13 @@ class Cluster(Model):
             terraform_refresh(verbose=True)
             time.sleep(5)
 
-            new_ips = get_cluster_nodes_ip_addresses(
-                cluster=self,
-                number_of_nodes=self.node_count,
-                region=self.region,
-            )
+            new_ips = get_running_nodes_ips(cluster=self)
             log.debug(f"Old cluster IPs = {self.node_ips}")
             log.debug(f"New cluster IPs = {new_ips}")
             if len(new_ips) == len(self.node_ips):
                 self.node_ips = new_ips
                 await self.save()
-                log.info("Unresponsive Cluster Node is respawned!")
+                log.info("Bad Cluster Nodes are now respawned!")
                 terraform_ready = True
             else:
                 log.warning(
