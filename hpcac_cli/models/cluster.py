@@ -400,7 +400,7 @@ class Cluster(Model):
             time.sleep(5)
 
             new_ips = get_cluster_nodes_ip_addresses(
-                cluster_tag=self.cluster_tag,
+                cluster=self,
                 number_of_nodes=self.node_count,
                 region=self.region,
             )

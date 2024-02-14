@@ -95,16 +95,17 @@ def get_cluster_efs_dns_name(cluster_tag: str, region: str) -> Optional[str]:
 
 
 def get_cluster_nodes_ip_addresses(
-    cluster_tag: str, number_of_nodes: int, region: str
+    cluster, number_of_nodes: int, region: str
 ) -> list[str]:
     # TODO: check if this function works with spot instances
     ec2 = boto3.client("ec2", region_name=region)
-    filters = [{"Name": "tag:cost_allocation_tag", "Values": [cluster_tag]}]
+    filters = [
+        {"Name": "tag:cost_allocation_tag", "Values": [cluster.cluster_tag]},
+        {"Name": "instance-state-code", "Values": ["16"]}
+    ]
 
+    cluster_ips = []
     while True:
-        dangling_instances = False
-        ip_addresses = []
-
         response = ec2.describe_instances(Filters=filters)
         for reservation in response["Reservations"]:
             log.debug(
@@ -118,28 +119,16 @@ def get_cluster_nodes_ip_addresses(
             instance = reservation["Instances"][0]
             instance_ip = instance.get("PublicIpAddress", None)
             instance_state = instance["State"]["Name"]
+            log.info(
+                f"Detected AWS Instance: `{instance_ip}` with State: `{instance_state}`",
+            )
             if instance_state == "running" and instance_ip is not None:
-                log.debug(
-                    f"Detected AWS Instance: `{instance_ip}` with State: `{instance_state}`",
-                    detail="get_cluster_nodes_ip_addresses",
-                )
-                ip_addresses.append(instance_ip)
-            elif instance_state == "terminated" and instance_ip is not None:
-                log.debug(
-                    f"Detected AWS Instance: `{instance_ip}` with State: `{instance_state}`",
-                    detail="get_cluster_nodes_ip_addresses",
-                )
-            else:
-                log.warning(
-                    f"Detected BAD AWS Instance in state `{instance_state}`",
-                    detail="get_cluster_nodes_ip_addresses",
-                )
-                dangling_instances = True
-
-        if len(ip_addresses) == number_of_nodes and not dangling_instances:
-            return ip_addresses
+                cluster_ips.append(instance_ip)
+        if len(cluster_ips) == number_of_nodes:
+            log.info(f"Updated Cluster IPs: {cluster_ips}")
+            return cluster_ips
         else:
             log.warning(
-                f"AWS Instances not ready yet, sleeping for 10s and retrying..."
+                f"AWS Instances not ready yet. IPs: {cluster_ips}, sleeping for 10s and retrying..."
             )
             time.sleep(10)

@@ -112,7 +112,7 @@ async def create_cluster():
     log.info(f"Updating Cluster record in Postgres...")
     cluster.is_online = True
     cluster.node_ips = get_cluster_nodes_ip_addresses(
-        cluster_tag=cluster.cluster_tag,
+        cluster=cluster,
         number_of_nodes=cluster.node_count,
         region=cluster.region,
     )
