@@ -124,7 +124,7 @@ def get_cluster_nodes_ip_addresses(
                     detail="get_cluster_nodes_ip_addresses",
                 )
                 ip_addresses.append(instance_ip)
-            elif instance_state == "terminated":
+            elif instance_state == "terminated" and instance_ip is not None:
                 log.debug(
                     f"Detected AWS Instance: `{instance_ip}` with State: `{instance_state}`",
                     detail="get_cluster_nodes_ip_addresses",
