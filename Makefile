@@ -6,21 +6,15 @@ SHELL = /bin/bash
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
 
-init:  ## start the HPC@Cloud infrastructure containers only
-	docker-compose up -d postgres minio
+init:  ## start hpcac containers
+	docker compose up -d postgres minio
 
-stop:  ## stops the HPC@Cloud Toolkit containers
-	docker-compose stop
+install:  ## install hpcac using pip
+	pip install .
+	aerich init -t hpcac_cli.db.TORTOISE_ORM
+	aerich init-db
+	aerich migrate --name migration
+	aerich upgrade
 
-create-cluster:  ## create a cluster using the cluster_config.yaml configutaion
-	python manage.py create_cluster_config cluster_config.yaml
-	python manage.py create_cluster test_cluster
-
-destroy-cluster:  ## destroy the test_cluster
-	python manage.py destroy_cluster
-
-launch-mpi-jobs:  ## launch all MPI jobs configured in mpi_run.yaml
-	python manage.py launch_mpi_jobs --cluster-config-id test_cluster
-
-export:  ## export experiment results in CSV format
-	python manage.py export_results
+stop:  ## stops the hpcac containers
+	docker compose stop

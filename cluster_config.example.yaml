@@ -1,0 +1,42 @@
+# Provider settings:
+provider: "aws"
+region: "us-east-1"
+availability_zone: "us-east-1c"
+
+# SSH Keys:
+private_rsa_key_path: "/Users/vanderlei/.ssh/id_rsa"
+public_rsa_key_path: "/Users/vanderlei/.ssh/id_rsa.pub"
+public_key_name: "vanderlei@MacBookProM1"  # Name your SSH key
+
+# Cluster Main settings:
+node_count: 2
+node_ami: "ami-093c91324ede090b5"  # Base Setup + OpenMPI + Sphinx + Debug
+instance_username: "ec2-user"  # The username required for login into the AMI
+node_instance_type: "t2.micro"
+
+# Run the following commands after spawning the cluster:
+init_commands:
+  - python3 -m pip install docutils
+  - sudo yum remove awscli -y
+  - pip install awscli
+  - aws configure set aws_access_key_id ...
+  - aws configure set aws_secret_access_key ...
+  - aws configure set default.region us-east-1
+  - aws configure set default.output json
+
+# Spot Cluster settings:
+use_spot: "false"  # Use spot instances?
+spot_maximum_rate: 5  # Maximum spot rate (USD) per hour
+spot_maximum_timeout: 30  # Maximum spot request wait time (s)
+
+# Root Block Storage (RBS) devices (for each node):
+node_rbs_size: 100
+node_rbs_type: "io2"
+node_rbs_iops: 5000
+
+# Shared file systems:
+use_efs: "true"
+use_fsx: "false"
+
+# Enhanced networking:
+use_efa: "false"

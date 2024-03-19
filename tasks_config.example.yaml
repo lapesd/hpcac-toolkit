@@ -1,0 +1,25 @@
+delete_cluster_after_execution: false
+overwrite_tasks: true  # overwrite tasks with the same tag?
+tasks:
+  - task_tag: "1-rank-hello-world"  # the task_tag must be unique if overwrite_tasks is set to false
+    # Execution commands:
+    setup_command: "cd /var/nfs_dir/my_files/hello_world && mpicc -o exec main.c"
+    run_command: "mpiexec -np 1 --hostfile /var/nfs_dir/my_files/hostfile /var/nfs_dir/my_files/hello_world/exec"
+    ckpt_command: null  # use only for system-level checkpointing
+    restart_command: null  # this command will be executed when retrying the execution after a failure
+    # Fault tolerance information and options:
+    fault_tolerance_technology_label: "No FT"  # this is just a label
+    checkpoint_strategy_label: "No FT"  # this is just a label
+    retries_before_aborting: 0  # maximum number of retries before aborting execution
+    # Outputs:
+    remote_outputs_dir: "/var/nfs_dir/my_files/hello_world"  # this remote folder will be saved at ./results
+
+  - task_tag: "2-ranks-hello-world"
+    setup_command: "cd /var/nfs_dir/my_files/hello_world && mpicc -o exec main.c"
+    run_command: "mpiexec -np 2 --hostfile /var/nfs_dir/my_files/hostfile /var/nfs_dir/my_files/hello_world/exec"
+    ckpt_command: null
+    restart_command: null
+    fault_tolerance_technology_label: "No FT"
+    checkpoint_strategy_label: "No FT"
+    retries_before_aborting: 0
+    remote_outputs_dir: "/var/nfs_dir/my_files/hello_world"
