@@ -1,0 +1,42 @@
+Iteration   61 norm 220.685745
+Iteration   62 norm 225.458420
+Iteration   63 norm 228.509491
+Iteration   64 norm 231.793121
+Iteration   65 norm 235.269730
+Iteration   66 norm 238.609467
+Iteration   67 norm 242.162979
+Iteration   68 norm 246.182281
+Iteration   69 norm 250.383530
+Iteration   70 norm 255.167740
+Iteration   71 norm 259.316986
+Iteration   72 norm 263.616089
+Iteration   73 norm 267.580994
+
+Iteration  126 norm 481.297516
+Iteration  127 norm 485.987946
+Iteration  128 norm 490.613434
+Iteration  129 norm 495.350403
+Iteration  130 norm 499.994446
+Iteration  131 norm 504.575806
+Iteration  132 norm 509.197937
+Iteration  133 norm 513.772156
+Iteration  134 norm 518.539307
+Iteration  135 norm 523.112427
+Iteration  136 norm 527.908142
+Iteration  137 norm 532.617798
+Iteration  138 norm 537.371948
+
+##### Timings #####
+# MIN:   1.56623e+01 	 MAX:   1.56671e+01
+# t_terminate_instances:   3.17087e-03
+##### Debug timings (Average by processes) #####
+# t_scr_init         (AVG):   1.24872e+01
+# t_have_restart     (AVG):   1.24573e-03
+# t_start_restart    (AVG):   6.87791e-04
+# t_route_file       (AVG):   7.90194e-04
+# t_complete_restart (AVG):   1.75183e-03
+# manual_ch_check    (AVG):   1.09693e-05
+# t_start_output     (AVG):   1.72217e+01
+# t_complete_output  (AVG):   5.40695e+00
+# t_scr_finalize     (AVG):   1.86518e+01
+

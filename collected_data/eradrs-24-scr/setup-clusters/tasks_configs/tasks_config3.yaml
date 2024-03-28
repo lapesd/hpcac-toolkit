@@ -1,0 +1,278 @@
+delete_cluster_after_execution: false
+overwrite_tasks: true  # overwrite tasks with the same tag?
+tasks:
+  # ================================ EXP 7 ================================
+  - task_tag: "exp 7-1"
+    fault_tolerance_technology_label: "SCR"
+    checkpoint_strategy_label: "SCR"
+    setup_command: "cd /var/nfs_dir/my_files/jacobi-method && make jacobi_scr && rm .scrconf && cp .scrconf-partner .scrconf"
+    run_command: "
+      cd /var/nfs_dir/my_files/jacobi-method/ &&
+      mpirun -np 32 -hostfile /var/nfs_dir/my_files/hostfile jacobi_scr -p 16 -q 16 -NB 2048 --debug
+      | tail -n 13 >> /var/nfs_dir/my_files/outputs/exp7-1.txt && echo >> /var/nfs_dir/my_files/outputs/exp7-1.txt
+      "
+    ckpt_command: null
+    restart_command: "
+      cd /var/nfs_dir/my_files/jacobi-method/ &&
+      mpirun -np 32 -hostfile /var/nfs_dir/my_files/hostfile jacobi_scr -p 16 -q 16 -NB 2048 --debug
+      | tail -n 13 >> /var/nfs_dir/my_files/outputs/exp7-1.txt && echo >> /var/nfs_dir/my_files/outputs/exp7-1.txt
+      "
+    retries_before_aborting: 3  # maximum number of retries before aborting execution
+    remote_outputs_dir: /var/nfs_dir/my_files/outputs
+
+  - task_tag: "exp 7-2"
+    fault_tolerance_technology_label: "SCR"
+    checkpoint_strategy_label: "SCR"
+    setup_command: "cd /var/nfs_dir/my_files/jacobi-method && make jacobi_scr && rm .scrconf && cp .scrconf-partner .scrconf"
+    run_command: "
+      cd /var/nfs_dir/my_files/jacobi-method/ &&
+      mpirun -np 32 -hostfile /var/nfs_dir/my_files/hostfile jacobi_scr -p 16 -q 16 -NB 2048 --debug
+      | tail -n 13 >> /var/nfs_dir/my_files/outputs/exp7-2.txt && echo >> /var/nfs_dir/my_files/outputs/exp7-2.txt
+      "
+    ckpt_command: null
+    restart_command: "
+      cd /var/nfs_dir/my_files/jacobi-method/ &&
+      mpirun -np 32 -hostfile /var/nfs_dir/my_files/hostfile jacobi_scr -p 16 -q 16 -NB 2048 --debug
+      | tail -n 13 >> /var/nfs_dir/my_files/outputs/exp7-2.txt && echo >> /var/nfs_dir/my_files/outputs/exp7-2.txt
+      "
+    retries_before_aborting: 3  # maximum number of retries before aborting execution
+    remote_outputs_dir: /var/nfs_dir/my_files/outputs
+
+  - task_tag: "exp 7-3"
+    fault_tolerance_technology_label: "SCR"
+    checkpoint_strategy_label: "SCR"
+    setup_command: "cd /var/nfs_dir/my_files/jacobi-method && make jacobi_scr && rm .scrconf && cp .scrconf-partner .scrconf"
+    run_command: "
+      cd /var/nfs_dir/my_files/jacobi-method/ &&
+      mpirun -np 32 -hostfile /var/nfs_dir/my_files/hostfile jacobi_scr -p 16 -q 16 -NB 2048 --debug
+      | tail -n 13 >> /var/nfs_dir/my_files/outputs/exp7-3.txt && echo >> /var/nfs_dir/my_files/outputs/exp7-3.txt
+      "
+    ckpt_command: null
+    restart_command: "
+      cd /var/nfs_dir/my_files/jacobi-method/ &&
+      mpirun -np 32 -hostfile /var/nfs_dir/my_files/hostfile jacobi_scr -p 16 -q 16 -NB 2048 --debug
+      | tail -n 13 >> /var/nfs_dir/my_files/outputs/exp7-3.txt && echo >> /var/nfs_dir/my_files/outputs/exp7-3.txt
+      "
+    retries_before_aborting: 3  # maximum number of retries before aborting execution
+    remote_outputs_dir: /var/nfs_dir/my_files/outputs
+
+  - task_tag: "exp 7-4"
+    fault_tolerance_technology_label: "SCR"
+    checkpoint_strategy_label: "SCR"
+    setup_command: "cd /var/nfs_dir/my_files/jacobi-method && make jacobi_scr && rm .scrconf && cp .scrconf-partner .scrconf"
+    run_command: "
+      cd /var/nfs_dir/my_files/jacobi-method/ &&
+      mpirun -np 32 -hostfile /var/nfs_dir/my_files/hostfile jacobi_scr -p 16 -q 16 -NB 2048 --debug
+      | tail -n 13 >> /var/nfs_dir/my_files/outputs/exp7-4.txt && echo >> /var/nfs_dir/my_files/outputs/exp7-4.txt
+      "
+    ckpt_command: null
+    restart_command: "
+      cd /var/nfs_dir/my_files/jacobi-method/ &&
+      mpirun -np 32 -hostfile /var/nfs_dir/my_files/hostfile jacobi_scr -p 16 -q 16 -NB 2048 --debug
+      | tail -n 13 >> /var/nfs_dir/my_files/outputs/exp7-4.txt && echo >> /var/nfs_dir/my_files/outputs/exp7-4.txt
+      "
+    retries_before_aborting: 3  # maximum number of retries before aborting execution
+    remote_outputs_dir: /var/nfs_dir/my_files/outputs
+
+  - task_tag: "exp 7-5"
+    fault_tolerance_technology_label: "SCR"
+    checkpoint_strategy_label: "SCR"
+    setup_command: "cd /var/nfs_dir/my_files/jacobi-method && make jacobi_scr && rm .scrconf && cp .scrconf-partner .scrconf"
+    run_command: "
+      cd /var/nfs_dir/my_files/jacobi-method/ &&
+      mpirun -np 32 -hostfile /var/nfs_dir/my_files/hostfile jacobi_scr -p 16 -q 16 -NB 2048 --debug
+      | tail -n 13 >> /var/nfs_dir/my_files/outputs/exp7-5.txt && echo >> /var/nfs_dir/my_files/outputs/exp7-5.txt
+      "
+    ckpt_command: null
+    restart_command: "
+      cd /var/nfs_dir/my_files/jacobi-method/ &&
+      mpirun -np 32 -hostfile /var/nfs_dir/my_files/hostfile jacobi_scr -p 16 -q 16 -NB 2048 --debug
+      | tail -n 13 >> /var/nfs_dir/my_files/outputs/exp7-5.txt && echo >> /var/nfs_dir/my_files/outputs/exp7-5.txt
+      "
+    retries_before_aborting: 3  # maximum number of retries before aborting execution
+    remote_outputs_dir: /var/nfs_dir/my_files/outputs
+  # =======================================================================
+
+  # ================================ EXP 8 ================================
+  - task_tag: "exp 8-1"
+    fault_tolerance_technology_label: "SCR"
+    checkpoint_strategy_label: "SCR"
+    setup_command: "cd /var/nfs_dir/my_files/jacobi-method && make jacobi_scr && rm .scrconf && cp .scrconf-xor .scrconf"
+    run_command: "
+      cd /var/nfs_dir/my_files/jacobi-method/ &&
+      mpirun -np 32 -hostfile /var/nfs_dir/my_files/hostfile jacobi_scr -p 16 -q 16 -NB 2048 --debug
+      | tail -n 13 >> /var/nfs_dir/my_files/outputs/exp8-1.txt && echo >> /var/nfs_dir/my_files/outputs/exp8-1.txt
+      "
+    ckpt_command: null
+    restart_command: "
+      cd /var/nfs_dir/my_files/jacobi-method/ &&
+      mpirun -np 32 -hostfile /var/nfs_dir/my_files/hostfile jacobi_scr -p 16 -q 16 -NB 2048 --debug
+      | tail -n 13 >> /var/nfs_dir/my_files/outputs/exp8-1.txt && echo >> /var/nfs_dir/my_files/outputs/exp8-1.txt
+      "
+    retries_before_aborting: 3  # maximum number of retries before aborting execution
+    remote_outputs_dir: /var/nfs_dir/my_files/outputs
+
+  - task_tag: "exp 8-2"
+    fault_tolerance_technology_label: "SCR"
+    checkpoint_strategy_label: "SCR"
+    setup_command: "cd /var/nfs_dir/my_files/jacobi-method && make jacobi_scr && rm .scrconf && cp .scrconf-xor .scrconf"
+    run_command: "
+      cd /var/nfs_dir/my_files/jacobi-method/ &&
+      mpirun -np 32 -hostfile /var/nfs_dir/my_files/hostfile jacobi_scr -p 16 -q 16 -NB 2048 --debug
+      | tail -n 13 >> /var/nfs_dir/my_files/outputs/exp8-2.txt && echo >> /var/nfs_dir/my_files/outputs/exp8-2.txt
+      "
+    ckpt_command: null
+    restart_command: "
+      cd /var/nfs_dir/my_files/jacobi-method/ &&
+      mpirun -np 32 -hostfile /var/nfs_dir/my_files/hostfile jacobi_scr -p 16 -q 16 -NB 2048 --debug
+      | tail -n 13 >> /var/nfs_dir/my_files/outputs/exp8-2.txt && echo >> /var/nfs_dir/my_files/outputs/exp8-2.txt
+      "
+    retries_before_aborting: 3  # maximum number of retries before aborting execution
+    remote_outputs_dir: /var/nfs_dir/my_files/outputs
+
+  - task_tag: "exp 8-3"
+    fault_tolerance_technology_label: "SCR"
+    checkpoint_strategy_label: "SCR"
+    setup_command: "cd /var/nfs_dir/my_files/jacobi-method && make jacobi_scr && rm .scrconf && cp .scrconf-xor .scrconf"
+    run_command: "
+      cd /var/nfs_dir/my_files/jacobi-method/ &&
+      mpirun -np 32 -hostfile /var/nfs_dir/my_files/hostfile jacobi_scr -p 16 -q 16 -NB 2048 --debug
+      | tail -n 13 >> /var/nfs_dir/my_files/outputs/exp8-3.txt && echo >> /var/nfs_dir/my_files/outputs/exp8-3.txt
+      "
+    ckpt_command: null
+    restart_command: "
+      cd /var/nfs_dir/my_files/jacobi-method/ &&
+      mpirun -np 32 -hostfile /var/nfs_dir/my_files/hostfile jacobi_scr -p 16 -q 16 -NB 2048 --debug
+      | tail -n 13 >> /var/nfs_dir/my_files/outputs/exp8-3.txt && echo >> /var/nfs_dir/my_files/outputs/exp8-3.txt
+      "
+    retries_before_aborting: 3  # maximum number of retries before aborting execution
+    remote_outputs_dir: /var/nfs_dir/my_files/outputs
+
+  - task_tag: "exp 8-4"
+    fault_tolerance_technology_label: "SCR"
+    checkpoint_strategy_label: "SCR"
+    setup_command: "cd /var/nfs_dir/my_files/jacobi-method && make jacobi_scr && rm .scrconf && cp .scrconf-xor .scrconf"
+    run_command: "
+      cd /var/nfs_dir/my_files/jacobi-method/ &&
+      mpirun -np 32 -hostfile /var/nfs_dir/my_files/hostfile jacobi_scr -p 16 -q 16 -NB 2048 --debug
+      | tail -n 13 >> /var/nfs_dir/my_files/outputs/exp8-4.txt && echo >> /var/nfs_dir/my_files/outputs/exp8-4.txt
+      "
+    ckpt_command: null
+    restart_command: "
+      cd /var/nfs_dir/my_files/jacobi-method/ &&
+      mpirun -np 32 -hostfile /var/nfs_dir/my_files/hostfile jacobi_scr -p 16 -q 16 -NB 2048 --debug
+      | tail -n 13 >> /var/nfs_dir/my_files/outputs/exp8-4.txt && echo >> /var/nfs_dir/my_files/outputs/exp8-4.txt
+      "
+    retries_before_aborting: 3  # maximum number of retries before aborting execution
+    remote_outputs_dir: /var/nfs_dir/my_files/outputs
+
+  - task_tag: "exp 8-5"
+    fault_tolerance_technology_label: "SCR"
+    checkpoint_strategy_label: "SCR"
+    setup_command: "cd /var/nfs_dir/my_files/jacobi-method && make jacobi_scr && rm .scrconf && cp .scrconf-xor .scrconf"
+    run_command: "
+      cd /var/nfs_dir/my_files/jacobi-method/ &&
+      mpirun -np 32 -hostfile /var/nfs_dir/my_files/hostfile jacobi_scr -p 16 -q 16 -NB 2048 --debug
+      | tail -n 13 >> /var/nfs_dir/my_files/outputs/exp8-5.txt && echo >> /var/nfs_dir/my_files/outputs/exp8-5.txt
+      "
+    ckpt_command: null
+    restart_command: "
+      cd /var/nfs_dir/my_files/jacobi-method/ &&
+      mpirun -np 32 -hostfile /var/nfs_dir/my_files/hostfile jacobi_scr -p 16 -q 16 -NB 2048 --debug
+      | tail -n 13 >> /var/nfs_dir/my_files/outputs/exp8-5.txt && echo >> /var/nfs_dir/my_files/outputs/exp8-5.txt
+      "
+    retries_before_aborting: 3  # maximum number of retries before aborting execution
+    remote_outputs_dir: /var/nfs_dir/my_files/outputs
+  # =======================================================================
+
+  # ================================ EXP 9 ================================
+  - task_tag: "exp 9-1"
+    fault_tolerance_technology_label: "SCR"
+    checkpoint_strategy_label: "SCR"
+    setup_command: "cd /var/nfs_dir/my_files/jacobi-method && make jacobi_scr && rm .scrconf && cp .scrconf-rs .scrconf"
+    run_command: "
+      cd /var/nfs_dir/my_files/jacobi-method/ &&
+      mpirun -np 32 -hostfile /var/nfs_dir/my_files/hostfile jacobi_scr -p 16 -q 16 -NB 2048 --debug
+      | tail -n 13 >> /var/nfs_dir/my_files/outputs/exp9-1.txt && echo >> /var/nfs_dir/my_files/outputs/exp9-1.txt
+      "
+    ckpt_command: null
+    restart_command: "
+      cd /var/nfs_dir/my_files/jacobi-method/ &&
+      mpirun -np 32 -hostfile /var/nfs_dir/my_files/hostfile jacobi_scr -p 16 -q 16 -NB 2048 --debug
+      | tail -n 13 >> /var/nfs_dir/my_files/outputs/exp9-1.txt && echo >> /var/nfs_dir/my_files/outputs/exp9-1.txt
+      "
+    retries_before_aborting: 3  # maximum number of retries before aborting execution
+    remote_outputs_dir: /var/nfs_dir/my_files/outputs
+
+  - task_tag: "exp 9-2"
+    fault_tolerance_technology_label: "SCR"
+    checkpoint_strategy_label: "SCR"
+    setup_command: "cd /var/nfs_dir/my_files/jacobi-method && make jacobi_scr && rm .scrconf && cp .scrconf-rs .scrconf"
+    run_command: "
+      cd /var/nfs_dir/my_files/jacobi-method/ &&
+      mpirun -np 32 -hostfile /var/nfs_dir/my_files/hostfile jacobi_scr -p 16 -q 16 -NB 2048 --debug
+      | tail -n 13 >> /var/nfs_dir/my_files/outputs/exp9-2.txt && echo >> /var/nfs_dir/my_files/outputs/exp9-2.txt
+      "
+    ckpt_command: null
+    restart_command: "
+      cd /var/nfs_dir/my_files/jacobi-method/ &&
+      mpirun -np 32 -hostfile /var/nfs_dir/my_files/hostfile jacobi_scr -p 16 -q 16 -NB 2048 --debug
+      | tail -n 13 >> /var/nfs_dir/my_files/outputs/exp9-2.txt && echo >> /var/nfs_dir/my_files/outputs/exp9-2.txt
+      "
+    retries_before_aborting: 3  # maximum number of retries before aborting execution
+    remote_outputs_dir: /var/nfs_dir/my_files/outputs
+
+  - task_tag: "exp 9-3"
+    fault_tolerance_technology_label: "SCR"
+    checkpoint_strategy_label: "SCR"
+    setup_command: "cd /var/nfs_dir/my_files/jacobi-method && make jacobi_scr && rm .scrconf && cp .scrconf-rs .scrconf"
+    run_command: "
+      cd /var/nfs_dir/my_files/jacobi-method/ &&
+      mpirun -np 32 -hostfile /var/nfs_dir/my_files/hostfile jacobi_scr -p 16 -q 16 -NB 2048 --debug
+      | tail -n 13 >> /var/nfs_dir/my_files/outputs/exp9-3.txt && echo >> /var/nfs_dir/my_files/outputs/exp9-3.txt
+      "
+    ckpt_command: null
+    restart_command: "
+      cd /var/nfs_dir/my_files/jacobi-method/ &&
+      mpirun -np 32 -hostfile /var/nfs_dir/my_files/hostfile jacobi_scr -p 16 -q 16 -NB 2048 --debug
+      | tail -n 13 >> /var/nfs_dir/my_files/outputs/exp9-3.txt && echo >> /var/nfs_dir/my_files/outputs/exp9-3.txt
+      "
+    retries_before_aborting: 3  # maximum number of retries before aborting execution
+    remote_outputs_dir: /var/nfs_dir/my_files/outputs
+
+  - task_tag: "exp 9-4"
+    fault_tolerance_technology_label: "SCR"
+    checkpoint_strategy_label: "SCR"
+    setup_command: "cd /var/nfs_dir/my_files/jacobi-method && make jacobi_scr && rm .scrconf && cp .scrconf-rs .scrconf"
+    run_command: "
+      cd /var/nfs_dir/my_files/jacobi-method/ &&
+      mpirun -np 32 -hostfile /var/nfs_dir/my_files/hostfile jacobi_scr -p 16 -q 16 -NB 2048 --debug
+      | tail -n 13 >> /var/nfs_dir/my_files/outputs/exp9-4.txt && echo >> /var/nfs_dir/my_files/outputs/exp9-4.txt
+      "
+    ckpt_command: null
+    restart_command: "
+      cd /var/nfs_dir/my_files/jacobi-method/ &&
+      mpirun -np 32 -hostfile /var/nfs_dir/my_files/hostfile jacobi_scr -p 16 -q 16 -NB 2048 --debug
+      | tail -n 13 >> /var/nfs_dir/my_files/outputs/exp9-4.txt && echo >> /var/nfs_dir/my_files/outputs/exp9-4.txt
+      "
+    retries_before_aborting: 3  # maximum number of retries before aborting execution
+    remote_outputs_dir: /var/nfs_dir/my_files/outputs
+
+  - task_tag: "exp 9-5"
+    fault_tolerance_technology_label: "SCR"
+    checkpoint_strategy_label: "SCR"
+    setup_command: "cd /var/nfs_dir/my_files/jacobi-method && make jacobi_scr && rm .scrconf && cp .scrconf-rs .scrconf"
+    run_command: "
+      cd /var/nfs_dir/my_files/jacobi-method/ &&
+      mpirun -np 32 -hostfile /var/nfs_dir/my_files/hostfile jacobi_scr -p 16 -q 16 -NB 2048 --debug
+      | tail -n 13 >> /var/nfs_dir/my_files/outputs/exp9-5.txt && echo >> /var/nfs_dir/my_files/outputs/exp9-5.txt
+      "
+    ckpt_command: null
+    restart_command: "
+      cd /var/nfs_dir/my_files/jacobi-method/ &&
+      mpirun -np 32 -hostfile /var/nfs_dir/my_files/hostfile jacobi_scr -p 16 -q 16 -NB 2048 --debug
+      | tail -n 13 >> /var/nfs_dir/my_files/outputs/exp9-5.txt && echo >> /var/nfs_dir/my_files/outputs/exp9-5.txt
+      "
+    retries_before_aborting: 3  # maximum number of retries before aborting execution
+    remote_outputs_dir: /var/nfs_dir/my_files/outputs
+  # =======================================================================
