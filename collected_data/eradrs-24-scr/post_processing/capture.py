@@ -2,7 +2,7 @@ import os
 import sys
 import csv
 
-HEADER = "tempo total,tempo não idle,SCR_Init,SCR_Have_restart,SCR_Start_restart,SCR_Route_file,SCR_Complete_restart,SCR_Need_checkpoint,SCR_Start_output,SCR_Complete_output,SCR_Finalize"
+HEADER = "total timing,non-idle timing,SCR_Init,SCR_Have_restart,SCR_Start_restart,SCR_Route_file,SCR_Complete_restart,SCR_Need_checkpoint,SCR_Start_output,SCR_Complete_output,SCR_Finalize"
 
 DATA_DIR = "../collected_data/"
 OUTPUT_DIR = DATA_DIR + "mid-processing/"

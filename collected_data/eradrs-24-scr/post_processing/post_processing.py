@@ -1,13 +1,3 @@
-# um arquivo para cada experimento: 5 execuções (exp1.csv, ..., exp24.csv)
-# cada arquivo tem 5 linhas (uma para cada execução):
-# linhas: tempo total, tempo não idle, tempo terminar instâncias, SCR_Init,
-# SCR_Have_restart, SCR_Start_restart, SCR_Route_file, SCR_Complete_restart,
-# SCR_Need_checkpoint, SCR_Start_output, SCR_Complete_output, SCR_Finalize (12 colunas)
-# Obs: checado, printado na ordem acima
-#
-# pós-processamento: calcular média e desvio padrão para cada experimento
-# e escrever em um arquivo .csv (resultados/exp1.csv, ..., resultados/exp24.csv)
-
 import csv
 from pathlib import Path
 import capture
@@ -17,186 +7,186 @@ INPUT_DIR = capture.OUTPUT_DIR + capture.EXP_PREFIX + "$.csv"
 OUTPUT_FILE = capture.DATA_DIR + "final/" + capture.EXP_PREFIX + "$.csv"
 
 
-def calcular_desvio_padrao(lista: list[float]) -> float:
+def calculate_stdev(numbers: list[float]) -> float:
     """
-    Calcula o desvio padrão de uma lista de números.
+    Calculates the standard deviation of a list of numbers.
     """
-    n = len(lista)
-    media = sum(lista) / n
-    soma = 0
-    for i in lista:
-        soma += (i - media) ** 2
-    desvio_padrao = (soma / (n - 1)) ** 0.5
-    return desvio_padrao
+    n = len(numbers)
+    average = sum(numbers) / n
+    k = 0
+    for i in numbers:
+        k += (i - average) ** 2
+    stdev = (k / (n - 1)) ** 0.5
+    return stdev
 
 
-def calcular_porcentagem_desvio_padrao(
-    desvios: list[float], tempos_totais: list[float]
+def calculate_stdev_percentage(
+    stdevs: list[float], total_timings: list[float]
 ) -> list[float]:
     """
-    Calcula a porcentagem do desvio padrão em relação ao tempo total.
+    Calculates the percentage of the standard deviation in relation to the total time.
     """
-    # desvio/tempo_total = x%/100% -> x = 100*desvio/tempo_total
+    # stdev/total_timing = x%/100% -> x = 100*stdev/total_timing
 
-    porcentagens = []
-    for desvio, tempo_total in zip(desvios, tempos_totais):
-        porcentagens.append(100 * desvio / tempo_total)
-    return porcentagens
-
-
-def calcular_tempo_medio(lista: list[float]) -> float:
-    """
-    Calcula o tempo médio de uma lista de números.
-    """
-    return sum(lista) / len(lista)
+    percentages = []
+    for stdev, total_timing in zip(stdevs, total_timings):
+        percentages.append(100 * stdev / total_timing)
+    return percentages
 
 
-def pegar_tempos_totais(nome_arquivo: str) -> list[float]:
+def calculate_average_timing(numbers: list[float]) -> float:
     """
-    Retorna uma lista com os tempos totais de cada execução.
+    Calculates the average time of a list of numbers.
     """
-    tempos = []
-    with open(nome_arquivo, "r") as arquivo:
-        leitor_csv = csv.reader(arquivo)
-        next(leitor_csv)  # header
-        for linha in leitor_csv:
-            if linha == []:
+    return sum(numbers) / len(numbers)
+
+
+def capture_total_timings(filename: str) -> list[float]:
+    """
+    Returns a list with the total times of each execution.
+    """
+    timings = []
+    with open(filename, "r") as file:
+        csv_reader = csv.reader(file)
+        next(csv_reader)  # header
+        for row in csv_reader:
+            if row == []:
                 continue
-            tempos.append(float(linha[0]))
-    return tempos
+            timings.append(float(row[0]))
+    return timings
 
 
-def pegar_tempos_nao_idle(nome_arquivo: str) -> list[float]:
+def capture_non_idle_timings(filename: str) -> list[float]:
     """
-    Retorna uma lista com os tempos não idle de cada execução.
+    Returns a list with the non-idle timings of each execution.
     """
-    tempos = []
-    with open(nome_arquivo, "r") as arquivo:
-        leitor_csv = csv.reader(arquivo)
-        next(leitor_csv)  # header
-        for linha in leitor_csv:
-            if linha == []:
+    timings = []
+    with open(filename, "r") as file:
+        csv_reader = csv.reader(file)
+        next(csv_reader)  # header
+        for row in csv_reader:
+            if row == []:
                 continue
-            tempos.append(float(linha[1]))
-    return tempos
+            timings.append(float(row[1]))
+    return timings
 
 
-def pegar_tempos_por_funcao(nome_arquivo: str) -> list[list[float]]:
+def capture_functions_timings(filename: str) -> list[list[float]]:
     """
-    Retorna uma lista com os tempos de cada função de cada execução.
+    Returns a list with the timings of each function of each execution.
     """
-    tempos = [[] for _ in range(9)]
-    with open(nome_arquivo, "r") as arquivo:
-        leitor_csv = csv.reader(arquivo)
-        next(leitor_csv)  # header
-        for linha in leitor_csv:
-            if linha == []:
+    timings = [[] for _ in range(9)]
+    with open(filename, "r") as file:
+        csv_reader = csv.reader(file)
+        next(csv_reader)  # header
+        for row in csv_reader:
+            if row == []:
                 continue
             for i in range(2, 11):
-                tempos[i - 2].append(float(linha[i]))
-    return tempos
+                timings[i - 2].append(float(row[i]))
+    return timings
 
 
-def escrever_resultados(
-    nome_arquivo: str,
-    media_tempos_totais: float,
-    stdev_tempos_totais: float,
-    porc_stdev_tempos_totais: float,
-    media_tempos_nao_idle: float,
-    stdev_tempos_nao_idle: float,
-    porc_stdev_tempos_nao_idle: float,
-    medias_tempos_por_funcao: list[float],
-    stdevs_tempos_por_funcao: list[float],
-    porc_stdevs_tempos_por_funcao: list[float],
+def write_final(
+    filename: str,
+    average_total_timings: float,
+    stdev_total_timings: float,
+    porc_stdev_total_timings: float,
+    non_idle_avg_timings: float,
+    stdev_non_idle_timings: float,
+    porc_stdev_non_idle_timings: float,
+    avg_functions_timings: list[float],
+    stdev_functions_timings: list[float],
+    perc_stdev_functions_timings: list[float],
 ) -> None:
     """
-    Escreve os resultados em um arquivo .csv, com o seguinte formato:
-    media_tempos_totais, stdev_tempos_totais
-    media_tempos_nao_idle, stdev_tempos_nao_idle
-    tempo_funcao1_medio, desvio_padrao_funcao1
+    Write the results to a .csv file, with the following format:
+    average_total_timings, stdev_total_timings
+    non_idle_avg_timings, stdev_non_idle_timings
+    avg_func1_timing, stdev_func1
     ...
-    tempo_funcao10_medio, desvio_padrao_funcao10
+    avg_func10_timing, stdev_func10
     """
-    if not Path(nome_arquivo).parent.exists():
-        Path(nome_arquivo).parent.mkdir()
+    if not Path(filename).parent.exists():
+        Path(filename).parent.mkdir()
 
     header_list = capture.HEADER.split(",")
 
-    with open(nome_arquivo, "w") as arquivo:
-        escritor_csv = csv.writer(arquivo)
-        escritor_csv.writerow(
-            ["label", "media", "desvio_padrao", "porcentagem_desvio_padrao"]
+    with open(filename, "w") as file:
+        csv_writer = csv.writer(file)
+        csv_writer.writerow(
+            ["label", "average", "stdev", "porcentagem_stdev"]
         )
-        escritor_csv.writerow(
+        csv_writer.writerow(
             [
                 header_list[0],
-                media_tempos_totais,
-                stdev_tempos_totais,
-                porc_stdev_tempos_totais,
+                average_total_timings,
+                stdev_total_timings,
+                porc_stdev_total_timings,
             ]
         )
-        escritor_csv.writerow(
+        csv_writer.writerow(
             [
                 header_list[1],
-                media_tempos_nao_idle,
-                stdev_tempos_nao_idle,
-                porc_stdev_tempos_nao_idle,
+                non_idle_avg_timings,
+                stdev_non_idle_timings,
+                porc_stdev_non_idle_timings,
             ]
         )
-        for i in range(len(medias_tempos_por_funcao)):
-            escritor_csv.writerow(
+        for i in range(len(avg_functions_timings)):
+            csv_writer.writerow(
                 [
                     header_list[i + 2],
-                    medias_tempos_por_funcao[i],
-                    stdevs_tempos_por_funcao[i],
-                    porc_stdevs_tempos_por_funcao[i],
+                    avg_functions_timings[i],
+                    stdev_functions_timings[i],
+                    perc_stdev_functions_timings[i],
                 ]
             )
 
 
 def main():
     """
-    Executa o pós-processamento.
+    Executes the post-processing.
     """
     for i in range(1, 25):
-        arquivo = INPUT_DIR.replace("$", str(i))
+        file = INPUT_DIR.replace("$", str(i))
 
-        tempos_totais = pegar_tempos_totais(arquivo)
-        tempos_nao_idle = pegar_tempos_nao_idle(arquivo)
-        tempos_por_funcao = pegar_tempos_por_funcao(arquivo)
+        total_timings = capture_total_timings(file)
+        timings_nao_idle = capture_non_idle_timings(file)
+        timings_por_funcao = capture_functions_timings(file)
 
-        media_tempos_totais = calcular_tempo_medio(tempos_totais)
-        stdev_tempos_totais = calcular_desvio_padrao(tempos_totais)
-        porc_stdev_tempos_totais = calcular_porcentagem_desvio_padrao(
-            [stdev_tempos_totais], [media_tempos_totais]
+        average_total_timings = calculate_average_timing(total_timings)
+        stdev_total_timings = calculate_stdev(total_timings)
+        porc_stdev_total_timings = calculate_stdev_percentage(
+            [stdev_total_timings], [average_total_timings]
         )[0]
 
-        media_tempos_nao_idle = calcular_tempo_medio(tempos_nao_idle)
-        stdev_tempos_nao_idle = calcular_desvio_padrao(tempos_nao_idle)
-        porc_stdev_tempos_nao_idle = calcular_porcentagem_desvio_padrao(
-            [stdev_tempos_nao_idle], [media_tempos_nao_idle]
+        non_idle_avg_timings = calculate_average_timing(timings_nao_idle)
+        stdev_non_idle_timings = calculate_stdev(timings_nao_idle)
+        porc_stdev_non_idle_timings = calculate_stdev_percentage(
+            [stdev_non_idle_timings], [non_idle_avg_timings]
         )[0]
 
-        medias_tempos_por_funcao = []
-        stdevs_tempos_por_funcao = []
-        for j in tempos_por_funcao:
-            medias_tempos_por_funcao.append(calcular_tempo_medio(j))
-            stdevs_tempos_por_funcao.append(calcular_desvio_padrao(j))
-        porc_stdevs_tempos_por_funcao = calcular_porcentagem_desvio_padrao(
-            stdevs_tempos_por_funcao, medias_tempos_por_funcao
+        avg_functions_timings = []
+        stdev_functions_timings = []
+        for j in timings_por_funcao:
+            avg_functions_timings.append(calculate_average_timing(j))
+            stdev_functions_timings.append(calculate_stdev(j))
+        perc_stdev_functions_timings = calculate_stdev_percentage(
+            stdev_functions_timings, avg_functions_timings
         )
 
-        escrever_resultados(
+        write_final(
             OUTPUT_FILE.replace("$", str(i)),
-            media_tempos_totais,
-            stdev_tempos_totais,
-            porc_stdev_tempos_totais,
-            media_tempos_nao_idle,
-            stdev_tempos_nao_idle,
-            porc_stdev_tempos_nao_idle,
-            medias_tempos_por_funcao,
-            stdevs_tempos_por_funcao,
-            porc_stdevs_tempos_por_funcao,
+            average_total_timings,
+            stdev_total_timings,
+            porc_stdev_total_timings,
+            non_idle_avg_timings,
+            stdev_non_idle_timings,
+            porc_stdev_non_idle_timings,
+            avg_functions_timings,
+            stdev_functions_timings,
+            perc_stdev_functions_timings,
         )
 
 
