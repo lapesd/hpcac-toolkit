@@ -41,8 +41,8 @@ async def create_cluster():
     node_count = cluster_config["node_count"]
     instance_type = cluster_config["node_instance_type"]
     # ami_id = cluster_config["node_ami"]
-    use_spot = cluster_config["use_spot"]
-    use_efs = cluster_config["use_efs"]
+    use_spot = bool(cluster_config["use_spot"])
+    use_efs = bool(cluster_config["use_efs"])
     timestamp = datetime.now().strftime("%H-%M-%S--%d-%m-%Y")
 
     cluster_tag = f"{provider}-{az}-{node_count}x-{instance_type}{'-spot' if use_spot else ''}{'-efs' if use_efs else ''}-{timestamp}"

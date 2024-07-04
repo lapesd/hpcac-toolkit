@@ -25,7 +25,7 @@ init_commands:
   - aws configure set default.output json
 
 # Spot Cluster settings:
-use_spot: "false"  # Use spot instances?
+use_spot: false  # Use spot instances?
 spot_maximum_rate: 5  # Maximum spot rate (USD) per hour
 spot_maximum_timeout: 30  # Maximum spot request wait time (s)
 
@@ -35,8 +35,8 @@ node_rbs_type: "io2"
 node_rbs_iops: 5000
 
 # Shared file systems:
-use_efs: "true"
-use_fsx: "false"
+use_efs: false
+use_fsx: false
 
 # Enhanced networking:
-use_efa: "false"
+use_efa: false
