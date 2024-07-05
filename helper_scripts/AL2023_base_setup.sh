@@ -7,18 +7,11 @@ sudo yum -y update
 sudo yum groupinstall -y 'Development Tools'
 sudo yum install -y \
   git \
-  wget \
-  nfs-utils
+  wget
 
 # Clean yum cache and metadata:
 sudo yum clean all \
   && sudo rm -rf /var/cache/yum
-
-# Setup EFS/NFS shared directories
-sudo mkdir /var/nfs_dir
-sudo chown -R nobody:nobody /var/nfs_dir
-sudo chown -R ec2-user:nobody /var/nfs_dir
-sudo chmod -R 775 /var/nfs_dir
 
 # Edit the /etc/ssh/ssh_config file with the following:
 # Host *

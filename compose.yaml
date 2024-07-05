@@ -9,7 +9,7 @@ services:
       POSTGRES_PASSWORD: local
       POSTGRES_DB: postgres
     volumes:
-      - ./my_files/postgres:/var/lib/postgresql
+      - ./workspace/postgres:/var/lib/postgresql
 
   minio:
     image: minio/minio:latest
@@ -18,7 +18,7 @@ services:
       - "9000:9000"
       - "9090:9090"
     volumes:
-      - ./my_files/minio/data:/data/minio
+      - ./workspace/minio/data:/data/minio
     environment:
       MINIO_ROOT_USER: root
       MINIO_ROOT_PASSWORD: password

@@ -174,8 +174,5 @@ exported_results.csv
 **terraform.tfvars
 /tmp_terraform_dir
 
-# Minio files
-/minio
-
 .python-version
 .DS_Store
