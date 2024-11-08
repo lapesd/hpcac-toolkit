@@ -10,10 +10,10 @@ init:  ## start hpcac containers
 	docker compose up -d
 
 install:  ## install hpcac using pip
-	pip install .
-	aerich init -t hpcac_cli.db.TORTOISE_ORM
-	aerich init-db
-	aerich migrate --name migration
+	pip install . && \
+	aerich init -t hpcac_cli.db.TORTOISE_ORM && \
+	aerich init-db && \
+	aerich migrate --name migration && \
 	aerich upgrade
 
 stop:  ## stops the hpcac containers

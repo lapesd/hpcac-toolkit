@@ -172,7 +172,6 @@ exported_results.csv
 
 # Terraform files
 **terraform.tfvars
-/tmp_terraform_dir
 
 .python-version
 .DS_Store
