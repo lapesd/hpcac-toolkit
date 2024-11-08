@@ -2,7 +2,7 @@ from tortoise import Tortoise
 
 
 TORTOISE_ORM = {
-    "connections": {"default": "postgres://local:local@127.0.0.1:5432/postgres"},
+    "connections": {"default": "postgres://local:local@127.0.0.1:5437/postgres"},
     "apps": {
         "models": {
             "models": [
