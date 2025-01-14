@@ -3,8 +3,13 @@ overwrite_tasks: true  # overwrite tasks with the same tag?
 tasks:
   - task_tag: "1-rank-hello-world"  # the task_tag must be unique if overwrite_tasks is set to false
     # Execution commands:
-    setup_command: "cd /var/nfs_dir/my_files/hello_world && mpicc -o exec main.c"
-    run_command: "mpiexec -np 1 --hostfile /var/nfs_dir/my_files/hostfile /var/nfs_dir/my_files/hello_world/exec"
+    setup_commands: 
+      - cd /var/nfs_dir/my_files/hello_world 
+      - mpicc -o exec main.c
+    run_commands: 
+      - mpiexec -np 1 --hostfile /var/nfs_dir/my_files/hostfile /var/nfs_dir/my_files/hello_world/exec
+    nodes_to_use: 1
+    slots_per_node_to_use: 1
     ckpt_command: null  # use only for system-level checkpointing
     restart_command: null  # this command will be executed when retrying the execution after a failure
     # Fault tolerance information and options:
@@ -15,11 +20,57 @@ tasks:
     remote_outputs_dir: "/var/nfs_dir/my_files/hello_world"  # this remote folder will be saved at ./results
 
   - task_tag: "2-ranks-hello-world"
-    setup_command: "cd /var/nfs_dir/my_files/hello_world && mpicc -o exec main.c"
-    run_command: "mpiexec -np 2 --hostfile /var/nfs_dir/my_files/hostfile /var/nfs_dir/my_files/hello_world/exec"
-    ckpt_command: null
-    restart_command: null
-    fault_tolerance_technology_label: "No FT"
-    checkpoint_strategy_label: "No FT"
-    retries_before_aborting: 0
-    remote_outputs_dir: "/var/nfs_dir/my_files/hello_world"
+    setup_commands: 
+      - cd /var/nfs_dir/my_files/hello_world
+      - mpicc -o exec main.c
+    run_commands: 
+      - mpiexec -np 2 --hostfile /var/nfs_dir/my_files/hostfile /var/nfs_dir/my_files/hello_world/exec
+    nodes_to_use: 1
+    slots_per_node_to_use: 1
+
+  - task_tag: "npb_is_example"
+    setup_commands: 
+      - git clone git@github.com:lapesd/hpcac-toolkit-apps.git /var/nfs_dir/my_files/hpcac-toolkit-apps
+      - mkdir -p /var/nfs_dir/my_files/hpcac-toolkit-apps/NPB3.3.1/NPB3.3-MPI/bin
+      - make -C /var/nfs_dir/my_files/hpcac-toolkit-apps/NPB3.3.1/NPB3.3-MPI is NPROCS=4 CLASS=C
+    run_commands: 
+      - mpirun -np 4 -hostfile /var/nfs_dir/my_files/hostfile /var/nfs_dir/my_files/hpcac-toolkit-apps/NPB3.3.1/NPB3.3-MPI/bin/is.C.4
+    nodes_to_use: 1
+    slots_per_node_to_use: 4
+
+  - task_tag: "npb_ep_example"
+    setup_commands: 
+      - git clone git@github.com:lapesd/hpcac-toolkit-apps.git /var/nfs_dir/my_files/hpcac-toolkit-apps
+      - mkdir -p /var/nfs_dir/my_files/hpcac-toolkit-apps/NPB3.3.1/NPB3.3-MPI/bin
+      - make -C /var/nfs_dir/my_files/hpcac-toolkit-apps/NPB3.3.1/NPB3.3-MPI ep NPROCS=4 CLASS=C
+    run_commands: 
+      - mpirun -np 4 -hostfile /var/nfs_dir/my_files/hostfile /var/nfs_dir/my_files/hpcac-toolkit-apps/NPB3.3.1/NPB3.3-MPI/bin/ep.C.4
+    nodes_to_use: 1
+    slots_per_node_to_use: 4
+
+  - task_tag: "npb_lu_example"
+    setup_commands: 
+      - git clone git@github.com:lapesd/hpcac-toolkit-apps.git /var/nfs_dir/my_files/hpcac-toolkit-apps
+      - mkdir -p /var/nfs_dir/my_files/hpcac-toolkit-apps/NPB3.3.1/NPB3.3-MPI/bin
+      - make -C /var/nfs_dir/my_files/hpcac-toolkit-apps/NPB3.3.1/NPB3.3-MPI lu NPROCS=4 CLASS=C
+    run_commands: 
+      - mpirun -np 4 -hostfile /var/nfs_dir/my_files/hostfile /var/nfs_dir/my_files/hpcac-toolkit-apps/NPB3.3.1/NPB3.3-MPI/bin/lu.C.4
+    nodes_to_use: 1
+    slots_per_node_to_use: 4
+
+  - task_tag: "heat_example"
+    setup_commands: 
+      - cd /var/nfs_dir/my_files
+      - git clone https://github.com/vanderlei-filho/jacobi-method
+      - cd jacobi-method
+      - git checkout HEAT2
+      - mkdir build
+      - cd build
+      - cmake ..
+      - make
+    run_commands:
+      - sudo setenforce 0
+      - cd /var/nfs_dir/my_files/jacobi-method/build
+      - mpirun -np 8 -hostfile /var/nfs_dir/my_files/hostfile jacobi_noft -p 1 -q 8 -NB 2048 -max_iter 200
+    nodes_to_use: 2
+    slots_per_node_to_use: 4

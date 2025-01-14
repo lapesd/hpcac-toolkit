@@ -38,12 +38,13 @@ class Task(Model):
     approximate_costs = fields.DecimalField(
         max_digits=12, decimal_places=4, default=Decimal(0.0)
     )
-    setup_command = fields.TextField()
-    run_command = fields.TextField()
+    setup_commands = fields.JSONField() 
+    run_commands = fields.JSONField()
     checkpoint_command = fields.TextField(null=True)
     restart_command = fields.TextField(null=True)
-    remote_outputs_dir = fields.TextField()
-
+    remote_outputs_dir = fields.TextField(null=True)
+    nodes_to_use = fields.IntField(default=1)
+    slots_per_node_to_use = fields.IntField(default=1)
 
 async def is_task_tag_alredy_used(task_tag: str) -> bool:
     existing_task = await Task.filter(task_tag=task_tag).first()

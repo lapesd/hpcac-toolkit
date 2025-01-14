@@ -9,8 +9,15 @@ help:
 init:  ## start hpcac containers
 	docker compose up -d
 
-install:  ## install hpcac using pip
+reset-db:  ## reset the postgres database
+	hpcac destroy-cluster \
+	docker compose stop postgres && \
+	docker compose rm -f postgres && \
+	docker compose up -d postgres
+
+install: reset-db init  ## install hpcac using pip
 	pip install . && \
+	rm -rf migrations && \
 	aerich init -t hpcac_cli.db.TORTOISE_ORM && \
 	aerich init-db && \
 	aerich migrate --name migration && \

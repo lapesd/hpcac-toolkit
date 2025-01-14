@@ -5,9 +5,6 @@ sudo yum -y update
 
 # Install general system dependencies:
 sudo yum groupinstall -y 'Development Tools'
-sudo yum install -y \
-  git \
-  wget
 
 # Clean yum cache and metadata:
 sudo yum clean all \
@@ -23,7 +20,8 @@ sudo sh -c "echo 'Host *' >> /etc/ssh/ssh_config"
 sudo sh -c "echo '        StrictHostKeyChecking no' >> /etc/ssh/ssh_config"
 sudo sh -c "echo '        UserKnownHostsFile=/dev/null' >> /etc/ssh/ssh_config"
 
+# TODO: CHECK IF THIS IS STILL REQUIRED
 # Edit the /root/.ssh/authorized_keys to allow root ssh access:
-sudo rm /root/.ssh/authorized_keys
-sudo touch /root/.ssh/authorized_keys
-sudo sh -c "echo '10.0.0.10' >> /root/.ssh/authorized_keys"
+#sudo rm /root/.ssh/authorized_keys
+#sudo touch /root/.ssh/authorized_keys
+#sudo sh -c "echo '10.0.0.10' >> /root/.ssh/authorized_keys"

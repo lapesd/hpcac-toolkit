@@ -1,41 +1,35 @@
 # Provider settings:
 provider: "aws"
 region: "us-east-1"
-availability_zone: "us-east-1c"
+availability_zone: "us-east-1a"
 
 # SSH Keys:
 private_rsa_key_path: "/Users/vanderlei/.ssh/id_rsa"
 public_rsa_key_path: "/Users/vanderlei/.ssh/id_rsa.pub"
-public_key_name: "vanderlei@MacBookProM1"  # Name your SSH key
+public_key_name: "vanderlei@MacBook-Pro-M1.local"
 
 # Cluster Main settings:
-node_count: 2
-node_ami: "ami-093c91324ede090b5"  # Base Setup + OpenMPI + Sphinx + Debug
+node_count: 1
+node_ami: "ami-0519ee848a13559b3"
 instance_username: "ec2-user"  # The username required for login into the AMI
-node_instance_type: "t2.micro"
+node_instance_type: "t3.2xlarge"
 
 # Run the following commands after spawning the cluster:
 init_commands:
-  - python3 -m pip install docutils
-  - sudo yum remove awscli -y
-  - pip install awscli
-  - aws configure set aws_access_key_id ...
-  - aws configure set aws_secret_access_key ...
-  - aws configure set default.region us-east-1
-  - aws configure set default.output json
+  - sudo yum install -y libpng-devel cmake gcc-gfortran
 
 # Spot Cluster settings:
-use_spot: false  # Use spot instances?
+use_spot: false # Use spot instances?
 spot_maximum_rate: 5  # Maximum spot rate (USD) per hour
 spot_maximum_timeout: 30  # Maximum spot request wait time (s)
 
 # Root Block Storage (RBS) devices (for each node):
 node_rbs_size: 100
-node_rbs_type: "io2"
+node_rbs_type: "gp3"
 node_rbs_iops: 5000
 
 # Shared file systems:
-use_efs: false
+use_efs: true
 use_fsx: false
 
 # Enhanced networking:

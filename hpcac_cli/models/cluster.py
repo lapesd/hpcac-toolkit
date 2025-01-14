@@ -1,26 +1,20 @@
-from decimal import Decimal
 import os
 import socket
 import time
+from decimal import Decimal
 
 import paramiko
 from paramiko.ssh_exception import NoValidConnectionsError, SSHException
-from tortoise.queryset import QuerySet
-from tortoise.models import Model
 from tortoise import fields
+from tortoise.models import Model
+from tortoise.queryset import QuerySet
 
 from hpcac_cli.models.task import TaskStatus
 from hpcac_cli.utils.logger import Logger
-from hpcac_cli.utils.providers.aws import (
-    get_cluster_efs_dns_name,
-    get_running_nodes_ips,
-)
-from hpcac_cli.utils.ssh import (
-    scp_transfer_directory,
-    scp_download_directory,
-)
+from hpcac_cli.utils.providers.aws import (get_cluster_efs_dns_name,
+                                           get_running_nodes_ips)
+from hpcac_cli.utils.ssh import scp_download_directory, scp_transfer_directory
 from hpcac_cli.utils.terraform import terraform_refresh
-
 
 log = Logger()
 DECIMALS = ["on_demand_price_per_hour"]
@@ -66,7 +60,7 @@ class Cluster(Model):
             f"Cluster {self.cluster_tag}: {self.node_count}x {self.node_instance_type}"
         )
 
-    def generate_hostfile(self, mpi_distribution: str):
+    def generate_hostfile(self, mpi_distribution: str, nodes: int, slots_per_node: int):
         log.debug(text=f"Generating {mpi_distribution} hostfile...")
         if mpi_distribution.lower() != "openmpi":
             raise NotImplementedError(
@@ -77,9 +71,15 @@ class Cluster(Model):
         if os.path.exists(HOSTFILE_PATH):
             os.remove(HOSTFILE_PATH)
         with open(HOSTFILE_PATH, "w") as file:
-            for i in range(self.node_count):
-                file.write(f"{base_host}{i} slots={self.vcpus_per_node}\n")
-        log.debug(text=f"Generation of {mpi_distribution} hostfile complete!")
+            for i in range(nodes):
+                file.write(f"{base_host}{i} slots={slots_per_node}\n")
+        log.debug(text=f"Generation of {mpi_distribution} hostfile complete.")
+
+        # Print the contents of the hostfile
+        with open(HOSTFILE_PATH, "r") as file:
+            hostfile_contents = file.read()
+            log.info(text="Generated Hostfile Contents:")
+            log.info(text=hostfile_contents)
 
     def clean_remote_my_files_directory(self):
         command = (
@@ -183,56 +183,57 @@ class Cluster(Model):
             return False
         return True
 
-    def run_task(self, command: str) -> TaskStatus:
+    def run_task(self, commands_list: list[str]) -> TaskStatus:
         ip = self.node_ips[0]
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         task_status = TaskStatus.NotCompleted
         try:
             ssh.connect(ip, username=self.instance_username, timeout=3)
-            log.debug(
-                text=f"Executing Task command: ```\n{command}\n```",
-                detail=f"run_task@{ip}",
-            )
-            _stdin, stdout, stderr = ssh.exec_command(command=command)
-            exit_status = stdout.channel.recv_exit_status()
-            stdout_text = stdout.read().decode().strip()
-            stderr_text = stderr.read().decode().strip()
-            if stdout_text != "":
+            for command in commands_list:
                 log.debug(
-                    text=f"STDOUT: ```\n{stdout_text}\n```", detail=f"run_task@{ip}"
+                    text=f"Executing Task command: ```\n{command}\n```",
+                    detail=f"run_task@{ip}",
                 )
+                _, stdout, stderr = ssh.exec_command(command=command)
+                exit_status = stdout.channel.recv_exit_status()
+                stdout_text = stdout.read().decode().strip()
+                stderr_text = stderr.read().decode().strip()
+                if stdout_text != "":
+                    log.debug(
+                        text=f"STDOUT: ```\n{stdout_text}\n```", detail=f"run_task@{ip}"
+                    )
+                if exit_status == 0:
+                    if "PRTE has lost communication" in stderr_text:
+                        log.warning(
+                            f"```\n{stderr_text}\n```", detail="TaskStatus=NodeEvicted"
+                        )
+                        task_status = TaskStatus.NodeEvicted
+                    else:
+                        log.info(
+                            f"Completed task command `{command}` successfully!!",
+                            detail="TaskStatus=Success",
+                        )
+                        task_status = TaskStatus.Success
+                else:
+                    # Check if a node was evicted or not
+                    if not self.is_healthy():
+                        log.warning(
+                            f"```\n{stderr_text}\n```", detail="TaskStatus=NodeEvicted"
+                        )
+                        task_status = TaskStatus.NodeEvicted
+                    else:
+                        log.error(
+                            f"```\n{stderr_text}\n```", detail="TaskStatus=RemoteException"
+                        )
+                        task_status = TaskStatus.RemoteException
+
         except (NoValidConnectionsError, SSHException, socket.timeout) as err:
             log.warning(f"```\n{err}\n```", detail="TaskStatus=NodeEvicted")
             task_status = TaskStatus.NodeEvicted
         except Exception as err:
             log.error(f"```\n{err}\n```", detail="TaskStatus=RemoteException")
             task_status = TaskStatus.RemoteException
-        else:
-            if exit_status == 0:
-                if "PRTE has lost communication" in stderr_text:
-                    log.warning(
-                        f"```\n{stderr_text}\n```", detail="TaskStatus=NodeEvicted"
-                    )
-                    task_status = TaskStatus.NodeEvicted
-                else:
-                    log.info(
-                        f"Completed task command `{command}` successfully!!",
-                        detail="TaskStatus=Success",
-                    )
-                    task_status = TaskStatus.Success
-            else:
-                # Check if a node was evicted or not
-                if not self.is_healthy():
-                    log.warning(
-                        f"```\n{stderr_text}\n```", detail="TaskStatus=NodeEvicted"
-                    )
-                    task_status = TaskStatus.NodeEvicted
-                else:
-                    log.error(
-                        f"```\n{stderr_text}\n```", detail="TaskStatus=RemoteException"
-                    )
-                    task_status = TaskStatus.RemoteException
 
         ssh.close()
         return task_status

@@ -1,19 +1,14 @@
 import csv
-from datetime import datetime
 import os
+import time
+from datetime import datetime
 
 from hpcac_cli.models.cluster import fetch_latest_online_cluster
-from hpcac_cli.models.task import (
-    Task,
-    TaskStatus,
-    insert_task_record,
-    is_task_tag_alredy_used,
-)
-
+from hpcac_cli.models.task import (Task, TaskStatus, insert_task_record,
+                                   is_task_tag_alredy_used)
 from hpcac_cli.utils.chronometer import Chronometer
 from hpcac_cli.utils.logger import Logger
 from hpcac_cli.utils.parser import parse_yaml
-
 
 log = Logger()
 
@@ -70,9 +65,13 @@ async def run_tasks():
         log.info(f"Setting up Task {task.task_tag}...", detail=detail)
         setup_task_chronometer.start()
         cluster.clean_remote_my_files_directory()
-        cluster.generate_hostfile(mpi_distribution="openmpi")
+        cluster.generate_hostfile(
+            mpi_distribution="openmpi",
+            nodes=task.nodes_to_use,
+            slots_per_node=task.slots_per_node_to_use,
+        )
         cluster.upload_my_files()
-        setup_status = cluster.run_task(task.setup_command)
+        setup_status = cluster.run_task(task.setup_commands)
         setup_task_chronometer.stop()
         if setup_status == TaskStatus.Success:
             log.info(f"Finished setup of Task `{task.task_tag}`!", detail=detail)
@@ -80,23 +79,26 @@ async def run_tasks():
             log.error(f"Task setup failed, aborting...", detail=detail)
             exit(1)
 
+        time.sleep(15)
         # Execute Task:
         log.info(f"Starting executing Task `{task.task_tag}`...", detail=detail)
         execution_chronometer.start()
-        task_status = cluster.run_task(task.run_command)
+        task_status = cluster.run_task(task.run_commands)
         execution_chronometer.stop()
 
+        failures_during_execution = 0
         # Check TaskStatus:
         if task_status == TaskStatus.RemoteException:
             log.error(f"Task execution failed, aborting...", detail=detail)
+            failures_during_execution += 1
             exit(1)
         elif task_status == TaskStatus.Success:
             log.info(f"Task {task.task_tag} completed!", detail=detail)
             successfully_executed_task = True
         elif task_status == TaskStatus.NodeEvicted:
             # Start the retry loop:
+            failures_during_execution += 1
             retries = task.retries_before_aborting
-            failures_during_execution = 0
             task_retry_status = TaskStatus.NotCompleted
             for retry in range(1, retries + 1):
                 detail = f"retry {retry}"
@@ -124,12 +126,13 @@ async def run_tasks():
                 if task_retry_status == TaskStatus.RemoteException:
                     log.error(f"Task execution failed, aborting...", detail=detail)
                     exit(1)
-
-        log.info(text=f"Starting download of Task results...", detail=detail)
-        cluster.download_directory(
-            remote_path=task.remote_outputs_dir, local_path=f"./results/{task.task_tag}"
-        )
-        log.info(text=f"Completed download of tasks results!", detail=detail)
+        if task.remote_outputs_dir:
+            log.info(text=f"Starting download of Task results...", detail=detail)
+            cluster.download_directory(
+                remote_path=task.remote_outputs_dir,
+                local_path=f"./results/{task.task_tag}",
+            )
+            log.info(text=f"Completed download of tasks results!", detail=detail)
 
         task.completed_at = datetime.now()
         task.task_completed_successfully = successfully_executed_task
