@@ -10,7 +10,6 @@ init:  ## start hpcac containers
 	docker compose up -d
 
 reset-db:  ## reset the postgres database
-	hpcac destroy-cluster \
 	docker compose stop postgres && \
 	docker compose rm -f postgres && \
 	docker compose up -d postgres
