@@ -168,7 +168,6 @@ my_files
 migrations
 
 # HPC@Cloud results
-/results
 exported_results.csv
 
 # Terraform files
