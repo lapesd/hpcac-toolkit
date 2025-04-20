@@ -1,4 +1,0 @@
-[tool.aerich]
-tortoise_orm = "hpcac_cli.db.TORTOISE_ORM"
-location = "./migrations"
-src_folder = "./."
