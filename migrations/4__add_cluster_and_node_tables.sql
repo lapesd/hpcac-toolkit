@@ -1,0 +1,28 @@
+-- Create the CLUSTERS table
+CREATE TABLE clusters (
+    id VARCHAR(32) PRIMARY KEY,
+    display_name TEXT NOT NULL,
+    provider_id VARCHAR(32) NOT NULL,
+    provider_config_id INTEGER NOT NULL,
+    public_ssh_key_path TEXT NOT NULL,
+    private_ssh_key_path TEXT NOT NULL,
+    region TEXT NOT NULL,
+    created_at DATETIME NOT NULL,
+    spawned_at DATETIME,
+    FOREIGN KEY (provider_config_id) REFERENCES provider_configs(id),
+    FOREIGN KEY (provider_id) REFERENCES providers(id)
+);
+
+-- Create the NODES table
+CREATE TABLE nodes (
+    id VARCHAR(32) PRIMARY KEY,
+    cluster_id VARCHAR(32) NOT NULL,
+    status TEXT NOT NULL,
+    instance_type TEXT NOT NULL,
+    allocation_mode TEXT NOT NULL,
+    burstable_mode TEXT NULL,
+    image_id TEXT NOT NULL,
+    private_ip TEXT NULL,
+    public_ip TEXT NULL,
+    FOREIGN KEY (cluster_id) REFERENCES clusters(id)
+);

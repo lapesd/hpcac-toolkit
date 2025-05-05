@@ -1,0 +1,40 @@
+# Developer Notes
+
+To develop HPC@Cloud you need the [Rust compiler](https://www.rust-lang.org/tools/install).
+You won't be able to compile the application if the sqlite file is not set up with the required tables. 
+Use sqlx-cli to run the migrations first, following these instructions:
+
+1. Install Rust: https://www.rust-lang.org/tools.install
+2. Create the `.env` file, copying the contents from `.example.env`. Update the variables as needed
+3. Source the .env file with `source .env`
+4. Install sqlx-cli with `cargo install sqlx-cli`
+5. Create an empty db.sqlite file: `touch db.sqlite`
+6. Run the database migrations with `sqlx migrate run --database-url $DATABASE_URL`
+7. To reset the database and re-apply all migrations, run `sqlx database reset`
+
+After the steps above are done, you can test the commands with cargo `cargo run -- <command> <arguments>`.
+Run this the following to get help with the available commands:
+
+cargo run -- help
+
+The first thing you'll want to do is probably to set up provider credentials with the provider-config command.
+Currently two providers are supported: vultr and AWS.
+To fetch your credentials, follow each documentation:
+
+Creating AWS access keys: https://docs.aws.amazon.com/keyspaces/latest/devguide/create.keypair.html
+Creating a Vultr API key: https://docs.vultr.com/platform/other/api/regenerate-user-api-key
+
+# Cloud Interface Implementation
+
+The table below presents the current state of the cloud provider integration into HPC@Cloud Toolkit CLI.
+
+| Function               |  AWS  | Vultr |
+|------------------------|:-----:|:-----:|
+| `fetch_regions`        |  YES  |  YES  |
+| `fetch_zones`          |  YES  |  YES  |
+| `fetch_instance_types` |  YES  |  YES  |
+| `fetch_prices`         |  YES  |  YES  |
+| `fetch_machine_image`  |  YES  |   -   |
+| `spawn_cluster`        |   -   |   -   |
+| `despawn_cluster`      |   -   |   -   |
+| `run_task`             |   -   |   -   |

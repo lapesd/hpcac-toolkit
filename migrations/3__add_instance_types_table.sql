@@ -1,0 +1,25 @@
+-- Create the INSTANCE_TYPES table
+CREATE TABLE instance_types (
+    name VARCHAR(32) NOT NULL,
+    cpu_architecture TEXT NOT NULL,
+    vcpus INTEGER NOT NULL,
+    core_count INTEGER NULL,
+    threads_per_core INTEGER NULL,
+    cpu_type TEXT NOT NULL,
+    gpu_type TEXT NULL,
+    gpu_count INTEGER NOT NULL,
+    fpga_type TEXT NULL,
+    fpga_count INTEGER NOT NULL,
+    memory_in_mib INTEGER NOT NULL,
+    supports_spot BOOLEAN NOT NULL,
+    is_baremetal BOOLEAN NOT NULL,
+    is_burstable BOOLEAN NOT NULL,
+    supports_efa BOOLEAN NOT NULL,
+    has_affinity_settings BOOLEAN NOT NULL,
+    on_demand_price_per_hour FLOAT NULL,
+    spot_price_per_hour FLOAT NULL,
+    region TEXT NOT NULL,
+    provider_id VARCHAR(32) NOT NULL,
+    PRIMARY KEY (name, region),
+    FOREIGN KEY (provider_id) REFERENCES providers(id)
+);

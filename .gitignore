@@ -1,0 +1,25 @@
+# MacOS files
+.DS_Store
+
+# Rust/Cargo files
+debug/
+target/
+**/*.rs.bk
+
+# SQLite database files
+*.db
+*.sqlite
+*.sqlite3
+*.db.sqlite-shm
+*.db.sqlite-wal
+
+# SQLite Journal files
+*.db-journal
+*.sqlite-journal
+*.sqlite3-journal
+
+# SQLite backup files
+*.sqbpro
+
+# .env files
+.env
