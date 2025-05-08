@@ -174,3 +174,19 @@ exported_results.csv
 
 .python-version
 .DS_Store
+
+# SQLite database files
+*.db
+*.sqlite
+*.sqlite3
+*.db.sqlite-shm
+*.db.sqlite-wal
+
+# SQLite Journal files
+*.db-journal
+*.sqlite-journal
+*.sqlite3-journal
+
+# SQLite backup files
+*.sqbpro
+
