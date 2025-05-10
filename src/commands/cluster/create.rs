@@ -2,7 +2,7 @@ use crate::commands::utils;
 use crate::database::models::{
     Cluster, InstanceType, Node, Provider, ProviderConfig, ShellCommand,
 };
-use crate::integrations::{CloudInterface, providers::aws::AwsInterface};
+use crate::integrations::{cloud_interface::CloudInfoProvider, providers::aws::AwsInterface};
 use chrono::Utc;
 use inquire::{Confirm, Select};
 use serde::{Deserialize, Serialize};

@@ -1,66 +1,14 @@
 use crate::commands::utils::ProgressTracker;
-use crate::database::models::{Cluster, ConfigVar, ConfigVarFinder, InstanceType, Node};
-use crate::integrations::{CloudInterface, data_transfer_objects::MachineImageDetail};
+use crate::database::models::{InstanceType, MachineImage};
+use crate::integrations::{CloudErrorHandler, CloudInfoProvider};
 
-use anyhow::{Error, Result, anyhow};
-use aws_config::{BehaviorVersion, Region, SdkConfig};
-use aws_credential_types::{Credentials, provider::SharedCredentialsProvider};
-use aws_sdk_ec2::Client as EC2Client;
-use aws_sdk_pricing::Client as PricingClient;
-use aws_sdk_servicequotas::Client as ServiceQuotasClient;
+use anyhow::{Error, Result};
 use std::collections::HashMap;
 use tracing::warn;
 
-pub struct AwsInterface {
-    pub config_vars: Vec<ConfigVar>,
-}
+use super::interface::AwsInterface;
 
-impl AwsInterface {
-    /// Build an AWS SDK configuration from ConfigVars
-    pub fn get_config(&self, region: &str) -> Result<SdkConfig> {
-        let access_key_id = self
-            .config_vars
-            .get_value("ACCESS_KEY_ID")
-            .ok_or_else(|| anyhow!("Key 'ACCESS_KEY_ID' not found in config_vars."))?
-            .to_string();
-
-        let secret_access_key = self
-            .config_vars
-            .get_value("SECRET_ACCESS_KEY")
-            .ok_or_else(|| anyhow!("Key 'SECRET_ACCESS_KEY' not found in config_vars."))?
-            .to_string();
-
-        let credentials =
-            Credentials::from_keys(access_key_id.clone(), secret_access_key.clone(), None);
-        let static_provider = SharedCredentialsProvider::new(credentials);
-        let region_struct = Region::new(region.to_string());
-
-        let config = SdkConfig::builder()
-            .behavior_version(BehaviorVersion::v2025_01_17())
-            .region(region_struct)
-            .credentials_provider(static_provider)
-            .build();
-
-        Ok(config)
-    }
-
-    /// Get an EC2 client configured with the provided credentials and region.
-    pub fn get_ec2_client(&self, region: &str) -> Result<EC2Client, Error> {
-        Ok(EC2Client::new(&self.get_config(region)?))
-    }
-
-    /// Get a Pricing client configured with the provided credentials and region.
-    pub fn get_pricing_client(&self) -> Result<PricingClient, Error> {
-        Ok(PricingClient::new(&self.get_config("us-east-1")?))
-    }
-
-    /// Get an Service Quotas client configured with the provided credentials and region.
-    pub fn _get_service_quotas_client(&self, region: &str) -> Result<ServiceQuotasClient, Error> {
-        Ok(ServiceQuotasClient::new(&self.get_config(region)?))
-    }
-}
-
-impl CloudInterface for AwsInterface {
+impl CloudInfoProvider for AwsInterface {
     async fn fetch_regions(&self, _tracker: &ProgressTracker) -> Result<Vec<String>, Error> {
         // Use a default region (here "us-east-1") to create the client,
         // as the describe_regions API call is global.
@@ -294,8 +242,8 @@ impl CloudInterface for AwsInterface {
                         is_burstable,
                         supports_efa,
                         has_affinity_settings,
-                        on_demand_price_per_hour: None, // Will be added later
-                        spot_price_per_hour: None,      // Will be added later
+                        on_demand_price_per_hour: None,
+                        spot_price_per_hour: None,
                         region: region.to_string(),
                         provider_id: "aws".to_string(),
                     };
@@ -529,7 +477,7 @@ impl CloudInterface for AwsInterface {
         &self,
         region: &str,
         image_id: &str,
-    ) -> Result<MachineImageDetail, Error> {
+    ) -> Result<MachineImage, Error> {
         let client = match self.get_ec2_client(region) {
             Ok(client) => client,
             Err(err) => return self.handle_error(err, "Failed to initialize EC2 client"),
@@ -550,50 +498,21 @@ impl CloudInterface for AwsInterface {
 
         let images = resp.images.unwrap_or_default();
         let aws_image = &images[0]; // get the first (should be only one)
-        let image = MachineImageDetail {
+
+        // Create a machine image with current time
+        let now = chrono::Utc::now().naive_utc();
+        let image = MachineImage {
             id: image_id.to_string(),
             name: aws_image.name.clone().unwrap_or_default(),
             description: aws_image.description.clone().unwrap_or_default(),
             owner: aws_image.owner_id.clone().unwrap_or_default(),
             creation_date: aws_image.creation_date.clone().unwrap_or_default(),
+            provider: "aws".to_string(),
+            region: region.to_string(),
+            created_at: now,
+            updated_at: now,
         };
 
         Ok(image)
-    }
-
-    async fn spawn_cluster(&self, cluster: Cluster, _nodes: Vec<Node>) -> Result<(), Error> {
-        let client = match self.get_ec2_client(&cluster.region) {
-            Ok(client) => client,
-            Err(err) => return self.handle_error(err, "Failed to initialize EC2 client"),
-        };
-
-        let vpc_cidr_block = "10.0.0.6/16";
-        let _create_vpc_request = client
-            .create_vpc()
-            .cidr_block(vpc_cidr_block)
-            .instance_tenancy(aws_sdk_ec2::types::Tenancy::Default)
-            .tag_specifications(
-                aws_sdk_ec2::types::TagSpecification::builder()
-                    .resource_type(aws_sdk_ec2::types::ResourceType::Vpc)
-                    .tags(
-                        aws_sdk_ec2::types::Tag::builder()
-                            .key("Name")
-                            .value(format!("cluster-{}-vpc", cluster.id))
-                            .build(),
-                    )
-                    .tags(
-                        aws_sdk_ec2::types::Tag::builder()
-                            .key("ClusterId")
-                            .value(cluster.id.to_string())
-                            .build(),
-                    )
-                    .build(),
-            )
-            .send()
-            .await;
-
-        // Continue, after VPC, crete subnets, etc.. up to the nodes and security rules.
-
-        Ok(())
     }
 }

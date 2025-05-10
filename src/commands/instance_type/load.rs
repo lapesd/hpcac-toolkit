@@ -1,7 +1,7 @@
 use crate::commands::utils::ProgressTracker;
 use crate::database::models::{InstanceType, Provider, ProviderConfig};
 use crate::integrations::{
-    CloudInterface, CloudProvider,
+    CloudInfoProvider, CloudProvider,
     providers::{aws::AwsInterface, vultr::VultrInterface},
 };
 use inquire::Select;

@@ -11,7 +11,9 @@ target/
 *.sqlite
 *.sqlite3
 *.db.sqlite-shm
+db.sqlite-shm
 *.db.sqlite-wal
+db.sqlite-wal
 
 # SQLite Journal files
 *.db-journal

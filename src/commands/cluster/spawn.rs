@@ -1,5 +1,5 @@
 use crate::database::models::{Cluster, ProviderConfig};
-use crate::integrations::{CloudInterface, providers::aws::AwsInterface};
+use crate::integrations::{cloud_interface::CloudResourceManager, providers::aws::AwsInterface};
 use inquire::Confirm;
 use sqlx::sqlite::SqlitePool;
 use tracing::{error, info};
