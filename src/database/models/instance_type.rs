@@ -38,6 +38,7 @@ pub struct InstanceTypeFilters {
     pub with_fpga: Option<bool>,
     pub baremetal: Option<bool>,
     pub spot: Option<bool>,
+    pub burstable: Option<bool>,
 }
 
 impl InstanceType {
@@ -159,6 +160,11 @@ impl InstanceType {
             let _ = args.add(supports_spot);
         }
 
+        if let Some(is_burstable) = filters.burstable {
+            conditions.push("is_burstable = ?");
+            let _ = args.add(is_burstable);
+        }
+        
         if !conditions.is_empty() {
             query.push_str(" WHERE ");
             query.push_str(&conditions.join(" AND "));

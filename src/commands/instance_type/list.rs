@@ -28,6 +28,8 @@ struct InstanceTypeDisplay {
     memory: i64,
     #[tabled(rename = "Spot Support")]
     supports_spot: bool,
+    #[tabled(rename = "Is Burstable")]
+    is_burstable: bool,
     #[tabled(rename = "Affinity Option")]
     has_affinity_settings: bool,
     #[tabled(rename = "Supports EFA")]
@@ -74,6 +76,7 @@ pub async fn list(pool: &SqlitePool, filters: InstanceTypeFilters) -> anyhow::Re
                 fpgas,
                 memory: instance_type.memory_in_mib,
                 supports_spot: instance_type.supports_spot,
+                is_burstable: instance_type.is_burstable,
                 has_affinity_settings: instance_type.has_affinity_settings,
                 supports_efa: instance_type.supports_efa,
             })
