@@ -212,4 +212,53 @@ impl ProviderConfig {
 
         Ok(config_vars)
     }
+
+    pub async fn delete(&self, pool: &SqlitePool) -> Result<()> {
+        let mut tx = match pool.begin().await {
+            Ok(result) => result,
+            Err(e) => {
+                error!("SQLx Error: {}", e.to_string());
+                anyhow::bail!("DB Operation Failure");
+            }
+        };
+
+        // First delete associated config variables (foreign key constraint)
+        let _ = match sqlx::query(
+            r#"
+                DELETE FROM config_variables
+                WHERE provider_config_id = ?
+            "#,
+        )
+        .bind(self.id)
+        .execute(&mut *tx)
+        .await
+        {
+            Ok(result) => result,
+            Err(e) => {
+                error!("SQLx Error: {}", e.to_string());
+                anyhow::bail!("DB Operation Failure");
+            }
+        };
+
+        // Then delete the provider config itself
+        let _ = match sqlx::query(
+            r#"
+                DELETE FROM provider_configs
+                WHERE id = ?
+            "#,
+        )
+        .bind(self.id)
+        .execute(&mut *tx)
+        .await
+        {
+            Ok(result) => result,
+            Err(e) => {
+                error!("SQLx Error: {}", e.to_string());
+                anyhow::bail!("DB Operation Failure");
+            }
+        };
+
+        tx.commit().await?;
+        Ok(())
+    }
 }

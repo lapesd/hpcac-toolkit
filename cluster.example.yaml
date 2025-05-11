@@ -1,11 +1,11 @@
-display_name: My Cluster
+display_name: TestCluster2
 provider_id: aws
 public_ssh_key_path: ~/.ssh/id_ed25519.pub
 private_ssh_key_path: ~/.ssh/id_ed25519
 region: us-east-1
 availability_zone: us-east-1c
 nodes:
-  - instance_type: g4dn.2xlarge
+  - instance_type: g6.2xlarge
     allocation_mode: on-demand
     image_id: ami-0387168b4a09b1490
     init_commands:

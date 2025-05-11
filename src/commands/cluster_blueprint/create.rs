@@ -265,11 +265,11 @@ pub async fn create(
 
         // Validate burstable_mode
         let burstable_mode = match &node_definition.burstable_mode {
-            Some(mode) => match instance_type_details.is_burstable {
+            Some(burstable_mode) => match instance_type_details.is_burstable {
                 true => {
                     // TODO: validate if the burstable_mode string matches a supported burstable
                     // performance mode.
-                    Some(mode)
+                    Some(burstable_mode)
                 }
                 false => {
                     anyhow::bail!(
@@ -332,10 +332,41 @@ pub async fn create(
     );
     println!("{:<20}: {}\n", "Node Count", cluster_yaml.nodes.len());
 
-    println!("Node Definitions:");
+    println!("Node Details:");
     for (i, node) in cluster_yaml.nodes.iter().enumerate() {
+        let instance_type_name = &node.instance_type;
+        let instance_details =
+            InstanceType::fetch_by_name_and_region(pool, instance_type_name, &region)
+                .await?
+                .unwrap(); // Because of the previous validation, unwrap won't fail here
+
+        let processor_info = match &instance_details.core_count {
+            Some(cores) => {
+                format!(
+                    "{}-Core {} {}",
+                    cores, instance_details.cpu_architecture, instance_details.cpu_type
+                )
+            }
+            None => {
+                format!(
+                    "{} {}",
+                    instance_details.cpu_architecture, instance_details.cpu_type
+                )
+            }
+        };
+
+        let gpu_info = match instance_details.gpu_type {
+            Some(gpu) => {
+                format!("{}x {}", instance_details.gpu_count, gpu)
+            }
+            None => "N/A".to_string(),
+        };
+
         println!("  Node {}:", i + 1);
         println!("    Instance Type   : {}", node.instance_type);
+        println!("    Processor       : {}", processor_info);
+        println!("    vCPUs:          : {}", instance_details.vcpus);
+        println!("    GPUs:           : {}", gpu_info);
         println!("    Image ID        : {}", node.image_id);
         println!(
             "    Allocation Mode : {}",
@@ -345,12 +376,6 @@ pub async fn create(
             "    Burstable Mode  : {}",
             node.burstable_mode.as_deref().unwrap_or("N/A")
         );
-        if let Some(cmds) = &node.init_commands {
-            println!("    Init Commands   :");
-            for cmd in cmds {
-                println!("      - {}", cmd);
-            }
-        }
         println!();
     }
 
@@ -390,8 +415,9 @@ pub async fn create(
         .await?;
 
     println!(
-        "New Cluster '{}' created successfully! To spawn it, use: 'cluster spawn'",
-        cluster_name
+        "New Cluster Blueprint '{}' created successfully! To spawn a cluster with this \
+        blueprint, use: 'cluster spawn --blueprint-id {}'",
+        cluster_name, cluster.id
     );
     Ok(())
 }

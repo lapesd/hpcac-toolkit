@@ -5,15 +5,13 @@ use crate::database::models::{
 use crate::integrations::providers::{aws::AwsInterface, vultr::VultrInterface};
 use anyhow::{Error, Result};
 use std::collections::HashMap;
-use std::process;
-use tracing::{debug, error};
+use tracing::error;
 
 /// Trait for handling cloud errors - can be implemented by all cloud-related traits
 pub trait CloudErrorHandler {
     fn handle_error<T>(&self, err: Error, message: &str) -> Result<T> {
-        debug!("{}", err);
-        error!("Cloud Operation Error: {}", message);
-        process::exit(1);
+        error!("{}", err);
+        anyhow::bail!("Cloud Operation: {}", message);
     }
 }
 

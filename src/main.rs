@@ -24,6 +24,12 @@ enum Commands {
         command: ClusterCommands,
     },
 
+    /// ClusterBlueprint management commands
+    ClusterBlueprint {
+        #[command(subcommand)]
+        command: ClusterBlueprintCommands,
+    },
+
     /// Instance type management commands
     InstanceType {
         #[command(subcommand)]
@@ -39,20 +45,6 @@ enum Commands {
 
 #[derive(Subcommand, Debug)]
 enum ClusterCommands {
-    /// Create a new Cluster
-    Create {
-        /// Path to the YAML file with cluster details
-        #[arg(short = 'f', long = "file")]
-        yaml_file_path: String,
-
-        /// Skip confirmation prompt
-        #[arg(short = 'y', long = "yes")]
-        yes: bool,
-    },
-
-    /// List existing Clusters
-    List {},
-
     /// Spawn a new Cluster
     Spawn {
         /// Name of the Cluster to spawn
@@ -63,6 +55,23 @@ enum ClusterCommands {
         #[arg(short = 'y', long = "yes")]
         yes: bool,
     },
+}
+
+#[derive(Subcommand, Debug)]
+enum ClusterBlueprintCommands {
+    /// Create a ClusterBlueprint
+    Create {
+        /// Path to the YAML file with cluster blueprint details
+        #[arg(short = 'f', long = "file")]
+        yaml_file_path: String,
+
+        /// Skip confirmation prompt
+        #[arg(short = 'y', long = "yes")]
+        yes: bool,
+    },
+
+    /// List existing ClusterBlueprints
+    List {},
 }
 
 #[derive(Subcommand, Debug)]
@@ -131,6 +140,17 @@ enum ProviderConfigCommands {
         yes: bool,
     },
 
+    /// Delete existing provider configurations
+    Delete {
+        /// The ID of the provider configuration to delete
+        #[arg(required = true)]
+        id: String,
+
+        /// Skip confirmation prompt
+        #[arg(short = 'y', long = "yes")]
+        yes: bool,
+    },
+
     /// List existing provider configurations
     List {},
 }
@@ -166,17 +186,19 @@ async fn main() -> anyhow::Result<()> {
     // Match clap commands and pass the SQLite pool to the command handlers
     match &cli.command {
         Commands::Cluster { command } => match command {
-            ClusterCommands::Create {
+            ClusterCommands::Spawn { cluster_id, yes } => {
+                commands::cluster::spawn(&sqlite_pool, cluster_id, *yes).await?;
+            }
+        },
+        Commands::ClusterBlueprint { command } => match command {
+            ClusterBlueprintCommands::Create {
                 yaml_file_path,
                 yes,
             } => {
-                commands::cluster::create(&sqlite_pool, yaml_file_path, *yes).await?;
+                commands::cluster_blueprint::create(&sqlite_pool, yaml_file_path, *yes).await?;
             }
-            ClusterCommands::List {} => {
-                commands::cluster::list(&sqlite_pool).await?;
-            }
-            ClusterCommands::Spawn { cluster_id, yes } => {
-                commands::cluster::spawn(&sqlite_pool, cluster_id, *yes).await?;
+            ClusterBlueprintCommands::List {} => {
+                commands::cluster_blueprint::list(&sqlite_pool).await?;
             }
         },
         Commands::InstanceType { command } => match command {
@@ -224,6 +246,9 @@ async fn main() -> anyhow::Result<()> {
         Commands::ProviderConfig { command } => match command {
             ProviderConfigCommands::Create { yes } => {
                 commands::provider_config::create(&sqlite_pool, *yes).await?;
+            }
+            ProviderConfigCommands::Delete { id, yes } => {
+                commands::provider_config::delete(&sqlite_pool, id, *yes).await?;
             }
             ProviderConfigCommands::List {} => {
                 commands::provider_config::list(&sqlite_pool).await?;

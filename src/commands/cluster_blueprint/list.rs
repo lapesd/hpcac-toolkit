@@ -12,6 +12,8 @@ struct ClusterDisplay {
     display_name: String,
     #[tabled(rename = "Nodes")]
     node_count: usize,
+    #[tabled(rename = "Created At")]
+    created_at: String,
 }
 
 pub async fn list(pool: &SqlitePool) -> anyhow::Result<()> {
@@ -30,6 +32,7 @@ pub async fn list(pool: &SqlitePool) -> anyhow::Result<()> {
                 provider: cluster.provider_id,
                 display_name: cluster.display_name,
                 node_count,
+                created_at: cluster.created_at.to_string(),
             })
         }
 
