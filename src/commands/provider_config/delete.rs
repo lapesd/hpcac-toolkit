@@ -1,7 +1,6 @@
 use crate::database::models::ProviderConfig;
-use inquire::Confirm;
+use crate::utils;
 use sqlx::sqlite::SqlitePool;
-use tracing::{error, info};
 
 pub async fn delete(
     pool: &SqlitePool,
@@ -26,23 +25,11 @@ pub async fn delete(
     println!();
 
     // Prompt user for confirmation
-    if !skip_confirmation {
-        match Confirm::new("Do you want to proceed deleting this provider config?")
-            .with_default(true)
-            .prompt()
-        {
-            Ok(true) => {}
-            Ok(false) => {
-                println!("Operation cancelled by user");
-                return Ok(());
-            }
-            Err(e) => {
-                error!("{}", e.to_string());
-                anyhow::bail!("Error processing user response")
-            }
-        }
-    } else {
-        info!("Automatic confirmation with -y flag. Proceeding...");
+    if !(utils::user_confirmation(
+        skip_confirmation,
+        "Do you want to proceed creating this provider configuration?",
+    )?) {
+        return Ok(());
     }
 
     // Delete the config

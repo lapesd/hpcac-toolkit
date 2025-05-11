@@ -7,6 +7,7 @@ mod commands;
 mod constants;
 mod database;
 mod integrations;
+mod utils;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]

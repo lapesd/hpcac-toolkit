@@ -1,6 +1,6 @@
-use crate::commands::utils::ProgressTracker;
 use crate::database::models::{InstanceType, MachineImage};
 use crate::integrations::{CloudErrorHandler, CloudInfoProvider};
+use crate::utils::ProgressTracker;
 
 use anyhow::{Error, Result};
 use std::collections::HashMap;

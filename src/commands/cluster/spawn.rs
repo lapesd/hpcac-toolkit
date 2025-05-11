@@ -1,8 +1,8 @@
 use crate::database::models::{Cluster, ProviderConfig};
 use crate::integrations::{cloud_interface::CloudResourceManager, providers::aws::AwsInterface};
-use inquire::Confirm;
+use crate::utils;
 use sqlx::sqlite::SqlitePool;
-use tracing::{error, info};
+use tracing::error;
 
 pub async fn spawn(
     pool: &SqlitePool,
@@ -25,7 +25,6 @@ pub async fn spawn(
         }
     };
 
-    // Get cloud interface
     let config_vars = provider_config.get_config_vars(pool).await?;
     let provider_id = provider_config.provider_id.clone();
     let cloud_interface = match provider_id.as_str() {
@@ -38,25 +37,12 @@ pub async fn spawn(
     let nodes = cluster.get_nodes(pool).await?;
     cloud_interface.spawn_cluster(cluster, nodes).await?;
 
-    if !skip_confirmation {
-        let confirm = Confirm::new("Do you want to proceed with spawning this cluster?")
-            .with_default(true)
-            .prompt();
-        match confirm {
-            Ok(true) => info!("Confirmed! Proceeding with cluster spawn..."),
-            Ok(false) => {
-                println!("Operation cancelled by user");
-                return Ok(());
-            }
-            Err(e) => {
-                error!("{}", e.to_string());
-                anyhow::bail!("Error processing user response")
-            }
-        }
-    } else {
-        info!("Automatic confirmation with -y flag. Proceeding...");
+    if !(utils::user_confirmation(
+        skip_confirmation,
+        "Do you want to proceed spawning this cluster",
+    )?) {
+        return Ok(());
     }
-
     println!("Spawning cluster {}", cluster_id);
 
     Ok(())

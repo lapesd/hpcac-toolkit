@@ -1,10 +1,10 @@
-use crate::commands::utils;
 use crate::database::models::{
     Cluster, InstanceType, Node, Provider, ProviderConfig, ShellCommand,
 };
 use crate::integrations::{cloud_interface::CloudInfoProvider, providers::aws::AwsInterface};
+use crate::utils;
 use chrono::Utc;
-use inquire::{Confirm, Select};
+use inquire::Select;
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqlitePool;
 use std::fs;
@@ -379,23 +379,11 @@ pub async fn create(
         println!();
     }
 
-    if !skip_confirmation {
-        let confirm = Confirm::new("Do you want to proceed with storing this cluster blueprint?")
-            .with_default(true)
-            .prompt();
-        match confirm {
-            Ok(true) => info!("Confirmed! Proceeding with cluster blueprint creation..."),
-            Ok(false) => {
-                println!("Operation cancelled by user");
-                return Ok(());
-            }
-            Err(e) => {
-                error!("{}", e.to_string());
-                anyhow::bail!("Error processing user response")
-            }
-        }
-    } else {
-        info!("Automatic confirmation with -y flag. Proceeding...");
+    if !(utils::user_confirmation(
+        skip_confirmation,
+        "Do you want to proceed creating this cluster blueprint?",
+    )?) {
+        return Ok(());
     }
 
     let cluster_name = cluster_yaml.display_name.clone();

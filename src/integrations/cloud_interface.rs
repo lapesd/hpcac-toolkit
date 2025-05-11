@@ -1,8 +1,8 @@
-use crate::commands::utils::ProgressTracker;
 use crate::database::models::{
     CloudResource, Cluster, InstanceType, MachineImage, Node, ResourceStatus,
 };
 use crate::integrations::providers::{aws::AwsInterface, vultr::VultrInterface};
+use crate::utils::ProgressTracker;
 use anyhow::{Error, Result};
 use std::collections::HashMap;
 use tracing::error;

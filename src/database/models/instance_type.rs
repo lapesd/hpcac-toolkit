@@ -164,7 +164,7 @@ impl InstanceType {
             conditions.push("is_burstable = ?");
             let _ = args.add(is_burstable);
         }
-        
+
         if !conditions.is_empty() {
             query.push_str(" WHERE ");
             query.push_str(&conditions.join(" AND "));

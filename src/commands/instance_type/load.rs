@@ -1,9 +1,9 @@
-use crate::commands::utils::ProgressTracker;
 use crate::database::models::{InstanceType, Provider, ProviderConfig};
 use crate::integrations::{
     CloudInfoProvider, CloudProvider,
     providers::{aws::AwsInterface, vultr::VultrInterface},
 };
+use crate::utils::ProgressTracker;
 use inquire::Select;
 use sqlx::sqlite::SqlitePool;
 use tracing::error;
@@ -144,7 +144,6 @@ pub async fn load(
     let multi = ProgressTracker::create_multi();
     let main_tracker =
         ProgressTracker::add_to_multi(&multi, regions.len() as u64, Some("regions processed"));
-
     for (index, region) in regions.iter().enumerate() {
         main_tracker.set_position(index as u64);
         main_tracker.update_message(&format!(

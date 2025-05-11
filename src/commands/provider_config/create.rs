@@ -1,4 +1,5 @@
 use crate::database::models::{ConfigVar, Provider, ProviderConfig};
+use crate::utils;
 use inquire::{Confirm, Password, Select, Text};
 use sqlx::sqlite::SqlitePool;
 use tracing::{error, info};
@@ -53,23 +54,11 @@ pub async fn create(pool: &SqlitePool, skip_confirmation: bool) -> anyhow::Resul
         });
     }
 
-    if !skip_confirmation {
-        match Confirm::new("Do you want to proceed with adding this provider config?")
-            .with_default(true)
-            .prompt()
-        {
-            Ok(true) => {}
-            Ok(false) => {
-                println!("Operation cancelled by user");
-                return Ok(());
-            }
-            Err(e) => {
-                error!("{}", e.to_string());
-                anyhow::bail!("Error processing user response")
-            }
-        }
-    } else {
-        info!("Automatic confirmation with -y flag. Proceeding...");
+    if !(utils::user_confirmation(
+        skip_confirmation,
+        "Do you want to proceed creating this provider configuration?",
+    )?) {
+        return Ok(());
     }
 
     ProviderConfig::insert(pool, display_name, provider.id.clone(), config_vars).await?;
