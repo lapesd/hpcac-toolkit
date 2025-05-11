@@ -18,7 +18,7 @@ pub async fn delete(
         .ok_or_else(|| anyhow::anyhow!("Provider config with ID {} not found", id))?;
 
     // Print ProviderConfig details
-    println!("\n\n=== Provider Configuration to be deleted ===");
+    println!("\n=== Provider Configuration to be deleted ===");
     println!("{:<20}: {}", "ID", config_to_be_deleted.id);
     println!("{:<20}: {}", "Provider", config_to_be_deleted.provider_id);
     println!("{:<20}: {}", "Name", config_to_be_deleted.display_name);

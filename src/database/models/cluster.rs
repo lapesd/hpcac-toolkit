@@ -1,4 +1,4 @@
-use crate::database::models::{Node, ShellCommand};
+use crate::database::models::{InstanceType, Node, ProviderConfig, ShellCommand};
 use anyhow::Result;
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
@@ -19,6 +19,83 @@ pub struct Cluster {
 }
 
 impl Cluster {
+    pub async fn print_details(&self, pool: &SqlitePool) -> Result<()> {
+        let provider_config =
+            match ProviderConfig::fetch_by_id(pool, self.provider_config_id).await? {
+                Some(config) => config,
+                None => {
+                    error!("Missing ProviderConfig '{}'", self.provider_config_id);
+                    anyhow::bail!("Data Consistency Failure");
+                }
+            };
+
+        let nodes = self.get_nodes(pool).await?;
+
+        println!("\n=== Cluster '{}' ===", self.display_name);
+        println!("{:<20}: {}", "Provider", self.provider_id);
+        println!("{:<20}: {}", "Region", self.region);
+        println!(
+            "{:<20}: {}",
+            "Provider Config", provider_config.display_name
+        );
+        println!("{:<20}: {}\n", "Node Count", nodes.len());
+
+        println!("Node Details:");
+        for (i, node) in nodes.iter().enumerate() {
+            let instance_type_name = &node.instance_type;
+            let instance_details = match InstanceType::fetch_by_name_and_region(
+                pool,
+                instance_type_name,
+                &self.region,
+            )
+            .await?
+            {
+                Some(instance_type) => instance_type,
+                None => {
+                    error!("Missing InstanceType '{}'", instance_type_name);
+                    anyhow::bail!("Data Consistency Failure");
+                }
+            };
+
+            let processor_info = match &instance_details.core_count {
+                Some(cores) => {
+                    format!(
+                        "{}-Core {} {}",
+                        cores, instance_details.cpu_architecture, instance_details.cpu_type
+                    )
+                }
+                None => {
+                    format!(
+                        "{} {}",
+                        instance_details.cpu_architecture, instance_details.cpu_type
+                    )
+                }
+            };
+
+            let gpu_info = match instance_details.gpu_type {
+                Some(gpu) => {
+                    format!("{}x {}", instance_details.gpu_count, gpu)
+                }
+                None => "N/A".to_string(),
+            };
+
+            println!("  Node {}:", i + 1);
+            println!("    Instance Type   : {}", node.instance_type);
+            println!("    Processor       : {}", processor_info);
+            println!("    vCPUs:          : {}", instance_details.vcpus);
+            println!("    GPUs:           : {}", gpu_info);
+            println!("    Image ID        : {}", node.image_id);
+            println!("    Allocation Mode : {}", node.allocation_mode);
+            println!(
+                "    Burstable Mode  : {}",
+                node.burstable_mode.as_deref().unwrap_or("N/A")
+            );
+            println!();
+        }
+
+        Ok(())
+    }
+
     pub async fn fetch_by_id(pool: &SqlitePool, cluster_id: &str) -> Result<Cluster> {
         let cluster = match sqlx::query_as!(
             Cluster,

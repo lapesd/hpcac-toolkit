@@ -185,23 +185,6 @@ pub async fn create(
         )
     }
 
-    // Check availability_zone
-    let zones_tracker = utils::ProgressTracker::new(1, Some("availability zones discovery"));
-    let availability_zones = cloud_interface.fetch_zones(&region, &zones_tracker).await?;
-    zones_tracker.finish_with_message(&format!(
-        "Availability zone discovery complete: found {} zones in region {}",
-        availability_zones.len(),
-        &region
-    ));
-    let availability_zone = cluster_yaml.availability_zone.clone();
-    if !availability_zones.contains(&availability_zone) {
-        anyhow::bail!(
-            "Availability zone '{}' is not available. Possible options: {:?}",
-            availability_zone,
-            availability_zones
-        )
-    }
-
     // Validate node data
     let new_cluster_id = utils::generate_id();
     let mut nodes_to_insert: Vec<Node> = vec![];
@@ -322,10 +305,9 @@ pub async fn create(
     }
     nodes_tracker.finish_with_message(&format!("Validated {} nodes", node_count));
 
-    println!("\n\n=== New Cluster Blueprint Information ===");
+    println!("\n=== New Cluster Blueprint Information ===");
     println!("{:<20}: {}", "Provider", provider_config.provider_id);
     println!("{:<20}: {}", "Region", region);
-    println!("{:<20}: {}", "Availability Zone", availability_zone);
     println!(
         "{:<20}: {}",
         "Provider Config", provider_config.display_name

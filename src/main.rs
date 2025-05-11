@@ -50,7 +50,7 @@ enum ClusterCommands {
     Spawn {
         /// Name of the Cluster to spawn
         #[arg(long)]
-        cluster_id: String,
+        blueprint_id: String,
 
         /// Skip confirmation prompt
         #[arg(short = 'y', long = "yes")]
@@ -191,8 +191,8 @@ async fn main() -> anyhow::Result<()> {
     // Match clap commands and pass the SQLite pool to the command handlers
     match &cli.command {
         Commands::Cluster { command } => match command {
-            ClusterCommands::Spawn { cluster_id, yes } => {
-                commands::cluster::spawn(&sqlite_pool, cluster_id, *yes).await?;
+            ClusterCommands::Spawn { blueprint_id, yes } => {
+                commands::cluster::spawn(&sqlite_pool, blueprint_id, *yes).await?;
             }
         },
         Commands::ClusterBlueprint { command } => match command {
