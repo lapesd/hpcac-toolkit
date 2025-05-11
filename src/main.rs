@@ -113,6 +113,10 @@ enum InstanceTypeCommands {
         /// Filter instance_types by spot allocation support
         #[arg(long)]
         spot: Option<bool>,
+
+        /// Filter instance_types by burstable support
+        #[arg(long)]
+        burstable: Option<bool>,
     },
 
     /// Load instance type data from providers
@@ -225,6 +229,7 @@ async fn main() -> anyhow::Result<()> {
                 with_fpga,
                 baremetal,
                 spot,
+                burstable,
             } => {
                 commands::instance_type::list(
                     &sqlite_pool,
@@ -238,6 +243,7 @@ async fn main() -> anyhow::Result<()> {
                         with_fpga: *with_fpga,
                         baremetal: *baremetal,
                         spot: *spot,
+                        burstable: *burstable,
                     },
                 )
                 .await?;
