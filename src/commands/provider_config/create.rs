@@ -1,8 +1,8 @@
 use crate::database::models::{ConfigVar, Provider, ProviderConfig};
 use crate::utils;
-use inquire::{Confirm, Password, Select, Text};
+use inquire::{Password, Select, Text};
 use sqlx::sqlite::SqlitePool;
-use tracing::{error, info};
+use tracing::error;
 
 pub async fn create(pool: &SqlitePool, skip_confirmation: bool) -> anyhow::Result<()> {
     let providers = Provider::fetch_all(pool).await?;
