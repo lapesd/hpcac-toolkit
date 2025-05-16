@@ -2,7 +2,7 @@
 CREATE TABLE provider_configs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     provider_id VARCHAR(32) NOT NULL,
-    display_name VARCHAR(50) NOT NULL,
+    display_name VARCHAR(50) NOT NULL UNIQUE,
     FOREIGN KEY (provider_id) REFERENCES providers(id)
 );
 

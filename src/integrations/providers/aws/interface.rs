@@ -43,17 +43,29 @@ impl AwsInterface {
 
     /// Get an EC2 client configured with the provided credentials and region.
     pub fn get_ec2_client(&self, region: &str) -> Result<EC2Client, Error> {
-        Ok(EC2Client::new(&self.get_config(region)?))
+        let config = match self.get_config(region) {
+            Ok(config) => config,
+            Err(e) => return self.handle_error(e, "Failed to get AWS Config"),
+        };
+        Ok(EC2Client::new(&config))
     }
 
     /// Get a Pricing client configured with the provided credentials and region.
     pub fn get_pricing_client(&self) -> Result<PricingClient, Error> {
-        Ok(PricingClient::new(&self.get_config("us-east-1")?))
+        let config = match self.get_config("us-east-1") {
+            Ok(config) => config,
+            Err(e) => return self.handle_error(e, "Failed to get AWS Config"),
+        };
+        Ok(PricingClient::new(&config))
     }
 
     /// Get an Service Quotas client configured with the provided credentials and region.
     pub fn _get_service_quotas_client(&self, region: &str) -> Result<ServiceQuotasClient, Error> {
-        Ok(ServiceQuotasClient::new(&self.get_config(region)?))
+        let config = match self.get_config(region) {
+            Ok(config) => config,
+            Err(e) => return self.handle_error(e, "Failed to get AWS Config"),
+        };
+        Ok(ServiceQuotasClient::new(&config))
     }
 }
 

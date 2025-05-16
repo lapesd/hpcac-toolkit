@@ -14,6 +14,7 @@ pub struct Cluster {
     pub public_ssh_key_path: String,
     pub private_ssh_key_path: String,
     pub region: String,
+    pub availability_zone: String,
     pub created_at: NaiveDateTime,
     pub spawned_at: Option<NaiveDateTime>,
 }
@@ -96,7 +97,7 @@ impl Cluster {
         Ok(())
     }
 
-    pub async fn fetch_by_id(pool: &SqlitePool, cluster_id: &str) -> Result<Cluster> {
+    pub async fn fetch_by_id(pool: &SqlitePool, cluster_id: &str) -> Result<Option<Cluster>> {
         let cluster = match sqlx::query_as!(
             Cluster,
             r#"
@@ -108,6 +109,7 @@ impl Cluster {
                     public_ssh_key_path,
                     private_ssh_key_path,
                     region,
+                    availability_zone,
                     created_at,
                     spawned_at
                 FROM clusters
@@ -115,7 +117,7 @@ impl Cluster {
             "#,
             cluster_id
         )
-        .fetch_one(pool)
+        .fetch_optional(pool)
         .await
         {
             Ok(result) => result,
@@ -140,6 +142,7 @@ impl Cluster {
                     public_ssh_key_path,
                     private_ssh_key_path,
                     region,
+                    availability_zone,
                     created_at,
                     spawned_at
                 FROM clusters
@@ -189,9 +192,10 @@ impl Cluster {
                     public_ssh_key_path, 
                     private_ssh_key_path, 
                     region,
+                    availability_zone,
                     created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
             self.id,
             self.display_name,
@@ -200,6 +204,7 @@ impl Cluster {
             self.public_ssh_key_path,
             self.private_ssh_key_path,
             self.region,
+            self.availability_zone,
             self.created_at
         )
         .execute(&mut *tx)

@@ -12,10 +12,7 @@ impl CloudInfoProvider for AwsInterface {
     async fn fetch_regions(&self, _tracker: &ProgressTracker) -> Result<Vec<String>, Error> {
         // Use a default region (here "us-east-1") to create the client,
         // as the describe_regions API call is global.
-        let client = match self.get_ec2_client("us-east-1") {
-            Ok(client) => client,
-            Err(err) => return self.handle_error(err, "Failed to initialize AWS EC2 client"),
-        };
+        let client = self.get_ec2_client("us-east-1")?;
 
         match client.describe_regions().send().await {
             Ok(resp) => {
@@ -37,10 +34,7 @@ impl CloudInfoProvider for AwsInterface {
         region: &str,
         _tracker: &ProgressTracker,
     ) -> Result<Vec<String>, anyhow::Error> {
-        let client = match self.get_ec2_client(region) {
-            Ok(client) => client,
-            Err(err) => return self.handle_error(err, "Failed to initialize AWS EC2 client"),
-        };
+        let client = self.get_ec2_client(region)?;
         match client.describe_availability_zones().send().await {
             Ok(resp) => {
                 let zones: Vec<String> = resp
@@ -67,10 +61,7 @@ impl CloudInfoProvider for AwsInterface {
         region: &str,
         tracker: &ProgressTracker,
     ) -> Result<Vec<InstanceType>, Error> {
-        let ec2_client = match self.get_ec2_client(region) {
-            Ok(client) => client,
-            Err(err) => return self.handle_error(err, "Failed to initialize AWS EC2 client"),
-        };
+        let ec2_client = self.get_ec2_client(region)?;
         let mut instance_types: Vec<InstanceType> = vec![];
         let mut next_token: Option<String> = None;
         let base_request = ec2_client.describe_instance_types();
@@ -478,11 +469,7 @@ impl CloudInfoProvider for AwsInterface {
         region: &str,
         image_id: &str,
     ) -> Result<MachineImage, Error> {
-        let client = match self.get_ec2_client(region) {
-            Ok(client) => client,
-            Err(err) => return self.handle_error(err, "Failed to initialize EC2 client"),
-        };
-
+        let client = self.get_ec2_client(region)?;
         let resp = match client.describe_images().image_ids(image_id).send().await {
             Ok(resp) => resp,
             Err(err) => {
@@ -498,8 +485,6 @@ impl CloudInfoProvider for AwsInterface {
 
         let images = resp.images.unwrap_or_default();
         let aws_image = &images[0]; // get the first (should be only one)
-
-        // Create a machine image with current time
         let now = chrono::Utc::now().naive_utc();
         let image = MachineImage {
             id: image_id.to_string(),

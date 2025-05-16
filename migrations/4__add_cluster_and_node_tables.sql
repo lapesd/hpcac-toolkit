@@ -1,12 +1,13 @@
 -- Create the CLUSTERS table
 CREATE TABLE clusters (
     id VARCHAR(32) PRIMARY KEY,
-    display_name TEXT NOT NULL,
+    display_name TEXT NOT NULL UNIQUE,
     provider_id VARCHAR(32) NOT NULL,
     provider_config_id INTEGER NOT NULL,
     public_ssh_key_path TEXT NOT NULL,
     private_ssh_key_path TEXT NOT NULL,
     region TEXT NOT NULL,
+    availability_zone TEXT NOT NULL,
     created_at DATETIME NOT NULL,
     spawned_at DATETIME,
     FOREIGN KEY (provider_config_id) REFERENCES provider_configs(id),

@@ -37,7 +37,7 @@ pub async fn create(
     yaml_file_path: &str,
     skip_confirmation: bool,
 ) -> anyhow::Result<()> {
-    // Open and parse the cluster blueprint yaml file
+    // Open and parse the cluster yaml file
     let path = Path::new(yaml_file_path);
     let cluster_yaml_str: String = match fs::read_to_string(path) {
         Ok(result) => {
@@ -52,7 +52,7 @@ pub async fn create(
 
     let cluster_yaml: ClusterYaml = match serde_yaml::from_str(&cluster_yaml_str) {
         Ok(result) => {
-            info!("Parsed cluster blueprint yaml file successfully");
+            info!("Parsed cluster yaml file successfully");
             result
         }
         Err(e) => {
@@ -185,6 +185,23 @@ pub async fn create(
         )
     }
 
+    // Check availability_zone, if present
+    let zones_tracker = utils::ProgressTracker::new(1, Some("zones discovery"));
+    let zones = cloud_interface.fetch_zones(&region, &zones_tracker).await?;
+    zones_tracker.finish_with_message(&format!(
+        "Zone discovery complete: found {} zones in {}",
+        zones.len(),
+        region
+    ));
+    let zone = cluster_yaml.availability_zone.clone();
+    if !zones.contains(&zone) {
+        anyhow::bail!(
+            "Availability Zone '{}' is not available. Possible options: {:?}",
+            zone,
+            zones
+        )
+    }
+
     // Validate node data
     let new_cluster_id = utils::generate_id();
     let mut nodes_to_insert: Vec<Node> = vec![];
@@ -305,7 +322,7 @@ pub async fn create(
     }
     nodes_tracker.finish_with_message(&format!("Validated {} nodes", node_count));
 
-    println!("\n=== New Cluster Blueprint Information ===");
+    println!("\n=== New Cluster Information ===");
     println!("{:<20}: {}", "Provider", provider_config.provider_id);
     println!("{:<20}: {}", "Region", region);
     println!(
@@ -363,7 +380,7 @@ pub async fn create(
 
     if !(utils::user_confirmation(
         skip_confirmation,
-        "Do you want to proceed creating this cluster blueprint?",
+        "Do you want to proceed creating this cluster?",
     )?) {
         return Ok(());
     }
@@ -377,6 +394,7 @@ pub async fn create(
         public_ssh_key_path: public_key_path_string,
         private_ssh_key_path: private_key_path_string,
         region,
+        availability_zone: zone,
         created_at: Utc::now().naive_utc(),
         spawned_at: None,
     };
@@ -385,8 +403,8 @@ pub async fn create(
         .await?;
 
     println!(
-        "New Cluster Blueprint '{}' created successfully! To spawn a cluster with this \
-        blueprint, use: 'cluster spawn --blueprint-id {}'",
+        "New Cluster '{}' created successfully! To spawn this cluster, \
+        use: 'cluster spawn --cluster-id {}'",
         cluster_name, cluster.id
     );
     Ok(())

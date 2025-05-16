@@ -1,16 +1,15 @@
-use crate::database::models::{
-    CloudResource, Cluster, InstanceType, MachineImage, Node, ResourceStatus,
-};
+use crate::database::models::{Cluster, InstanceType, MachineImage, Node};
 use crate::integrations::providers::{aws::AwsInterface, vultr::VultrInterface};
 use crate::utils::ProgressTracker;
+
 use anyhow::{Error, Result};
 use std::collections::HashMap;
 use tracing::error;
 
 /// Trait for handling cloud errors - can be implemented by all cloud-related traits
 pub trait CloudErrorHandler {
-    fn handle_error<T>(&self, err: Error, message: &str) -> Result<T> {
-        error!("{}", err);
+    fn handle_error<T>(&self, e: Error, message: &str) -> Result<T> {
+        error!("{}", e);
         anyhow::bail!("Cloud Operation: {}", message);
     }
 }
@@ -55,23 +54,8 @@ pub trait CloudResourceManager: CloudErrorHandler {
     /// Create a new cluster with the specified nodes
     async fn spawn_cluster(&self, cluster: Cluster, nodes: Vec<Node>) -> Result<(), Error>;
 
-    /// Check if a cluster with the given ID exists
-    async fn check_cluster_exists(&self, cluster_id: &str) -> Result<bool, Error>;
-
     /// Delete a cluster and all its associated resources
-    async fn delete_cluster(&self, cluster_id: &str) -> Result<(), Error>;
-
-    /// Find and clean up any orphaned resources associated with a cluster
-    async fn cleanup_orphaned_resources(&self, cluster_id: &str) -> Result<Vec<String>, Error>;
-}
-
-pub trait CloudResourceTracker: CloudErrorHandler {
-    async fn list_resources_by_cluster(
-        &self,
-        cluster_id: &str,
-    ) -> Result<Vec<CloudResource>, Error>;
-
-    async fn get_resource_status(&self, resource_id: &str) -> Result<ResourceStatus, Error>;
+    async fn destroy_cluster(&self, cluster: Cluster) -> Result<(), Error>;
 }
 
 pub enum CloudProvider {
@@ -152,43 +136,10 @@ impl CloudResourceManager for CloudProvider {
         }
     }
 
-    async fn check_cluster_exists(&self, cluster_id: &str) -> Result<bool, Error> {
+    async fn destroy_cluster(&self, cluster: Cluster) -> Result<(), Error> {
         match self {
-            CloudProvider::Aws(aws) => aws.check_cluster_exists(cluster_id).await,
-            CloudProvider::Vultr(vultr) => vultr.check_cluster_exists(cluster_id).await,
-        }
-    }
-
-    async fn delete_cluster(&self, cluster_id: &str) -> Result<(), Error> {
-        match self {
-            CloudProvider::Aws(aws) => aws.delete_cluster(cluster_id).await,
-            CloudProvider::Vultr(vultr) => vultr.delete_cluster(cluster_id).await,
-        }
-    }
-
-    async fn cleanup_orphaned_resources(&self, cluster_id: &str) -> Result<Vec<String>, Error> {
-        match self {
-            CloudProvider::Aws(aws) => aws.cleanup_orphaned_resources(cluster_id).await,
-            CloudProvider::Vultr(vultr) => vultr.cleanup_orphaned_resources(cluster_id).await,
-        }
-    }
-}
-
-impl CloudResourceTracker for CloudProvider {
-    async fn list_resources_by_cluster(
-        &self,
-        cluster_id: &str,
-    ) -> Result<Vec<CloudResource>, Error> {
-        match self {
-            CloudProvider::Aws(aws) => aws.list_resources_by_cluster(cluster_id).await,
-            CloudProvider::Vultr(vultr) => vultr.list_resources_by_cluster(cluster_id).await,
-        }
-    }
-
-    async fn get_resource_status(&self, resource_id: &str) -> Result<ResourceStatus, Error> {
-        match self {
-            CloudProvider::Aws(aws) => aws.get_resource_status(resource_id).await,
-            CloudProvider::Vultr(vultr) => vultr.get_resource_status(resource_id).await,
+            CloudProvider::Aws(aws) => aws.destroy_cluster(cluster).await,
+            CloudProvider::Vultr(vultr) => vultr.destroy_cluster(cluster).await,
         }
     }
 }

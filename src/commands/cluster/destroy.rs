@@ -1,12 +1,10 @@
 use crate::database::models::{Cluster, ProviderConfig};
-use crate::integrations::{
-    CloudInfoProvider, cloud_interface::CloudResourceManager, providers::aws::AwsInterface,
-};
+use crate::integrations::{cloud_interface::CloudResourceManager, providers::aws::AwsInterface};
 use crate::utils;
 use sqlx::sqlite::SqlitePool;
 use tracing::error;
 
-pub async fn spawn(
+pub async fn destroy(
     pool: &SqlitePool,
     cluster_id: &str,
     skip_confirmation: bool,
@@ -21,7 +19,6 @@ pub async fn spawn(
             anyhow::bail!("DB Operation Failure");
         }
     };
-
     let provider_config =
         match ProviderConfig::fetch_by_id(pool, cluster.provider_config_id).await? {
             Some(config) => config,
@@ -40,28 +37,13 @@ pub async fn spawn(
         }
     };
 
-    let zones_tracker = utils::ProgressTracker::new(1, Some("availability_zone discovery"));
-    let availability_zones = cloud_interface
-        .fetch_zones(&cluster.region, &zones_tracker)
-        .await?;
-    zones_tracker.finish_with_message(&format!(
-        "Availability zone discovery complete: found {} zones in region {}",
-        availability_zones.len(),
-        &cluster.region
-    ));
-
-    // TODO: Add a way to configure the AZ for the cluster to be spawned.
-
-    let nodes = cluster.get_nodes(pool).await?;
-    cluster.print_details(pool).await?;
-
     if !(utils::user_confirmation(
         skip_confirmation,
-        "Do you want to proceed spawning this cluster?",
+        "Do you confirm you want to destroy this cluster?",
     )?) {
         return Ok(());
     }
 
-    cloud_interface.spawn_cluster(cluster, nodes).await?;
+    cloud_interface.destroy_cluster(cluster).await?;
     Ok(())
 }
