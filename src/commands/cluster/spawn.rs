@@ -1,7 +1,5 @@
 use crate::database::models::{Cluster, ProviderConfig};
-use crate::integrations::{
-    CloudInfoProvider, cloud_interface::CloudResourceManager, providers::aws::AwsInterface,
-};
+use crate::integrations::{cloud_interface::CloudResourceManager, providers::aws::AwsInterface};
 use crate::utils;
 use sqlx::sqlite::SqlitePool;
 use tracing::error;
@@ -39,18 +37,6 @@ pub async fn spawn(
             anyhow::bail!("Provider '{}' is currently not supported.", &provider_id)
         }
     };
-
-    let zones_tracker = utils::ProgressTracker::new(1, Some("availability_zone discovery"));
-    let availability_zones = cloud_interface
-        .fetch_zones(&cluster.region, &zones_tracker)
-        .await?;
-    zones_tracker.finish_with_message(&format!(
-        "Availability zone discovery complete: found {} zones in region {}",
-        availability_zones.len(),
-        &cluster.region
-    ));
-
-    // TODO: Add a way to configure the AZ for the cluster to be spawned.
 
     let nodes = cluster.get_nodes(pool).await?;
     cluster.print_details(pool).await?;

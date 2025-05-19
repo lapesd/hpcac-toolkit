@@ -350,14 +350,19 @@ impl AwsInterface {
         Ok(rt_id.to_string())
     }
 
-    async fn get_existing_route_table_subnet_associations(
+    async fn get_existing_rt_subnet_association(
         &self,
         client: &aws_sdk_ec2::Client,
-        route_table_id: &str,
-    ) -> Result<Vec<String>> {
+        cluster_id: &str,
+    ) -> Result<Option<String>> {
         let rt_assoc_query_response = match client
             .describe_route_tables()
-            .route_table_ids(route_table_id)
+            .filters(
+                aws_sdk_ec2::types::Filter::builder()
+                    .name("tag:ClusterId")
+                    .values(cluster_id)
+                    .build(),
+            )
             .send()
             .await
         {
@@ -370,17 +375,21 @@ impl AwsInterface {
             }
         };
 
-        let mut association_ids = Vec::new();
         let route_tables = rt_assoc_query_response.route_tables();
         for rt in route_tables {
-            for assoc in rt.associations() {
-                if let Some(assoc_id) = assoc.route_table_association_id() {
-                    association_ids.push(assoc_id.to_string());
+            if let Some(associations) = rt.associations() {
+                for assoc in associations {
+                    if assoc.main() == Some(false)
+                        && assoc.route_table_id().is_some()
+                        && assoc.subnet_id().is_some()
+                    {
+                        return Ok(assoc.route_table_association_id().map(String::from));
+                    }
                 }
             }
         }
 
-        Ok(association_ids)
+        Ok(None)
     }
 
     async fn create_route_table_subnet_association(
@@ -468,35 +477,10 @@ impl AwsInterface {
     }
 
     async fn delete_route_table_subnet_association(
-        &self,
         client: &aws_sdk_ec2::Client,
         rt_association_id: &str,
     ) -> Result<(), Error> {
-        info!(
-            "Deleting Route Table Association '{}'...",
-            rt_association_id
-        );
-        match client
-            .disassociate_route_table()
-            .association_id(rt_association_id)
-            .send()
-            .await
-        {
-            Ok(_) => {
-                info!(
-                    "Route Table Association '{}' deleted successfully",
-                    rt_association_id
-                );
-                Ok(())
-            }
-            Err(e) => self.handle_error(
-                e.into(),
-                &format!(
-                    "Failed to delete Route Table Association '{}'",
-                    rt_association_id
-                ),
-            ),
-        }
+        Ok(())
     }
 
     async fn delete_route_table(
@@ -693,18 +677,11 @@ impl CloudResourceManager for AwsInterface {
             }
         };
 
-        // Create Route Table Subnet Association
-        let existing_rt_association_ids = self
-            .get_existing_route_table_subnet_associations(&client, &rt_id)
+        // Create Route Table Association
+        let existing_rt_association_id = self
+            .get_existing_rt_association(&client, &cluster.id)
             .await?;
-        if existing_rt_association_ids.is_empty() {
-            self.create_route_table_subnet_association(&client, &rt_id, &subnet_id)
-                .await?;
-        } else {
-            info!(
-                "Route Table subnet association for this cluster already exists, skipping creation..."
-            );
-        }
+        // add missing code to crete the rt association
 
         // Create Route via Gateway
         self.create_route_via_gateway(&client, &rt_id, &igw_id)
@@ -719,18 +696,13 @@ impl CloudResourceManager for AwsInterface {
         // Get AWS SDK client
         let client = self.get_ec2_client(&cluster.region)?;
 
+        // TODO: Continue deleting the Cluster
+
         // Delete ROUTE TABLE
         let existing_rt_id = self.get_existing_route_table(&client, &cluster.id).await?;
         match existing_rt_id {
             Some(rt_id) => {
                 info!("Found route table '{}' for cluster, deleting...", rt_id);
-                let existing_rt_association_ids = self
-                    .get_existing_route_table_subnet_associations(&client, &rt_id)
-                    .await?;
-                for id in existing_rt_association_ids {
-                    self.delete_route_table_subnet_association(&client, &id)
-                        .await?;
-                }
                 self.delete_route_table(&client, &rt_id).await?;
             }
             None => {
