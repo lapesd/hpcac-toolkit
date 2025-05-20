@@ -467,6 +467,164 @@ impl AwsInterface {
         }
     }
 
+    async fn get_existing_security_groups(
+        &self,
+        client: &aws_sdk_ec2::Client,
+        cluster_id: &str,
+    ) -> Result<Vec<(String, String)>, Error> {
+        let sg_query_response = match client
+            .describe_security_groups()
+            .filters(
+                aws_sdk_ec2::types::Filter::builder()
+                    .name("tag:ClusterId")
+                    .values(cluster_id)
+                    .build(),
+            )
+            .send()
+            .await
+        {
+            Ok(response) => response,
+            Err(e) => {
+                return self.handle_error(e.into(), "Failed to query existing Security Groups");
+            }
+        };
+
+        let mut security_groups = Vec::new();
+        for sg in sg_query_response.security_groups() {
+            if let (Some(id), Some(name)) = (sg.group_id(), sg.group_name()) {
+                security_groups.push((id.to_string(), name.to_string()));
+            }
+        }
+
+        Ok(security_groups)
+    }
+
+    async fn create_security_groups(
+        &self,
+        client: &aws_sdk_ec2::Client,
+        vpc_id: &str,
+        sg_name: &str,
+        cluster_tag: aws_sdk_ec2::types::Tag,
+    ) -> Result<Vec<String>, Error> {
+        let mut security_group_ids = Vec::new();
+
+        // Allow All Security Group
+        info!("Creating Allow All security group...");
+
+        let allow_all_sg_output = match client
+            .create_security_group()
+            .group_name(sg_name)
+            .description("Allow all traffic")
+            .vpc_id(vpc_id)
+            .tag_specifications(
+                aws_sdk_ec2::types::TagSpecification::builder()
+                    .resource_type(aws_sdk_ec2::types::ResourceType::SecurityGroup)
+                    .tags(
+                        aws_sdk_ec2::types::Tag::builder()
+                            .key("Name")
+                            .value(sg_name)
+                            .build(),
+                    )
+                    .tags(cluster_tag)
+                    .build(),
+            )
+            .send()
+            .await
+        {
+            Ok(output) => output,
+            Err(e) => {
+                return self.handle_error(e.into(), "Failed to create Allow All security group");
+            }
+        };
+
+        let allow_all_sg_id = match allow_all_sg_output.group_id() {
+            Some(id) => {
+                info!("Created Allow All security group with ID '{}'", id);
+                id.to_string()
+            }
+            None => {
+                let error_msg = "Missing Security Group ID from AWS API response";
+                return self.handle_error(anyhow!(error_msg), error_msg);
+            }
+        };
+
+        // Add Allow All ingress rule (self-referential for internal communication)
+        match client
+            .authorize_security_group_ingress()
+            .group_id(&allow_all_sg_id)
+            .ip_permissions(
+                aws_sdk_ec2::types::IpPermission::builder()
+                    .ip_protocol("-1") // All protocols
+                    .from_port(0)
+                    .to_port(0)
+                    .user_id_group_pairs(
+                        aws_sdk_ec2::types::UserIdGroupPair::builder()
+                            .group_id(&allow_all_sg_id) // Self-reference
+                            .build(),
+                    )
+                    .build(),
+            )
+            .send()
+            .await
+        {
+            Ok(_) => info!(
+                "Added self-referential ingress rule to security group '{}'",
+                allow_all_sg_id
+            ),
+            Err(e) => {
+                return self.handle_error(e.into(), "Failed to add self-referential ingress rule");
+            }
+        }
+
+        // Add ingress rule for external SSH access
+        match client
+            .authorize_security_group_ingress()
+            .group_id(&allow_all_sg_id)
+            .ip_permissions(
+                aws_sdk_ec2::types::IpPermission::builder()
+                    .ip_protocol("tcp")
+                    .from_port(22)
+                    .to_port(22)
+                    .ip_ranges(
+                        aws_sdk_ec2::types::IpRange::builder()
+                            .cidr_ip("0.0.0.0/0")
+                            .build(),
+                    )
+                    .build(),
+            )
+            .send()
+            .await
+        {
+            Ok(_) => info!(
+                "Added SSH ingress rule to security group '{}'",
+                allow_all_sg_id
+            ),
+            Err(e) => return self.handle_error(e.into(), "Failed to add SSH ingress rule"),
+        }
+        security_group_ids.push(allow_all_sg_id);
+
+        info!("Successfully created security group");
+        Ok(security_group_ids)
+    }
+
+    async fn delete_security_group(
+        &self,
+        client: &aws_sdk_ec2::Client,
+        sg_id: &str,
+    ) -> Result<(), Error> {
+        info!("Deleting security group '{}'...", sg_id);
+        match client.delete_security_group().group_id(sg_id).send().await {
+            Ok(_) => {
+                info!("Security group '{}' deleted successfully", sg_id);
+                Ok(())
+            }
+            Err(e) => self.handle_error(
+                e.into(),
+                &format!("Failed to delete security group '{}'", sg_id),
+            ),
+        }
+    }
+
     async fn delete_route_table_subnet_association(
         &self,
         client: &aws_sdk_ec2::Client,
@@ -613,7 +771,6 @@ impl CloudResourceManager for AwsInterface {
     async fn spawn_cluster(&self, cluster: Cluster, _nodes: Vec<Node>) -> Result<(), Error> {
         // Get AWS SDK client
         let client = self.get_ec2_client(&cluster.region)?;
-
         let cluster_tag = aws_sdk_ec2::types::Tag::builder()
             .key("ClusterId")
             .value(cluster.id.to_string())
@@ -688,8 +845,15 @@ impl CloudResourceManager for AwsInterface {
                 rt_id
             }
             None => {
-                self.create_route_table(&client, &vpc_id, &rt_name, cluster_tag.clone())
-                    .await?
+                let rt_id = self
+                    .create_route_table(&client, &vpc_id, &rt_name, cluster_tag.clone())
+                    .await?;
+                // TODO: Add get_existing_routes helper method and split route creation
+                // from the create route table logic.
+                self.create_route_via_gateway(&client, &rt_id, &igw_id)
+                    .await?;
+
+                rt_id
             }
         };
 
@@ -706,9 +870,17 @@ impl CloudResourceManager for AwsInterface {
             );
         }
 
-        // Create Route via Gateway
-        self.create_route_via_gateway(&client, &rt_id, &igw_id)
+        // Create Security Groups
+        let existing_sgs = self
+            .get_existing_security_groups(&client, &cluster.id)
             .await?;
+        if existing_sgs.is_empty() {
+            let sg_name = format!("{}-SECURITY_GROUP", &cluster.id);
+            self.create_security_groups(&client, &vpc_id, &sg_name, cluster_tag.clone())
+                .await?;
+        } else {
+            info!("Security Groups already created, skipping...")
+        }
 
         // TODO: Continue spawning the Cluster
         Ok(())
@@ -718,6 +890,14 @@ impl CloudResourceManager for AwsInterface {
     async fn destroy_cluster(&self, cluster: Cluster) -> Result<(), Error> {
         // Get AWS SDK client
         let client = self.get_ec2_client(&cluster.region)?;
+
+        // Delete SECURITY GROUPS
+        let existing_sgs = self
+            .get_existing_security_groups(&client, &cluster.id)
+            .await?;
+        for (sg_id, _) in existing_sgs.into_iter() {
+            self.delete_security_group(&client, &sg_id).await?;
+        }
 
         // Delete ROUTE TABLE
         let existing_rt_id = self.get_existing_route_table(&client, &cluster.id).await?;
