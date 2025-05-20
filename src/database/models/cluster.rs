@@ -17,6 +17,7 @@ pub struct Cluster {
     pub availability_zone: String,
     pub created_at: NaiveDateTime,
     pub spawned_at: Option<NaiveDateTime>,
+    pub node_affinity: bool,
 }
 
 impl Cluster {
@@ -111,7 +112,8 @@ impl Cluster {
                     region,
                     availability_zone,
                     created_at,
-                    spawned_at
+                    spawned_at,
+                    node_affinity
                 FROM clusters
                 WHERE id = ?
             "#,
@@ -144,7 +146,8 @@ impl Cluster {
                     region,
                     availability_zone,
                     created_at,
-                    spawned_at
+                    spawned_at,
+                    node_affinity
                 FROM clusters
             "#,
         )

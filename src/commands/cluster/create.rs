@@ -20,6 +20,7 @@ struct ClusterYaml {
     public_ssh_key_path: String,
     region: String,
     availability_zone: String,
+    node_affinity: bool,
     nodes: Vec<NodeYaml>,
 }
 
@@ -207,6 +208,7 @@ pub async fn create(
     let mut nodes_to_insert: Vec<Node> = vec![];
     let mut commands_to_insert: Vec<ShellCommand> = vec![];
     let node_count = cluster_yaml.nodes.len() as u64;
+
     let nodes_tracker = utils::ProgressTracker::new(node_count, Some("nodes validation"));
     for (i, node_definition) in cluster_yaml.nodes.iter().enumerate() {
         let instance_type_name = node_definition.instance_type.clone();
@@ -262,6 +264,14 @@ pub async fn create(
             },
             None => "on-demand".to_string(), // Default when not specified
         };
+
+        // Validade node_affinity
+        if cluster_yaml.node_affinity && !instance_type_details.has_affinity_settings {
+            anyhow::bail!(
+                "Instance type '{}' does not support node affinity settings",
+                &instance_type_name
+            )
+        }
 
         // Validate burstable_mode
         let burstable_mode = match &node_definition.burstable_mode {
@@ -397,6 +407,7 @@ pub async fn create(
         availability_zone: zone,
         created_at: Utc::now().naive_utc(),
         spawned_at: None,
+        node_affinity: cluster_yaml.node_affinity,
     };
     cluster
         .insert(pool, nodes_to_insert, commands_to_insert)

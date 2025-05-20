@@ -607,6 +607,108 @@ impl AwsInterface {
         Ok(security_group_ids)
     }
 
+    async fn get_existing_placement_group(
+        &self,
+        client: &aws_sdk_ec2::Client,
+        cluster_id: &str,
+    ) -> Result<Option<String>> {
+        let pg_query_response = match client
+            .describe_placement_groups()
+            .filters(
+                aws_sdk_ec2::types::Filter::builder()
+                    .name("tag:ClusterId")
+                    .values(cluster_id)
+                    .build(),
+            )
+            .send()
+            .await
+        {
+            Ok(response) => response,
+            Err(e) => {
+                return self.handle_error(e.into(), "Failed to query existing Placement Groups");
+            }
+        };
+
+        let placement_groups = pg_query_response.placement_groups();
+        if let Some(pg) = placement_groups.first() {
+            return Ok(pg.group_name().map(String::from));
+        }
+
+        Ok(None)
+    }
+
+    async fn create_placement_group(
+        &self,
+        client: &aws_sdk_ec2::Client,
+        pg_name: &str,
+        cluster_id: &str,
+        cluster_tag: aws_sdk_ec2::types::Tag,
+    ) -> Result<String, Error> {
+        info!("Creating a new Placement Group...");
+
+        let _pg_output = match client
+            .create_placement_group()
+            .group_name(pg_name)
+            .strategy(aws_sdk_ec2::types::PlacementStrategy::Cluster)
+            .tag_specifications(
+                aws_sdk_ec2::types::TagSpecification::builder()
+                    .resource_type(aws_sdk_ec2::types::ResourceType::PlacementGroup)
+                    .tags(
+                        aws_sdk_ec2::types::Tag::builder()
+                            .key("Name")
+                            .value(pg_name)
+                            .build(),
+                    )
+                    .tags(cluster_tag)
+                    .build(),
+            )
+            .send()
+            .await
+        {
+            Ok(output) => output,
+            Err(e) => return self.handle_error(e.into(), "Failure creating Placement Group"),
+        };
+
+        // Since the create_placement_group API doesn't return the placement group details,
+        // we'll confirm the group was created by querying for it
+        let existing_pg = match self.get_existing_placement_group(client, cluster_id).await {
+            Ok(Some(name)) => {
+                info!("Created new Placement Group '{}'", name);
+                name
+            }
+            _ => {
+                let error_msg = "Placement Group creation failed or cannot be verified";
+                return self.handle_error(anyhow!(error_msg), error_msg);
+            }
+        };
+
+        Ok(existing_pg)
+    }
+
+    async fn delete_placement_group(
+        &self,
+        client: &aws_sdk_ec2::Client,
+        pg_name: &str,
+    ) -> Result<(), Error> {
+        info!("Deleting Placement Group '{}'...", pg_name);
+
+        match client
+            .delete_placement_group()
+            .group_name(pg_name)
+            .send()
+            .await
+        {
+            Ok(_) => {
+                info!("Placement Group '{}' deleted successfully", pg_name);
+                Ok(())
+            }
+            Err(e) => self.handle_error(
+                e.into(),
+                &format!("Failed to delete Placement Group '{}'", pg_name),
+            ),
+        }
+    }
+
     async fn delete_security_group(
         &self,
         client: &aws_sdk_ec2::Client,
@@ -882,6 +984,18 @@ impl CloudResourceManager for AwsInterface {
             info!("Security Groups already created, skipping...")
         }
 
+        // Create Placement Group, if cluster is configured to use it
+        if cluster.node_affinity {
+            let existing_pg = self
+                .get_existing_placement_group(&client, &cluster.id)
+                .await?;
+            if existing_pg.is_none() {
+                let pg_name = format!("{}-PG", &cluster.id);
+                self.create_placement_group(&client, &pg_name, &cluster.id, cluster_tag.clone())
+                    .await?;
+            }
+        }
+
         // TODO: Continue spawning the Cluster
         Ok(())
     }
@@ -890,6 +1004,17 @@ impl CloudResourceManager for AwsInterface {
     async fn destroy_cluster(&self, cluster: Cluster) -> Result<(), Error> {
         // Get AWS SDK client
         let client = self.get_ec2_client(&cluster.region)?;
+
+        // Delete PLACEMENT GROUP
+        if cluster.node_affinity {
+            let existing_pg = self
+                .get_existing_placement_group(&client, &cluster.id)
+                .await?;
+            if existing_pg.is_some() {
+                self.delete_placement_group(&client, &existing_pg.unwrap())
+                    .await?;
+            }
+        }
 
         // Delete SECURITY GROUPS
         let existing_sgs = self
