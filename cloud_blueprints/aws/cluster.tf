@@ -169,13 +169,8 @@ resource "aws_efs_mount_target" "efs_mt" {
   security_groups = [aws_security_group.allow_nfs.id]
 }
 
-resource "aws_placement_group" "cluster_pg" {
-  name     = "cluster-placement-group"
-  strategy = "cluster"
-  tags = {
-    Name                  = "Cluster Placement Group"
-    "cost_allocation_tag" = var.cluster_tag
-  }
+data "aws_placement_group" "cluster_pg" {
+  name = "cluster-placement-group"
 }
 
 resource "aws_network_interface" "cluster_node_eni" {
@@ -195,7 +190,7 @@ resource "aws_instance" "cluster_node" {
   ami             = var.node_ami
   instance_type   = var.node_instance_type
   key_name        = aws_key_pair.deployer_key.key_name
-  placement_group = var.use_efa ? aws_placement_group.cluster_pg.name : null
+  placement_group = var.use_efa ? data.aws_placement_group.cluster_pg.name : null
   depends_on      = [aws_network_interface.cluster_node_eni]
   tags = {
     Name                  = "Node ${count.index + 1}"
@@ -232,7 +227,7 @@ resource "aws_spot_instance_request" "spot_cluster_node" {
   instance_type                  = var.node_instance_type
   spot_price                     = var.spot_maximum_rate
   key_name                       = aws_key_pair.deployer_key.key_name
-  placement_group                = var.use_efa ? aws_placement_group.cluster_pg.name : null
+  placement_group                = var.use_efa ? data.aws_placement_group.cluster_pg.name : null
   depends_on                     = [aws_network_interface.cluster_node_eni]
   spot_type                      = "one-time"
   instance_interruption_behavior = "terminate"
