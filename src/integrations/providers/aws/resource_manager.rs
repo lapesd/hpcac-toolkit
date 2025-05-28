@@ -3,6 +3,7 @@ use crate::database::models::{Cluster, Node};
 use crate::integrations::{CloudErrorHandler, CloudResourceManager};
 
 use anyhow::{Error, Result, anyhow};
+use std::fs;
 use tracing::info;
 
 impl AwsInterface {
@@ -685,6 +686,117 @@ impl AwsInterface {
         Ok(existing_pg)
     }
 
+    async fn get_existing_ssh_key(
+        &self,
+        client: &aws_sdk_ec2::Client,
+        cluster_id: &str,
+    ) -> Result<Option<String>> {
+        let key_query_response = match client
+            .describe_key_pairs()
+            .filters(
+                aws_sdk_ec2::types::Filter::builder()
+                    .name("tag:ClusterId")
+                    .values(cluster_id)
+                    .build(),
+            )
+            .send()
+            .await
+        {
+            Ok(response) => response,
+            Err(e) => {
+                return self.handle_error(e.into(), "Failed to query existing SSH key pairs");
+            }
+        };
+
+        let key_pairs = key_query_response.key_pairs();
+        if let Some(key_pair) = key_pairs.first() {
+            if let Some(key_id) = key_pair.key_pair_id() {
+                info!("Found existing SSH key: '{}'", key_id);
+                return Ok(Some(key_id.to_string()));
+            }
+        }
+
+        Ok(None)
+    }
+
+    async fn import_ssh_key(
+        &self,
+        client: &aws_sdk_ec2::Client,
+        key_name: &str,
+        public_ssh_key_path: &str,
+        cluster_tag: aws_sdk_ec2::types::Tag,
+    ) -> Result<String, Error> {
+        info!("Importing SSH key pair as '{}'...", key_name);
+
+        let public_key_material = match fs::read_to_string(public_ssh_key_path) {
+            Ok(material) => material,
+            Err(e) => {
+                let error_msg = format!(
+                    "Failed to read public key file from '{}'",
+                    public_ssh_key_path
+                );
+                return self.handle_error(e.into(), &error_msg);
+            }
+        };
+
+        let import_output = match client
+            .import_key_pair()
+            .key_name(key_name)
+            .public_key_material(aws_sdk_ec2::primitives::Blob::new(
+                public_key_material.as_bytes(),
+            ))
+            .tag_specifications(
+                aws_sdk_ec2::types::TagSpecification::builder()
+                    .resource_type(aws_sdk_ec2::types::ResourceType::KeyPair)
+                    .tags(
+                        aws_sdk_ec2::types::Tag::builder()
+                            .key("Name")
+                            .value(key_name)
+                            .build(),
+                    )
+                    .tags(cluster_tag)
+                    .build(),
+            )
+            .send()
+            .await
+        {
+            Ok(output) => output,
+            Err(e) => return self.handle_error(e.into(), "Failed to import SSH key pair"),
+        };
+
+        let key_id = match import_output.key_pair_id() {
+            Some(key_id) => {
+                info!("Imported SSH key pair '{}'", key_id);
+                key_id.to_string()
+            }
+            None => {
+                let error_msg = "Missing SSH key pair name from AWS API response";
+                return self.handle_error(anyhow!(error_msg), error_msg);
+            }
+        };
+
+        Ok(key_id)
+    }
+
+    async fn delete_ssh_key(
+        &self,
+        client: &aws_sdk_ec2::Client,
+        key_id: &str,
+    ) -> Result<(), Error> {
+        info!("Deleting SSH key '{}'...", key_id);
+
+        match client.delete_key_pair().key_pair_id(key_id).send().await {
+            Ok(_) => {
+                info!("SSH key pair '{}' deleted successfully", key_id);
+                Ok(())
+            }
+            Err(e) => self.handle_error(
+                e.into(),
+                &format!("Failed to delete SSH key pair '{}'", key_id),
+            ),
+        }
+    }
+
     async fn delete_placement_group(
         &self,
         client: &aws_sdk_ec2::Client,
@@ -981,7 +1093,7 @@ impl CloudResourceManager for AwsInterface {
             self.create_security_groups(&client, &vpc_id, &sg_name, cluster_tag.clone())
                 .await?;
         } else {
-            info!("Security Groups already created, skipping...")
+            info!("Security Groups for this cluster already exists, skipping creation...");
         }
 
         // Create Placement Group, if cluster is configured to use it
@@ -993,7 +1105,24 @@ impl CloudResourceManager for AwsInterface {
                 let pg_name = format!("{}-PG", &cluster.id);
                 self.create_placement_group(&client, &pg_name, &cluster.id, cluster_tag.clone())
                     .await?;
+            } else {
+                info!("Placement Group for this cluster already exists, skipping creation...");
             }
+        }
+
+        // Create the SSH Key Pairs
+        let existing_key = self.get_existing_ssh_key(&client, &cluster.id).await?;
+        if existing_key.is_none() {
+            let key_name = format!("{}-SSH-KEY-PAIR", &cluster.id);
+            self.import_ssh_key(
+                &client,
+                &key_name,
+                &cluster.public_ssh_key_path,
+                cluster_tag.clone(),
+            )
+            .await?;
+        } else {
+            info!("SSH Key Pair for this cluster already exists, skipping creation...");
         }
 
         // TODO: Continue spawning the Cluster
@@ -1005,13 +1134,20 @@ impl CloudResourceManager for AwsInterface {
         // Get AWS SDK client
         let client = self.get_ec2_client(&cluster.region)?;
 
+        // Delete SSH KEY
+        let existing_key_id = self.get_existing_ssh_key(&client, &cluster.id).await?;
+        if existing_key_id.is_some() {
+            self.delete_ssh_key(&client, &existing_key_id.unwrap())
+                .await?;
+        }
+
         // Delete PLACEMENT GROUP
         if cluster.node_affinity {
-            let existing_pg = self
+            let existing_pg_name = self
                 .get_existing_placement_group(&client, &cluster.id)
                 .await?;
-            if existing_pg.is_some() {
-                self.delete_placement_group(&client, &existing_pg.unwrap())
+            if existing_pg_name.is_some() {
+                self.delete_placement_group(&client, &existing_pg_name.unwrap())
                     .await?;
             }
         }

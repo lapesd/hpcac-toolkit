@@ -79,7 +79,7 @@ pub async fn load(
 
             let mut configs = ProviderConfig::fetch_all_by_provider(pool, &provider.id).await?;
             if configs.is_empty() {
-                anyhow::bail!("Provider Configurations table is empty")
+                anyhow::bail!("No provider configuration found for {}", &provider.id)
             } else if configs.len() == 1 {
                 // Use the only config available
                 configs.swap_remove(0)
