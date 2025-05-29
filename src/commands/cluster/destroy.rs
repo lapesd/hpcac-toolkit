@@ -19,6 +19,7 @@ pub async fn destroy(
             anyhow::bail!("DB Operation Failure");
         }
     };
+    let nodes = cluster.get_nodes(pool).await?;
     let provider_config =
         match ProviderConfig::fetch_by_id(pool, cluster.provider_config_id).await? {
             Some(config) => config,
@@ -44,6 +45,6 @@ pub async fn destroy(
         return Ok(());
     }
 
-    cloud_interface.destroy_cluster(cluster).await?;
+    cloud_interface.destroy_cluster(cluster, nodes).await?;
     Ok(())
 }

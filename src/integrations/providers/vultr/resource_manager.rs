@@ -10,7 +10,7 @@ impl CloudResourceManager for VultrInterface {
         anyhow::bail!("Not implemented")
     }
 
-    async fn destroy_cluster(&self, _cluster: Cluster) -> Result<(), Error> {
+    async fn destroy_cluster(&self, _cluster: Cluster, _nodes: Vec<Node>) -> Result<(), Error> {
         anyhow::bail!("Not implemented")
     }
 }

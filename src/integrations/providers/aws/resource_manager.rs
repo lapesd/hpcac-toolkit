@@ -472,7 +472,7 @@ impl AwsInterface {
         &self,
         client: &aws_sdk_ec2::Client,
         cluster_id: &str,
-    ) -> Result<Vec<(String, String)>, Error> {
+    ) -> Result<Vec<String>, Error> {
         let sg_query_response = match client
             .describe_security_groups()
             .filters(
@@ -492,8 +492,8 @@ impl AwsInterface {
 
         let mut security_groups = Vec::new();
         for sg in sg_query_response.security_groups() {
-            if let (Some(id), Some(name)) = (sg.group_id(), sg.group_name()) {
-                security_groups.push((id.to_string(), name.to_string()));
+            if let Some(id) = sg.group_id() {
+                security_groups.push(id.to_string());
             }
         }
 
@@ -778,6 +778,135 @@ impl AwsInterface {
         Ok(key_id)
     }
 
+    async fn get_existing_elastic_network_interface(
+        &self,
+        client: &aws_sdk_ec2::Client,
+        eni_name: &str,
+    ) -> Result<Option<String>> {
+        let eni_query_response = match client
+            .describe_network_interfaces()
+            .filters(
+                aws_sdk_ec2::types::Filter::builder()
+                    .name("tag:Name")
+                    .values(eni_name)
+                    .build(),
+            )
+            .send()
+            .await
+        {
+            Ok(response) => response,
+            Err(e) => {
+                return self.handle_error(e.into(), "Failed to query existing Network Interface");
+            }
+        };
+
+        let network_interfaces = eni_query_response.network_interfaces();
+        if let Some(eni) = network_interfaces.first() {
+            if let Some(eni_id) = eni.network_interface_id() {
+                info!("Found existing Network Interface: '{}'", eni_id);
+                return Ok(Some(eni_id.to_string()));
+            }
+        }
+
+        Ok(None)
+    }
+
+    pub async fn create_elastic_network_interface(
+        &self,
+        client: &aws_sdk_ec2::Client,
+        eni_name: &str,
+        private_ip: &str,
+        subnet_id: &str,
+        security_group_ids: Vec<String>,
+        node_affinity: bool,
+        cluster_tag: aws_sdk_ec2::types::Tag,
+    ) -> Result<String, Error> {
+        info!("Creating elastic network interface '{}'...", &eni_name);
+
+        let mut create_request = client
+            .create_network_interface()
+            .subnet_id(subnet_id)
+            .set_groups(Some(security_group_ids.clone()))
+            .private_ip_address(private_ip);
+
+        if node_affinity {
+            create_request = create_request
+                .interface_type(aws_sdk_ec2::types::NetworkInterfaceCreationType::Efa);
+        }
+
+        create_request = create_request.tag_specifications(
+            aws_sdk_ec2::types::TagSpecification::builder()
+                .resource_type(aws_sdk_ec2::types::ResourceType::NetworkInterface)
+                .tags(
+                    aws_sdk_ec2::types::Tag::builder()
+                        .key("Name")
+                        .value(eni_name)
+                        .build(),
+                )
+                .tags(cluster_tag)
+                .build(),
+        );
+
+        let eni_output = match create_request.send().await {
+            Ok(output) => output,
+            Err(e) => {
+                let error_msg = format!("AWS Error Details: {:?}", e);
+                return self.handle_error(
+                    anyhow::anyhow!(error_msg),
+                    &format!("Failed to create network interface '{}'", eni_name),
+                );
+            }
+        };
+
+        let eni_id = match eni_output
+            .network_interface()
+            .and_then(|eni| eni.network_interface_id())
+        {
+            Some(id) => {
+                info!(
+                    "Created network interface '{}' with ID '{}'{}",
+                    eni_name,
+                    id,
+                    if node_affinity { " (EFA enabled)" } else { "" }
+                );
+                id
+            }
+            None => {
+                let error_msg = "Missing Network Interface ID from AWS API response";
+                return self.handle_error(anyhow!(error_msg), error_msg);
+            }
+        };
+
+        Ok(eni_id.to_string())
+    }
+
+    async fn delete_elastic_network_interface(
+        &self,
+        client: &aws_sdk_ec2::Client,
+        eni_id: &str,
+    ) -> Result<(), Error> {
+        info!("Deleting Network Interface '{}'...", eni_id);
+
+        match client
+            .delete_network_interface()
+            .network_interface_id(eni_id)
+            .send()
+            .await
+        {
+            Ok(_) => {
+                info!("Network interface '{}' deleted successfully", eni_id);
+                Ok(())
+            }
+            Err(e) => {
+                let error_msg = format!("AWS Error Details: {:?}", e);
+                self.handle_error(
+                    anyhow::anyhow!(error_msg),
+                    &format!("Failed to delete elastic network interface '{}'", eni_id),
+                )
+            }
+        }
+    }
+
     async fn delete_ssh_key(
         &self,
         client: &aws_sdk_ec2::Client,
@@ -982,7 +1111,7 @@ impl AwsInterface {
 }
 
 impl CloudResourceManager for AwsInterface {
-    async fn spawn_cluster(&self, cluster: Cluster, _nodes: Vec<Node>) -> Result<(), Error> {
+    async fn spawn_cluster(&self, cluster: Cluster, nodes: Vec<Node>) -> Result<(), Error> {
         // Get AWS SDK client
         let client = self.get_ec2_client(&cluster.region)?;
         let cluster_tag = aws_sdk_ec2::types::Tag::builder()
@@ -1085,12 +1214,13 @@ impl CloudResourceManager for AwsInterface {
         }
 
         // Create Security Groups
-        let existing_sgs = self
+        let mut existing_sgs = self
             .get_existing_security_groups(&client, &cluster.id)
             .await?;
         if existing_sgs.is_empty() {
-            let sg_name = format!("{}-SECURITY_GROUP", &cluster.id);
-            self.create_security_groups(&client, &vpc_id, &sg_name, cluster_tag.clone())
+            let sg_name = format!("{}-SG", &cluster.id);
+            existing_sgs = self
+                .create_security_groups(&client, &vpc_id, &sg_name, cluster_tag.clone())
                 .await?;
         } else {
             info!("Security Groups for this cluster already exists, skipping creation...");
@@ -1125,14 +1255,52 @@ impl CloudResourceManager for AwsInterface {
             info!("SSH Key Pair for this cluster already exists, skipping creation...");
         }
 
+        // Create ELASTIC NETWORK INTERFACES for each node (for future use)
+        for (i, _node) in nodes.into_iter().enumerate() {
+            let eni_name = format!("{}-ENI-{}", &cluster.id, i);
+            let private_ip = format!("10.0.1.{}", i + 10);
+            let existing_eni = self
+                .get_existing_elastic_network_interface(&client, &eni_name)
+                .await?;
+            if existing_eni.is_none() {
+                self.create_elastic_network_interface(
+                    &client,
+                    &eni_name,
+                    &private_ip,
+                    &subnet_id,
+                    existing_sgs.clone(),
+                    cluster.node_affinity,
+                    cluster_tag.clone(),
+                )
+                .await?;
+            } else {
+                info!(
+                    "Elastic Network Interface for cluster node '{}' already exists, skipping creation...",
+                    i
+                );
+            }
+        }
+
         // TODO: Continue spawning the Cluster
         Ok(())
     }
 
     /// Function to destroy the cluster
-    async fn destroy_cluster(&self, cluster: Cluster) -> Result<(), Error> {
+    async fn destroy_cluster(&self, cluster: Cluster, nodes: Vec<Node>) -> Result<(), Error> {
         // Get AWS SDK client
         let client = self.get_ec2_client(&cluster.region)?;
+
+        // Delete ELASTIC NETWORK INTERFACES
+        for (i, _node) in nodes.into_iter().enumerate() {
+            let eni_name = format!("{}-ENI-{}", &cluster.id, i);
+            let eni_id = self
+                .get_existing_elastic_network_interface(&client, &eni_name)
+                .await?;
+            if eni_id.is_some() {
+                self.delete_elastic_network_interface(&client, &eni_id.unwrap())
+                    .await?;
+            }
+        }
 
         // Delete SSH KEY
         let existing_key_id = self.get_existing_ssh_key(&client, &cluster.id).await?;
@@ -1156,7 +1324,7 @@ impl CloudResourceManager for AwsInterface {
         let existing_sgs = self
             .get_existing_security_groups(&client, &cluster.id)
             .await?;
-        for (sg_id, _) in existing_sgs.into_iter() {
+        for sg_id in existing_sgs.into_iter() {
             self.delete_security_group(&client, &sg_id).await?;
         }
 

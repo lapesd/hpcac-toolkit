@@ -55,7 +55,7 @@ pub trait CloudResourceManager: CloudErrorHandler {
     async fn spawn_cluster(&self, cluster: Cluster, nodes: Vec<Node>) -> Result<(), Error>;
 
     /// Delete a cluster and all its associated resources
-    async fn destroy_cluster(&self, cluster: Cluster) -> Result<(), Error>;
+    async fn destroy_cluster(&self, cluster: Cluster, nodes: Vec<Node>) -> Result<(), Error>;
 }
 
 pub enum CloudProvider {
@@ -136,10 +136,10 @@ impl CloudResourceManager for CloudProvider {
         }
     }
 
-    async fn destroy_cluster(&self, cluster: Cluster) -> Result<(), Error> {
+    async fn destroy_cluster(&self, cluster: Cluster, nodes: Vec<Node>) -> Result<(), Error> {
         match self {
-            CloudProvider::Aws(aws) => aws.destroy_cluster(cluster).await,
-            CloudProvider::Vultr(vultr) => vultr.destroy_cluster(cluster).await,
+            CloudProvider::Aws(aws) => aws.destroy_cluster(cluster, nodes).await,
+            CloudProvider::Vultr(vultr) => vultr.destroy_cluster(cluster, nodes).await,
         }
     }
 }
