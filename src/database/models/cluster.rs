@@ -1,4 +1,5 @@
 use crate::database::models::{InstanceType, Node, ProviderConfig, ShellCommand};
+
 use anyhow::Result;
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
@@ -15,9 +16,9 @@ pub struct Cluster {
     pub private_ssh_key_path: String,
     pub region: String,
     pub availability_zone: String,
+    pub use_node_affinity: bool,
+    pub use_elastic_fabric_adapters: bool,
     pub created_at: NaiveDateTime,
-    pub spawned_at: Option<NaiveDateTime>,
-    pub node_affinity: bool,
 }
 
 impl Cluster {
@@ -36,6 +37,12 @@ impl Cluster {
         println!("\n=== Cluster '{}' ===", self.display_name);
         println!("{:<20}: {}", "Provider", self.provider_id);
         println!("{:<20}: {}", "Region", self.region);
+        println!("{:<20}: {}", "Availability Zone", self.availability_zone);
+        println!("{:<20}: {}", "Use Node Affinity", self.use_node_affinity);
+        println!(
+            "{:<20}: {}",
+            "Use Elastic Fabric Adapters (EFAs)", self.use_elastic_fabric_adapters
+        );
         println!(
             "{:<20}: {}",
             "Provider Config", provider_config.display_name
@@ -111,9 +118,9 @@ impl Cluster {
                     private_ssh_key_path,
                     region,
                     availability_zone,
-                    created_at,
-                    spawned_at,
-                    node_affinity
+                    use_node_affinity,
+                    use_elastic_fabric_adapters,
+                    created_at
                 FROM clusters
                 WHERE id = ?
             "#,
@@ -145,9 +152,9 @@ impl Cluster {
                     private_ssh_key_path,
                     region,
                     availability_zone,
-                    created_at,
-                    spawned_at,
-                    node_affinity
+                    use_node_affinity,
+                    use_elastic_fabric_adapters,
+                    created_at
                 FROM clusters
             "#,
         )
@@ -196,9 +203,11 @@ impl Cluster {
                     private_ssh_key_path, 
                     region,
                     availability_zone,
+                    use_node_affinity,
+                    use_elastic_fabric_adapters,
                     created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
             self.id,
             self.display_name,
@@ -208,7 +217,9 @@ impl Cluster {
             self.private_ssh_key_path,
             self.region,
             self.availability_zone,
-            self.created_at
+            self.use_node_affinity,
+            self.use_elastic_fabric_adapters,
+            self.created_at,
         )
         .execute(&mut *tx)
         .await

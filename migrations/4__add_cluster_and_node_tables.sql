@@ -8,8 +8,9 @@ CREATE TABLE clusters (
     private_ssh_key_path TEXT NOT NULL,
     region TEXT NOT NULL,
     availability_zone TEXT NOT NULL,
+    use_node_affinity BOOLEAN NOT NULL,
+    use_elastic_fabric_adapters BOOLEAN NOT NULL,
     created_at DATETIME NOT NULL,
-    spawned_at DATETIME,
     FOREIGN KEY (provider_config_id) REFERENCES provider_configs(id),
     FOREIGN KEY (provider_id) REFERENCES providers(id)
 );

@@ -120,6 +120,10 @@ enum InstanceTypeCommands {
         /// Filter instance_types by burstable support
         #[arg(long)]
         burstable: Option<bool>,
+
+        /// Filter instance_types by elastic fabric adapter support
+        #[arg(long)]
+        fabric_adapter: Option<bool>,
     },
 
     /// Load instance type data from providers
@@ -234,6 +238,7 @@ async fn main() -> anyhow::Result<()> {
                 baremetal,
                 spot,
                 burstable,
+                fabric_adapter,
             } => {
                 commands::instance_type::list(
                     &sqlite_pool,
@@ -248,6 +253,7 @@ async fn main() -> anyhow::Result<()> {
                         baremetal: *baremetal,
                         spot: *spot,
                         burstable: *burstable,
+                        fabric_adapter: *fabric_adapter,
                     },
                 )
                 .await?;

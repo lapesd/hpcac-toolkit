@@ -39,6 +39,7 @@ pub struct InstanceTypeFilters {
     pub baremetal: Option<bool>,
     pub spot: Option<bool>,
     pub burstable: Option<bool>,
+    pub fabric_adapter: Option<bool>,
 }
 
 impl InstanceType {
@@ -163,6 +164,11 @@ impl InstanceType {
         if let Some(is_burstable) = filters.burstable {
             conditions.push("is_burstable = ?");
             let _ = args.add(is_burstable);
+        }
+
+        if let Some(supports_efa) = filters.fabric_adapter {
+            conditions.push("supports_efa = ?");
+            let _ = args.add(supports_efa);
         }
 
         if !conditions.is_empty() {

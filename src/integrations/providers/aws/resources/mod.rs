@@ -1,3 +1,4 @@
+pub mod ec2_instance;
 pub mod gateway;
 pub mod network_interface;
 pub mod placement_group;

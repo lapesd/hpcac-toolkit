@@ -38,7 +38,8 @@ pub struct AwsClusterContext {
 
     // Cluster and network configuration
     pub availability_zone: String,
-    pub node_affinity: bool,
+    pub use_node_affinity: bool,
+    pub use_elastic_fabric_adapters: bool,
     pub public_ssh_key_path: String,
     pub vpc_cidr_block: String,
     pub subnet_cidr_block: String,
@@ -83,12 +84,18 @@ impl AwsClusterContext {
 
             // Copy some cluster configuration for convenience
             availability_zone: cluster.availability_zone.clone(),
-            node_affinity: cluster.node_affinity,
+            use_node_affinity: cluster.use_node_affinity,
+            use_elastic_fabric_adapters: cluster.use_elastic_fabric_adapters,
             public_ssh_key_path: cluster.public_ssh_key_path.clone(),
             // TODO: Evaluate if it's desired to make the CIDR blocks configurable
             vpc_cidr_block: "10.0.0.0/16".to_string(),
             subnet_cidr_block: "10.0.1.0/24".to_string(),
         }
+    }
+
+    /// Generate a ec2 instance name for a specific node index
+    pub fn ec2_instance_name(&self, node_index: usize) -> String {
+        format!("{}-EC2-INSTANCE-{}", self.cluster_id, node_index)
     }
 
     /// Generate a network interface name for a specific node index

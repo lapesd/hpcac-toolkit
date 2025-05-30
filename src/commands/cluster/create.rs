@@ -20,7 +20,8 @@ struct ClusterYaml {
     public_ssh_key_path: String,
     region: String,
     availability_zone: String,
-    node_affinity: bool,
+    use_node_affinity: bool,
+    use_elastic_fabric_adapters: bool,
     nodes: Vec<NodeYaml>,
 }
 
@@ -266,9 +267,17 @@ pub async fn create(
         };
 
         // Validade node_affinity
-        if cluster_yaml.node_affinity && !instance_type_details.has_affinity_settings {
+        if cluster_yaml.use_node_affinity && !instance_type_details.has_affinity_settings {
             anyhow::bail!(
                 "Instance type '{}' does not support node affinity settings",
+                &instance_type_name
+            )
+        }
+
+        // Validade elastic fabric adapters support
+        if cluster_yaml.use_elastic_fabric_adapters && !instance_type_details.supports_efa {
+            anyhow::bail!(
+                "Instance type '{}' does not support elastic fabric adapters",
                 &instance_type_name
             )
         }
@@ -335,6 +344,18 @@ pub async fn create(
     println!("\n=== New Cluster Information ===");
     println!("{:<20}: {}", "Provider", provider_config.provider_id);
     println!("{:<20}: {}", "Region", region);
+    println!(
+        "{:<20}: {}",
+        "Availability Zone", cluster_yaml.availability_zone
+    );
+    println!(
+        "{:<20}: {}",
+        "Use Node Affinity", cluster_yaml.use_node_affinity
+    );
+    println!(
+        "{:<20}: {}",
+        "Use Elastic Fabric Adapters (EFAs)", cluster_yaml.use_elastic_fabric_adapters
+    );
     println!(
         "{:<20}: {}",
         "Provider Config", provider_config.display_name
@@ -405,9 +426,9 @@ pub async fn create(
         private_ssh_key_path: private_key_path_string,
         region,
         availability_zone: zone,
+        use_node_affinity: cluster_yaml.use_node_affinity,
+        use_elastic_fabric_adapters: cluster_yaml.use_elastic_fabric_adapters,
         created_at: Utc::now().naive_utc(),
-        spawned_at: None,
-        node_affinity: cluster_yaml.node_affinity,
     };
     cluster
         .insert(pool, nodes_to_insert, commands_to_insert)

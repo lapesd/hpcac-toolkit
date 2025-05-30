@@ -79,8 +79,8 @@ impl AwsInterface {
             .set_groups(Some(context_security_group_ids.clone()))
             .private_ip_address(&private_ip);
 
-        // Add EFA interface type if node affinity is enabled
-        if context.node_affinity {
+        // Add EFA interface type if enabled
+        if context.use_elastic_fabric_adapters {
             create_request = create_request
                 .interface_type(aws_sdk_ec2::types::NetworkInterfaceCreationType::Efa);
         }
@@ -115,7 +115,7 @@ impl AwsInterface {
                 "Created network interface '{}' with ID '{}'{}",
                 eni_name,
                 eni_id,
-                if context.node_affinity {
+                if context.use_node_affinity {
                     " (EFA enabled)"
                 } else {
                     ""
