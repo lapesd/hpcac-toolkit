@@ -1,22 +1,22 @@
 use crate::database::models::{InstanceType, MachineImage};
-use crate::integrations::{CloudErrorHandler, CloudInfoProvider};
+use crate::integrations::CloudInfoProvider;
 use crate::utils::ProgressTracker;
 
-use anyhow::{Error, Result};
+use anyhow::{Result, bail};
 use std::collections::HashMap;
-use tracing::warn;
+use tracing::{error, warn};
 
 use super::interface::AwsInterface;
 
 impl CloudInfoProvider for AwsInterface {
-    async fn fetch_regions(&self, _tracker: &ProgressTracker) -> Result<Vec<String>, Error> {
+    async fn fetch_regions(&self, _tracker: &ProgressTracker) -> Result<Vec<String>> {
         // Use a default region (here "us-east-1") to create the client,
         // as the describe_regions API call is global.
         let client = self.get_ec2_client("us-east-1")?;
 
         match client.describe_regions().send().await {
-            Ok(resp) => {
-                let regions: Vec<String> = resp
+            Ok(response) => {
+                let regions: Vec<String> = response
                     .regions
                     .unwrap_or_default()
                     .into_iter()
@@ -25,7 +25,10 @@ impl CloudInfoProvider for AwsInterface {
 
                 Ok(regions)
             }
-            Err(err) => self.handle_error(err.into(), "Failed to fetch AWS regions"),
+            Err(e) => {
+                error!("{:?}", e);
+                bail!("Failed to fetch AWS regions")
+            }
         }
     }
 
@@ -46,13 +49,13 @@ impl CloudInfoProvider for AwsInterface {
 
                 Ok(zones)
             }
-            Err(err) => self.handle_error(
-                err.into(),
-                &format!(
+            Err(e) => {
+                error!("{:?}", e);
+                bail!(
                     "Failed to fetch AWS availability zones for region '{}'",
                     region
-                ),
-            ),
+                )
+            }
         }
     }
 
@@ -60,7 +63,7 @@ impl CloudInfoProvider for AwsInterface {
         &self,
         region: &str,
         tracker: &ProgressTracker,
-    ) -> Result<Vec<InstanceType>, Error> {
+    ) -> Result<Vec<InstanceType>> {
         let ec2_client = self.get_ec2_client(region)?;
         let mut instance_types: Vec<InstanceType> = vec![];
         let mut next_token: Option<String> = None;
@@ -72,17 +75,15 @@ impl CloudInfoProvider for AwsInterface {
                 request = request.next_token(token);
             }
 
-            let resp = match request.send().await {
-                Ok(resp) => resp,
-                Err(err) => {
-                    return self.handle_error(
-                        err.into(),
-                        &format!("Failed to fetch AWS instance types for region '{}'", region),
-                    );
+            let response = match request.send().await {
+                Ok(response) => response,
+                Err(e) => {
+                    error!("{:?}", e);
+                    bail!("Failed to fetch AWS instance types for region '{}'", region)
                 }
             };
 
-            let instance_types_batch = resp.instance_types.unwrap_or_default().into_iter();
+            let instance_types_batch = response.instance_types.unwrap_or_default().into_iter();
             for item in instance_types_batch {
                 // Reference: https://docs.rs/aws-sdk-ec2/latest/aws_sdk_ec2/client/struct.Client.html#impl-Client-286
                 if let Some(aws_it) = item.instance_type {
@@ -243,7 +244,7 @@ impl CloudInfoProvider for AwsInterface {
                 }
             }
 
-            next_token = resp.next_token;
+            next_token = response.next_token;
             if next_token.is_none() {
                 break;
             }
@@ -271,7 +272,7 @@ impl CloudInfoProvider for AwsInterface {
         region: &str,
         instance_type_names: &[String],
         tracker: &ProgressTracker,
-    ) -> Result<HashMap<String, f64>, Error> {
+    ) -> Result<HashMap<String, f64>> {
         let client = self.get_pricing_client()?;
 
         let mut price_map: HashMap<String, f64> = HashMap::new();
@@ -464,26 +465,21 @@ impl CloudInfoProvider for AwsInterface {
         Ok(price_map)
     }
 
-    async fn fetch_machine_image(
-        &self,
-        region: &str,
-        image_id: &str,
-    ) -> Result<MachineImage, Error> {
+    async fn fetch_machine_image(&self, region: &str, image_id: &str) -> Result<MachineImage> {
         let client = self.get_ec2_client(region)?;
-        let resp = match client.describe_images().image_ids(image_id).send().await {
-            Ok(resp) => resp,
-            Err(err) => {
-                return self.handle_error(
-                    err.into(),
-                    &format!(
-                        "Failed to fetch image '{}' in region '{}'",
-                        image_id, region
-                    ),
-                );
+        let response = match client.describe_images().image_ids(image_id).send().await {
+            Ok(response) => response,
+            Err(e) => {
+                error!("{:?}", e);
+                bail!(
+                    "Failed to fetch image '{}' in region '{}'",
+                    image_id,
+                    region
+                )
             }
         };
 
-        let images = resp.images.unwrap_or_default();
+        let images = response.images.unwrap_or_default();
         let aws_image = &images[0]; // get the first (should be only one)
         let now = chrono::Utc::now().naive_utc();
         let image = MachineImage {

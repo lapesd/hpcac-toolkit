@@ -1,21 +1,21 @@
 use crate::database::models::{InstanceType, MachineImage};
-use crate::integrations::{CloudErrorHandler, CloudInfoProvider};
+use crate::integrations::CloudInfoProvider;
 use crate::utils::ProgressTracker;
-use anyhow::{Error, Result, anyhow};
+
+use anyhow::{Result, bail};
 use std::collections::HashMap;
-use tracing::warn;
+use tracing::{error, warn};
 
 use super::interface::VultrInterface;
 
 impl CloudInfoProvider for VultrInterface {
-    async fn fetch_regions(&self, _tracker: &ProgressTracker) -> Result<Vec<String>, Error> {
+    async fn fetch_regions(&self, _tracker: &ProgressTracker) -> Result<Vec<String>> {
         let json_response = self.make_api_request("/regions").await?;
 
         let regions = match json_response["regions"].as_array() {
             Some(regions) => regions,
             None => {
-                let error_msg = "Missing 'regions' array from Vultr API response";
-                return self.handle_error(anyhow!(error_msg), error_msg);
+                bail!("Missing 'regions' array from Vultr API response")
             }
         };
 
@@ -27,18 +27,14 @@ impl CloudInfoProvider for VultrInterface {
         Ok(region_ids)
     }
 
-    async fn fetch_zones(
-        &self,
-        region: &str,
-        tracker: &ProgressTracker,
-    ) -> Result<Vec<String>, Error> {
+    async fn fetch_zones(&self, region: &str, tracker: &ProgressTracker) -> Result<Vec<String>> {
         // Vultr doesn't have a direct "zones" concept like some other cloud providers.
         // In Vultr, the closest equivalent would be availability within a region.
         // We'll return the region itself as the only zone for now.
         let regions = self.fetch_regions(tracker).await?;
         if !regions.contains(&region.to_string()) {
-            let error_msg = format!("Invalid Vultr region: {}", region);
-            return self.handle_error(anyhow!("{}", error_msg), &error_msg);
+            error!("{:?}", regions);
+            bail!("Invalid Vultr region: {}", region)
         }
 
         Ok(vec![region.to_string()])
@@ -48,7 +44,7 @@ impl CloudInfoProvider for VultrInterface {
         &self,
         region: &str,
         _tracker: &ProgressTracker,
-    ) -> Result<Vec<InstanceType>, Error> {
+    ) -> Result<Vec<InstanceType>> {
         let mut instance_types: Vec<InstanceType> = vec![];
         let locations: Vec<serde_json::Value> = Vec::new();
 
@@ -71,8 +67,8 @@ impl CloudInfoProvider for VultrInterface {
         let plans = match json_response["plans"].as_array() {
             Some(plans) => plans,
             None => {
-                let error_msg = "Missing 'plans' array from Vultr API response";
-                return self.handle_error(anyhow!(error_msg), error_msg);
+                error!("{:?}", json_response);
+                bail!("Missing 'plans' array from Vultr API response");
             }
         };
 
@@ -163,8 +159,8 @@ impl CloudInfoProvider for VultrInterface {
         let plans = match json_response["plans_metal"].as_array() {
             Some(plans) => plans,
             None => {
-                let error_msg = "Missing 'plans_metal' array from Vultr API response";
-                return self.handle_error(anyhow!(error_msg), error_msg);
+                error!("{:?}", json_response);
+                bail!("Missing 'plans_metal' array from Vultr API response")
             }
         };
 
@@ -260,7 +256,7 @@ impl CloudInfoProvider for VultrInterface {
         _region: &str,
         _instance_types: &[String],
         _tracker: &ProgressTracker,
-    ) -> Result<HashMap<String, f64>, Error> {
+    ) -> Result<HashMap<String, f64>> {
         // Vultr does not need a separate fetch prices method, as the pricing info
         // is returned in the instance_types api calls already.
         let map: HashMap<String, f64> = HashMap::new();
@@ -268,11 +264,7 @@ impl CloudInfoProvider for VultrInterface {
         Ok(map)
     }
 
-    async fn fetch_machine_image(
-        &self,
-        _region: &str,
-        _image_id: &str,
-    ) -> Result<MachineImage, Error> {
-        anyhow::bail!("Not implemented")
+    async fn fetch_machine_image(&self, _region: &str, _image_id: &str) -> Result<MachineImage> {
+        bail!("Not implemented")
     }
 }
