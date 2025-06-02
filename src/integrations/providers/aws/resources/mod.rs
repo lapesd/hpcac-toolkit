@@ -1,6 +1,7 @@
 pub mod ec2_instance;
-pub mod gateway;
-pub mod network_interface;
+pub mod elastic_ip;
+pub mod elastic_network_interface;
+pub mod internet_gateway;
 pub mod placement_group;
 pub mod route_table;
 pub mod security_group;

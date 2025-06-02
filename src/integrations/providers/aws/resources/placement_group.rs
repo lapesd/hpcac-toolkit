@@ -15,19 +15,19 @@ impl AwsInterface {
             Ok(response) => response,
             Err(e) => {
                 error!("{:?}", e);
-                bail!("Failure describing placement group resources");
+                bail!("Failure describing Placement Group resources");
             }
         };
 
         let placement_groups = describe_placement_groups_response.placement_groups();
         if let Some(placement_group) = placement_groups.first() {
             if let Some(group_name) = placement_group.group_name() {
-                info!("Found existing placement group: '{}'", group_name);
+                info!("Found existing Placement Group: '{}'", group_name);
                 return Ok(group_name.to_string());
             }
         }
 
-        info!("No existing placement group found, creating a new one...");
+        info!("No existing Placement Group found, creating a new one...");
 
         let create_placement_group_response = match context
             .client
@@ -52,13 +52,13 @@ impl AwsInterface {
             Ok(response) => response,
             Err(e) => {
                 error!("{:?}", e);
-                bail!("Failure creating placement group resource");
+                bail!("Failure creating Placement Group resource");
             }
         };
 
         // Since create_placement_group doesn't return placement group details,
         // we need to verify it was created by querying for it
-        info!("Verifying placement group creation...");
+        info!("Verifying Placement Group creation...");
         let verify_response = match context
             .client
             .describe_placement_groups()
@@ -69,20 +69,20 @@ impl AwsInterface {
             Ok(response) => response,
             Err(e) => {
                 error!("{:?}", e);
-                bail!("Failure verifying placement group creation");
+                bail!("Failure verifying Placement Group creation");
             }
         };
 
         let placement_groups = verify_response.placement_groups();
         if let Some(placement_group) = placement_groups.first() {
             if let Some(group_name) = placement_group.group_name() {
-                info!("Successfully created placement group '{}'", group_name);
+                info!("Successfully created Placement Group '{}'", group_name);
                 return Ok(group_name.to_string());
             }
         }
 
         warn!("{:?}", create_placement_group_response);
-        bail!("Placement group creation could not be verified");
+        bail!("Failure finding the id of the created Placement Group resource");
     }
 
     pub async fn cleanup_placement_group(&self, context: &AwsClusterContext) -> Result<()> {
@@ -96,15 +96,15 @@ impl AwsInterface {
             Ok(response) => response,
             Err(e) => {
                 error!("{:?}", e);
-                bail!("Failure describing placement group resources");
+                bail!("Failure describing Placement Group resources");
             }
         };
 
         let placement_groups = describe_placement_groups_response.placement_groups();
         if let Some(placement_group) = placement_groups.first() {
             if let Some(group_name) = placement_group.group_name() {
-                info!("Found placement group to cleanup: '{}'", group_name);
-                info!("Deleting placement group '{}'...", group_name);
+                info!("Found Placement Group to cleanup: '{}'", group_name);
+                info!("Deleting Placement Group '{}'...", group_name);
                 match context
                     .client
                     .delete_placement_group()
@@ -113,18 +113,18 @@ impl AwsInterface {
                     .await
                 {
                     Ok(_) => {
-                        info!("Placement group '{}' deleted successfully", group_name);
+                        info!("Placement Group '{}' deleted successfully", group_name);
                         return Ok(());
                     }
                     Err(e) => {
-                        error!("Failed to delete placement group '{}': {:?}", group_name, e);
-                        bail!("Failure deleting placement group resource");
+                        error!("{:?}", e);
+                        bail!("Failure deleting placement Group resource");
                     }
                 }
             }
         }
 
-        info!("No existing placement group found to cleanup");
+        info!("No existing Placement Group found");
         Ok(())
     }
 }

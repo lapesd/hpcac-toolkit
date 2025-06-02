@@ -25,3 +25,6 @@ db.sqlite-wal
 
 # .env files
 .env
+
+# .log files
+*.log

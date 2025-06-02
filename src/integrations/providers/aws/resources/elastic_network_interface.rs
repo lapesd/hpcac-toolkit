@@ -1,25 +1,20 @@
 use crate::integrations::providers::aws::{AwsInterface, interface::AwsClusterContext};
 
 use anyhow::{Result, bail};
+use tokio::time::Duration;
 use tracing::{error, info, warn};
 
 impl AwsInterface {
-    pub async fn ensure_network_interface(
+    pub async fn ensure_elastic_network_interface(
         &self,
         context: &AwsClusterContext,
         node_index: usize,
     ) -> Result<String> {
+        let eni_name = context.network_interface_name(node_index);
+        let private_ip = context.network_interface_private_ip(node_index);
         let context_subnet_id = context.subnet_id.as_ref().unwrap();
         let context_security_group_ids = &context.security_group_ids;
 
-        if context_security_group_ids.is_empty() {
-            bail!("Security group IDs are required but not set in context");
-        }
-
-        let eni_name = context.network_interface_name(node_index);
-        let private_ip = context.network_interface_private_ip(node_index);
-
-        // Check if ENI already exists
         let describe_eni_response = match context
             .client
             .describe_network_interfaces()
@@ -34,11 +29,11 @@ impl AwsInterface {
         {
             Ok(response) => response,
             Err(e) => {
-                error!(
-                    "Failed to describe network interface '{}': {:?}",
-                    eni_name, e
+                error!("{:?}", e);
+                bail!(
+                    "Failed to describe Elastic Network Interface '{}'",
+                    eni_name
                 );
-                bail!("Failure describing network interface resources");
             }
         };
 
@@ -46,23 +41,10 @@ impl AwsInterface {
         if let Some(eni) = network_interfaces.first() {
             if let Some(eni_id) = eni.network_interface_id() {
                 info!(
-                    "Found existing network interface '{}': '{}'",
+                    "Found existing Elastic Network Interface '{}': '{}'",
                     eni_name, eni_id
                 );
-
-                // Verify ENI is in correct subnet
-                if let Some(subnet_id) = eni.subnet_id() {
-                    if subnet_id == context_subnet_id {
-                        info!("Network interface '{}' is in correct subnet", eni_id);
-                        return Ok(eni_id.to_string());
-                    } else {
-                        warn!(
-                            "Network interface '{}' is in different subnet '{}', expected '{}'",
-                            eni_id, subnet_id, context_subnet_id
-                        );
-                        bail!("Network interface is in wrong subnet");
-                    }
-                }
+                return Ok(eni_id.to_string());
             }
         }
 
@@ -71,21 +53,16 @@ impl AwsInterface {
             eni_name, node_index
         );
 
-        // Create ENI
         let mut create_request = context
             .client
             .create_network_interface()
             .subnet_id(context_subnet_id)
             .set_groups(Some(context_security_group_ids.clone()))
             .private_ip_address(&private_ip);
-
-        // Add EFA interface type if enabled
         if context.use_elastic_fabric_adapters {
             create_request = create_request
                 .interface_type(aws_sdk_ec2::types::NetworkInterfaceCreationType::Efa);
         }
-
-        // Add tags
         create_request = create_request.tag_specifications(
             aws_sdk_ec2::types::TagSpecification::builder()
                 .resource_type(aws_sdk_ec2::types::ResourceType::NetworkInterface)
@@ -102,8 +79,8 @@ impl AwsInterface {
         let create_eni_response = match create_request.send().await {
             Ok(response) => response,
             Err(e) => {
-                error!("Failed to create network interface '{}': {:?}", eni_name, e);
-                bail!("Failure creating network interface resource");
+                error!("{:?}", e);
+                bail!("Failed to create Elastic Network Interface '{}'", eni_name);
             }
         };
 
@@ -112,8 +89,7 @@ impl AwsInterface {
             .and_then(|eni| eni.network_interface_id())
         {
             info!(
-                "Created network interface '{}' with ID '{}'{}",
-                eni_name,
+                "Created new Elastic Network Interface '{}'{}",
                 eni_id,
                 if context.use_node_affinity {
                     " (EFA enabled)"
@@ -121,24 +97,20 @@ impl AwsInterface {
                     ""
                 }
             );
-            Ok(eni_id.to_string())
-        } else {
-            warn!(
-                "Unexpected response when creating network interface '{}'",
-                eni_name
-            );
-            bail!("Unexpected response from AWS when creating network interface");
+            return Ok(eni_id.to_string());
         }
+
+        warn!("{:?}", create_eni_response);
+        bail!("Failure finding the id of the created Elastic Network Interface resource");
     }
 
-    pub async fn cleanup_network_interface(
+    pub async fn cleanup_elastic_network_interface(
         &self,
         context: &AwsClusterContext,
         node_index: usize,
     ) -> Result<()> {
         let eni_name = context.network_interface_name(node_index);
 
-        // Find ENI by name tag
         let describe_eni_response = match context
             .client
             .describe_network_interfaces()
@@ -154,7 +126,7 @@ impl AwsInterface {
             Ok(response) => response,
             Err(e) => {
                 error!("{:?}", e);
-                bail!("Failure describing network interface resources");
+                bail!("Failure describing Elastic Network Interface resources");
             }
         };
 
@@ -162,18 +134,16 @@ impl AwsInterface {
         if let Some(eni) = network_interfaces.first() {
             if let Some(eni_id) = eni.network_interface_id() {
                 info!(
-                    "Found network interface to cleanup '{}': '{}'",
+                    "Found Elastic Network Interface to cleanup '{}': '{}'",
                     eni_name, eni_id
                 );
 
-                // Check if ENI is attached to an instance and detach if necessary
                 if let Some(attachment) = eni.attachment() {
                     if let Some(instance_id) = attachment.instance_id() {
                         info!(
-                            "Network interface '{}' is attached to instance '{}', detaching...",
+                            "Elastic Network Interface '{}' is attached to Instance '{}', detaching...",
                             eni_id, instance_id
                         );
-
                         if let Some(attachment_id) = attachment.attachment_id() {
                             match context
                                 .client
@@ -185,29 +155,30 @@ impl AwsInterface {
                             {
                                 Ok(_) => {
                                     info!(
-                                        "Successfully detached network interface '{}' from instance '{}'",
+                                        "Successfully initiated detachment of Elastic Network Interface '{}' from Instance '{}'",
                                         eni_id, instance_id
                                     );
-
-                                    // Wait a moment for detachment to complete
-                                    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
                                 }
                                 Err(e) => {
-                                    error!(
-                                        "Failed to detach network interface '{}': {:?}",
-                                        eni_id, e
-                                    );
-                                    warn!(
-                                        "Continuing with deletion attempt despite detachment failure"
+                                    error!("{:?}", e);
+                                    bail!(
+                                        "Failed to detach Elastic Network Interface '{}'",
+                                        eni_id
                                     );
                                 }
                             }
+
+                            self.wait_for_eni_status(
+                                context,
+                                eni_id,
+                                aws_sdk_ec2::types::NetworkInterfaceStatus::Available,
+                            )
+                            .await?;
                         }
                     }
                 }
 
-                // Delete the ENI
-                info!("Deleting network interface '{}'...", eni_id);
+                info!("Deleting Elastic Network Interface '{}'...", eni_id);
                 match context
                     .client
                     .delete_network_interface()
@@ -216,19 +187,89 @@ impl AwsInterface {
                     .await
                 {
                     Ok(_) => {
-                        info!("Network interface '{}' deleted successfully", eni_id);
+                        info!(
+                            "Elastic Network Interface '{}' deleted successfully",
+                            eni_id
+                        );
                     }
                     Err(e) => {
-                        error!("Failed to delete network interface '{}': {:?}", eni_id, e);
-                        // Changed to bail instead of warn+continue since we're only handling one ENI
-                        bail!("Failure deleting network interface resource");
+                        error!("{:?}", e);
+                        bail!("Failed to delete Elastic Network interface '{}'", eni_id);
                     }
                 }
             }
-        } else {
-            info!("No network interface found for cleanup: '{}'", eni_name);
         }
 
+        info!("No Elastic Network Interface found");
         Ok(())
+    }
+
+    async fn wait_for_eni_status(
+        &self,
+        context: &AwsClusterContext,
+        eni_id: &str,
+        desired_status: aws_sdk_ec2::types::NetworkInterfaceStatus,
+    ) -> Result<()> {
+        let max_attempts = 10; // Maximum number of attempts (10 * 6 seconds = 1 minute)
+        let sleep_duration = Duration::from_secs(6);
+
+        for attempt in 1..=max_attempts {
+            match context
+                .client
+                .describe_network_interfaces()
+                .network_interface_ids(eni_id)
+                .send()
+                .await
+            {
+                Ok(response) => {
+                    if let Some(eni) = response.network_interfaces().first() {
+                        match eni.status() {
+                            Some(status) if *status == desired_status => {
+                                info!(
+                                    "Network interface '{}' reached desired status: {:?}",
+                                    eni_id, desired_status
+                                );
+                                return Ok(());
+                            }
+                            Some(status) => {
+                                info!(
+                                    "Elastic Network Interface '{}' status: {:?}, waiting for {:?} (attempt {}/{})",
+                                    eni_id, status, desired_status, attempt, max_attempts
+                                );
+                            }
+                            None => {
+                                warn!(
+                                    "Elastic Network Interface '{}' status is unknown, waiting for {:?} (attempt {}/{})",
+                                    eni_id, desired_status, attempt, max_attempts
+                                );
+                            }
+                        }
+                    } else {
+                        bail!(
+                            "Elastic Network Interface '{}' not found during status check",
+                            eni_id
+                        );
+                    }
+                }
+                Err(e) => {
+                    error!("{:?}", e);
+                    bail!(
+                        "Failed to check Elastic Network Interface '{}' status",
+                        eni_id
+                    );
+                }
+            }
+
+            if attempt < max_attempts {
+                tokio::time::sleep(sleep_duration).await;
+            }
+        }
+
+        bail!(
+            "Elastic Network Interface '{}' did not reach desired status {:?} within {} seconds",
+            eni_id,
+            desired_status,
+            max_attempts * sleep_duration.as_secs()
+        );
     }
 }

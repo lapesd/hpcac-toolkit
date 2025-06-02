@@ -3,7 +3,8 @@ use crate::integrations::{
     CloudInfoProvider, CloudProvider,
     providers::{aws::AwsInterface, vultr::VultrInterface},
 };
-use crate::utils::ProgressTracker;
+use crate::utils;
+
 use inquire::Select;
 use sqlx::sqlite::SqlitePool;
 use tracing::error;
@@ -129,7 +130,7 @@ pub async fn load(
             vec![region]
         }
         None => {
-            let regions_tracker = ProgressTracker::new(1, Some("region discovery"));
+            let regions_tracker = utils::ProgressTracker::new(1, Some("region discovery"));
             let regions = cloud_interface.fetch_regions(&regions_tracker).await?;
             regions_tracker.finish_with_message(&format!(
                 "Region discovery complete: found {} regions in {}",
@@ -141,9 +142,12 @@ pub async fn load(
     };
 
     let mut total_instance_types = 0;
-    let multi = ProgressTracker::create_multi();
-    let main_tracker =
-        ProgressTracker::add_to_multi(&multi, regions.len() as u64, Some("regions processed"));
+    let multi = utils::ProgressTracker::create_multi();
+    let main_tracker = utils::ProgressTracker::add_to_multi(
+        &multi,
+        regions.len() as u64,
+        Some("regions processed"),
+    );
     for (index, region) in regions.iter().enumerate() {
         main_tracker.set_position(index as u64);
         main_tracker.update_message(&format!(
@@ -154,7 +158,7 @@ pub async fn load(
         ));
 
         // Fetch instance types from the provider
-        let instances_tracker = ProgressTracker::new_indeterminate(
+        let instances_tracker = utils::ProgressTracker::new_indeterminate(
             &multi,
             &format!("Fetching '{}' instance type details...", region),
         );

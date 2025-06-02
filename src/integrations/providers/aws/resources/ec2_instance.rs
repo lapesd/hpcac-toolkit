@@ -102,6 +102,100 @@ impl AwsInterface {
                     "Requested new instance '{}' with ID '{}'",
                     instance_name, instance_id
                 );
+
+                // Wait for instance to reach RUNNING state
+                info!(
+                    "Waiting for instance '{}' to reach RUNNING state...",
+                    instance_id
+                );
+                let max_wait_time = Duration::from_secs(600); // 10 minutes timeout for instance startup
+                let poll_interval = Duration::from_secs(15); // Poll every 15 seconds
+                let start_time = std::time::Instant::now();
+                loop {
+                    if start_time.elapsed() >= max_wait_time {
+                        warn!(
+                            "Timeout waiting for instance '{}' to reach RUNNING state after {} seconds",
+                            instance_id,
+                            max_wait_time.as_secs()
+                        );
+                        bail!("Timeout waiting for EC2 instance to reach RUNNING state");
+                    }
+
+                    // Query current state of the instance
+                    let describe_response = match context
+                        .client
+                        .describe_instances()
+                        .instance_ids(instance_id)
+                        .send()
+                        .await
+                    {
+                        Ok(response) => response,
+                        Err(e) => {
+                            error!(
+                                "Failed to describe instance '{}' during startup wait: {:?}",
+                                instance_id, e
+                            );
+                            bail!("Failure checking instance state during startup");
+                        }
+                    };
+
+                    // Check the instance state
+                    let mut instance_running = false;
+                    for reservation in describe_response.reservations() {
+                        for instance in reservation.instances() {
+                            if let (Some(current_instance_id), Some(state)) =
+                                (instance.instance_id(), instance.state())
+                            {
+                                if current_instance_id == instance_id {
+                                    if let Some(state_name) = state.name() {
+                                        match state_name {
+                                            aws_sdk_ec2::types::InstanceStateName::Running => {
+                                                info!(
+                                                    "Instance '{}' has reached RUNNING state",
+                                                    instance_id
+                                                );
+                                                instance_running = true;
+                                            }
+                                            aws_sdk_ec2::types::InstanceStateName::Pending => {
+                                                info!(
+                                                    "Instance '{}' is still pending startup...",
+                                                    instance_id
+                                                );
+                                            }
+                                            aws_sdk_ec2::types::InstanceStateName::Terminated
+                                            | aws_sdk_ec2::types::InstanceStateName::ShuttingDown =>
+                                            {
+                                                error!(
+                                                    "Instance '{}' unexpectedly terminated during startup (state: {:?})",
+                                                    instance_id, state_name
+                                                );
+                                                bail!(
+                                                    "Instance terminated unexpectedly during startup"
+                                                );
+                                            }
+                                            _ => {
+                                                info!(
+                                                    "Instance '{}' is in state: {:?}",
+                                                    instance_id, state_name
+                                                );
+                                            }
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    if instance_running {
+                        info!("Instance '{}' is now ready and running!", instance_id);
+                        break;
+                    }
+
+                    // Wait before next poll
+                    sleep(poll_interval).await;
+                }
+
                 return Ok(instance_id.to_string());
             }
         }

@@ -17,7 +17,7 @@ impl AwsInterface {
             Ok(response) => response,
             Err(e) => {
                 error!("{:?}", e);
-                bail!("Failure describing security group resources");
+                bail!("Failure describing Security Group resources");
             }
         };
 
@@ -26,7 +26,7 @@ impl AwsInterface {
             let mut security_group_ids = Vec::new();
             for sg in security_groups {
                 if let Some(sg_id) = sg.group_id() {
-                    info!("Found existing security group: '{}'", sg_id);
+                    info!("Found existing Security Group: '{}'", sg_id);
 
                     // Verify it's in the correct VPC
                     if let Some(vpc_id) = sg.vpc_id() {
@@ -34,7 +34,7 @@ impl AwsInterface {
                             security_group_ids.push(sg_id.to_string());
                         } else {
                             warn!(
-                                "Security group '{}' is in different VPC '{}', expected '{}'",
+                                "Security Group '{}' is in different VPC '{}', expected '{}'",
                                 sg_id, vpc_id, context_vpc_id
                             );
                         }
@@ -43,12 +43,12 @@ impl AwsInterface {
             }
 
             if !security_group_ids.is_empty() {
-                info!("Using existing security groups: {:?}", security_group_ids);
+                info!("Using existing Security Groups: {:?}", security_group_ids);
                 return Ok(security_group_ids);
             }
         }
 
-        info!("No existing security groups found, creating a new one...");
+        info!("No existing Security Groups found, creating a new one...");
 
         let create_security_group_response = match context
             .client
@@ -74,16 +74,16 @@ impl AwsInterface {
             Ok(response) => response,
             Err(e) => {
                 error!("{:?}", e);
-                bail!("Failure creating security group resource");
+                bail!("Failure creating Security Group resource");
             }
         };
 
         if let Some(security_group_id) = create_security_group_response.group_id() {
-            info!("Created new security group '{}'", security_group_id);
+            info!("Created new Security Group '{}'", security_group_id);
 
             // Add self-referential ingress rule (allow all traffic within the security group)
             info!(
-                "Adding self-referential ingress rule to security group '{}'...",
+                "Adding self-referential ingress rule to Security Group '{}'...",
                 security_group_id
             );
             match context
@@ -107,13 +107,16 @@ impl AwsInterface {
             {
                 Ok(_) => {
                     info!(
-                        "Successfully added self-referential ingress rule to security group '{}'",
+                        "Successfully added self-referential ingress rule to Security Group '{}'",
                         security_group_id
                     );
                 }
                 Err(e) => {
                     error!("{:?}", e);
-                    bail!("Failure adding self-referential ingress rule to security group");
+                    bail!(
+                        "Failure adding self-referential ingress rule to Security Group '{}'",
+                        security_group_id
+                    );
                 }
             }
 
@@ -143,19 +146,22 @@ impl AwsInterface {
             {
                 Ok(_) => {
                     info!(
-                        "Successfully added SSH ingress rule to security group '{}'",
+                        "Successfully added SSH ingress rule to Security Group '{}'",
                         security_group_id
                     );
                     Ok(vec![security_group_id.to_string()])
                 }
                 Err(e) => {
                     error!("{:?}", e);
-                    bail!("Failure adding SSH ingress rule to security group");
+                    bail!(
+                        "Failure adding SSH ingress rule to Security Group '{}'",
+                        security_group_id
+                    );
                 }
             }
         } else {
             warn!("{:?}", create_security_group_response);
-            bail!("Unexpected response from AWS when creating security group resource");
+            bail!("Failure finding id of the created Security Group resource");
         }
     }
 
@@ -170,22 +176,20 @@ impl AwsInterface {
             Ok(response) => response,
             Err(e) => {
                 error!("{:?}", e);
-                bail!("Failure describing security group resources");
+                bail!("Failure describing Security Group resources");
             }
         };
 
         let security_groups = describe_security_groups_response.security_groups();
         if security_groups.is_empty() {
-            info!("No existing security groups found to cleanup");
+            info!("No existing Security Groups found");
             return Ok(());
         }
 
         for sg in security_groups {
             if let Some(sg_id) = sg.group_id() {
-                info!("Found security group to cleanup: '{}'", sg_id);
-
-                // Delete the security group
-                info!("Deleting security group '{}'...", sg_id);
+                info!("Found Security Group to cleanup: '{}'", sg_id);
+                info!("Deleting Security Group '{}'...", sg_id);
                 match context
                     .client
                     .delete_security_group()
@@ -194,15 +198,11 @@ impl AwsInterface {
                     .await
                 {
                     Ok(_) => {
-                        info!("Security group '{}' deleted successfully", sg_id);
+                        info!("Security Group '{}' deleted successfully", sg_id);
                     }
                     Err(e) => {
-                        error!("Failed to delete security group '{}': {:?}", sg_id, e);
-                        // Continue with other security groups instead of bailing
-                        warn!(
-                            "Continuing cleanup despite failure to delete security group '{}'",
-                            sg_id
-                        );
+                        error!("{:?}", e);
+                        error!("Failed to delete Security Group '{}'", sg_id);
                     }
                 }
             }

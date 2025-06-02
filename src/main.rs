@@ -1,7 +1,8 @@
+use anyhow::bail;
 use clap::{Parser, Subcommand};
 use sqlx::sqlite::SqlitePool;
-use std::process;
-use tracing::{error, info, warn};
+use std::fs::OpenOptions;
+use tracing::error;
 
 mod commands;
 mod constants;
@@ -168,8 +169,21 @@ enum ProviderConfigCommands {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
+    // Read environment variables
     dotenvy::dotenv().ok();
-    tracing_subscriber::fmt::init();
+
+    // Setup logging
+    let log_file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("hpcac-toolkit.log")
+        .expect("Failed to open log file");
+
+    tracing_subscriber::fmt()
+        .with_writer(log_file)
+        .with_ansi(false)
+        .init();
+
     let cli = Cli::parse();
 
     // Read SQLite connection data from environment variables.
@@ -177,20 +191,17 @@ async fn main() -> anyhow::Result<()> {
     let db_url = match std::env::var("DATABASE_URL") {
         Ok(result) => result,
         Err(_) => {
-            warn!("DATABASE_URL environment variable not set, using default.");
+            println!("DATABASE_URL environment variable not set, using default.");
             String::from("sqlite://db.sqlite")
         }
     };
 
     // Create a SQLite connection pool
     let sqlite_pool = match SqlitePool::connect(&db_url).await {
-        Ok(result) => {
-            info!("SQLite connection pool created!");
-            result
-        }
-        Err(error) => {
-            error!("Couldn't connect to SQLite: {}", error);
-            process::exit(1);
+        Ok(result) => result,
+        Err(e) => {
+            error!("{:?}", e);
+            bail!("Couldn't connect to SQLite database");
         }
     };
 

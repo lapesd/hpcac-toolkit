@@ -103,6 +103,11 @@ impl AwsClusterContext {
         format!("{}-ENI-{}", self.cluster_id, node_index)
     }
 
+    /// Generate an elastic ip name for a specific node index
+    pub fn elastic_ip_name(&self, node_index: usize) -> String {
+        format!("{}-EIP-{}", self.cluster_id, node_index)
+    }
+
     /// Generate private IP for a specific node index
     pub fn network_interface_private_ip(&self, node_index: usize) -> String {
         format!("10.0.1.{}", node_index + 10)

@@ -16,48 +16,28 @@ impl AwsInterface {
             Ok(response) => response,
             Err(e) => {
                 error!("{:?}", e);
-                bail!("Failure describing SSH key pair resources");
+                bail!("Failure describing SSH Keys resources");
             }
         };
 
         let key_pairs = describe_key_pairs_response.key_pairs();
         if let Some(key_pair) = key_pairs.first() {
             if let Some(key_id) = key_pair.key_pair_id() {
-                info!("Found existing SSH key pair: '{}'", key_id);
-
-                // Verify the key name matches what we expect
-                if let Some(key_name) = key_pair.key_name() {
-                    if key_name == context.ssh_key_name {
-                        info!(
-                            "SSH key pair '{}' matches expected name '{}'",
-                            key_id, key_name
-                        );
-                        return Ok(key_id.to_string());
-                    } else {
-                        warn!(
-                            "SSH key pair '{}' has different name '{}', expected '{}'",
-                            key_id, key_name, context.ssh_key_name
-                        );
-                    }
-                }
-
-                // If name doesn't match, we'll still use the existing key
-                // since it was tagged with our cluster ID
+                info!("Found existing SSH Key: '{}'", key_id);
                 return Ok(key_id.to_string());
             }
         }
 
-        info!("No existing SSH key pair found, importing a new one...");
+        info!("No existing SSH Key found, importing a new one...");
 
-        // Read the public key file
         let public_key_material = match fs::read_to_string(&context.public_ssh_key_path) {
             Ok(material) => material,
             Err(e) => {
-                error!(
-                    "Failed to read public key file from '{}': {:?}",
-                    context.public_ssh_key_path, e
+                error!("{:?}", e);
+                bail!(
+                    "Failure reading public SSH Key file from '{}'",
+                    context.public_ssh_key_path,
                 );
-                bail!("Failure reading public SSH key file");
             }
         };
 
@@ -86,17 +66,17 @@ impl AwsInterface {
             Ok(response) => response,
             Err(e) => {
                 error!("{:?}", e);
-                bail!("Failure importing SSH key pair");
+                bail!("Failure importing SSH Key pair");
             }
         };
 
         if let Some(key_id) = import_key_pair_response.key_pair_id() {
-            info!("Successfully imported SSH key pair '{}'", key_id);
-            Ok(key_id.to_string())
-        } else {
-            warn!("{:?}", import_key_pair_response);
-            bail!("Unexpected response from AWS when importing SSH key pair");
+            info!("Successfully imported SSH Key '{}'", key_id);
+            return Ok(key_id.to_string());
         }
+
+        warn!("{:?}", import_key_pair_response);
+        bail!("Failure finding the id of the created SSH Key resource");
     }
 
     pub async fn cleanup_ssh_key(&self, context: &AwsClusterContext) -> Result<()> {
@@ -110,16 +90,16 @@ impl AwsInterface {
             Ok(response) => response,
             Err(e) => {
                 error!("{:?}", e);
-                bail!("Failure describing SSH key pair resources");
+                bail!("Failure describing SSH Key resources");
             }
         };
 
         let key_pairs = describe_key_pairs_response.key_pairs();
         if let Some(key_pair) = key_pairs.first() {
             if let Some(key_id) = key_pair.key_pair_id() {
-                info!("Found SSH key pair to cleanup: '{}'", key_id);
+                info!("Found SSH Key to cleanup: '{}'", key_id);
 
-                info!("Deleting SSH key pair '{}'...", key_id);
+                info!("Deleting SSH Key '{}'...", key_id);
                 match context
                     .client
                     .delete_key_pair()
@@ -128,18 +108,18 @@ impl AwsInterface {
                     .await
                 {
                     Ok(_) => {
-                        info!("SSH key pair '{}' deleted successfully", key_id);
+                        info!("SSH Key '{}' deleted successfully", key_id);
                         return Ok(());
                     }
                     Err(e) => {
-                        error!("Failed to delete SSH key pair '{}': {:?}", key_id, e);
-                        bail!("Failure deleting SSH key pair resource");
+                        error!("Failed to delete SSH Key '{}': {:?}", key_id, e);
+                        bail!("Failure deleting SSH Key resource");
                     }
                 }
             }
         }
 
-        info!("No existing SSH key pair found to cleanup");
+        info!("No existing SSH Key found");
         Ok(())
     }
 }

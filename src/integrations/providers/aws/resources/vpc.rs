@@ -63,7 +63,7 @@ impl AwsInterface {
         }
 
         warn!("{:?}", create_vpc_response);
-        bail!("Unexpected response from AWS when creating a VPC resource");
+        bail!("Failure finding the id of the created VPC resource");
     }
 
     pub async fn cleanup_vpc(&self, context: &AwsClusterContext) -> Result<()> {

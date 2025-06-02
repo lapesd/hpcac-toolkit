@@ -274,7 +274,7 @@ pub async fn create(
             )
         }
 
-        // Validade elastic fabric adapters support
+        // Validate elastic fabric adapters support
         if cluster_yaml.use_elastic_fabric_adapters && !instance_type_details.supports_efa {
             anyhow::bail!(
                 "Instance type '{}' does not support elastic fabric adapters",

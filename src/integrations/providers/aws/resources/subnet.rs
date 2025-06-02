@@ -15,19 +15,19 @@ impl AwsInterface {
             Ok(response) => response,
             Err(e) => {
                 error!("{:?}", e);
-                bail!("Failure describing subnet resources");
+                bail!("Failure describing Subnet resources");
             }
         };
 
         let subnets = describe_subnets_response.subnets();
         if let Some(subnet) = subnets.first() {
             if let Some(subnet_id) = subnet.subnet_id() {
-                info!("Found existing subnet: '{}'", subnet_id);
+                info!("Found existing Subnet: '{}'", subnet_id);
                 return Ok(subnet_id.to_string());
             }
         }
 
-        info!("No existing subnet found, creating a new one...");
+        info!("No existing Subnet found, creating a new one...");
 
         let create_subnet_response = match context
             .client
@@ -53,7 +53,7 @@ impl AwsInterface {
             Ok(response) => response,
             Err(e) => {
                 error!("{:?}", e);
-                bail!("Failure creating subnet resource");
+                bail!("Failure creating Subnet resource");
             }
         };
 
@@ -61,12 +61,12 @@ impl AwsInterface {
             .subnet()
             .and_then(|subnet| subnet.subnet_id())
         {
-            info!("Created new subnet '{}'", subnet_id);
+            info!("Created new Subnet '{}'", subnet_id);
             return Ok(subnet_id.to_string());
         }
 
         warn!("{:?}", create_subnet_response);
-        bail!("Unexpected response from AWS when creating a subnet resource");
+        bail!("Failure finding the id of the created Subnet resource");
     }
 
     pub async fn cleanup_subnet(&self, context: &AwsClusterContext) -> Result<()> {
@@ -87,8 +87,8 @@ impl AwsInterface {
         let subnets = describe_subnets_response.subnets();
         if let Some(subnet) = subnets.first() {
             if let Some(subnet_id) = subnet.subnet_id() {
-                info!("Found existing subnet to cleanup: '{}'", subnet_id);
-                info!("Deleting subnet '{}'...", subnet_id);
+                info!("Found existing Subnet to cleanup: '{}'", subnet_id);
+                info!("Deleting Subnet '{}'...", subnet_id);
                 match context
                     .client
                     .delete_subnet()
@@ -102,13 +102,13 @@ impl AwsInterface {
                     }
                     Err(e) => {
                         error!("{:?}", e);
-                        bail!("Failure deleting subnet resource");
+                        bail!("Failure deleting Subnet resource");
                     }
                 };
             }
         }
 
-        info!("No existing subnet found");
+        info!("No existing Subnet found");
         Ok(())
     }
 }
