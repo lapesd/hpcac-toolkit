@@ -171,7 +171,7 @@ pub async fn load(
 
         // Increment the main tracker after completing a region
         total_instance_types += instance_types_count;
-        main_tracker.inc();
+        main_tracker.inc(1);
         main_tracker.update_message(&format!(
             "Completed region {}/{}: {}",
             index + 1,

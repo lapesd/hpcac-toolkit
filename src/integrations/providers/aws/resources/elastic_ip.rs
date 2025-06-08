@@ -196,14 +196,13 @@ impl AwsInterface {
         }
     }
 
-    /*
-    pub async fn associate_elastic_ip_with_elastic_network_interface(
+    pub async fn associate_elastic_ip_with_network_interface(
         &self,
         context: &AwsClusterContext,
         eip_id: &str,
         eni_id: &str,
     ) -> Result<()> {
-        let describe_elastic_ips_response = match context
+        let describe_eip_response = match context
             .client
             .describe_addresses()
             .allocation_ids(eip_id)
@@ -212,17 +211,17 @@ impl AwsInterface {
         {
             Ok(response) => response,
             Err(e) => {
-                error!("{:?}", e);
+                error!("Failed to describe Elastic IP '{}': {:?}", eip_id, e);
                 bail!("Failed to describe Elastic IP '{}'", eip_id);
             }
         };
 
-        for address in describe_elastic_ips_response.addresses() {
-            if let Some(associated_instance_id) = address.instance_id() {
-                if associated_instance_id == instance_id {
+        for address in describe_eip_response.addresses() {
+            if let Some(associated_eni_id) = address.network_interface_id() {
+                if associated_eni_id == eni_id {
                     info!(
-                        "Elastic IP '{}' is already associated with Instance '{}'",
-                        eip_id, instance_id
+                        "Elastic IP '{}' is already associated with Elastic Network Interface '{}'",
+                        eip_id, eni_id
                     );
                     return Ok(());
                 }
@@ -230,15 +229,15 @@ impl AwsInterface {
         }
 
         info!(
-            "Associating Elastic IP '{}' with Instance '{}'...",
-            eip_id, instance_id
+            "Associating Elastic IP '{}' with Network Interface '{}'...",
+            eip_id, eni_id
         );
 
-        let associate_eip_with_instance_response = match context
+        let associate_eip_with_eni_response = match context
             .client
             .associate_address()
             .allocation_id(eip_id)
-            .instance_id(instance_id)
+            .network_interface_id(eni_id)
             .allow_reassociation(true)
             .send()
             .await
@@ -247,26 +246,23 @@ impl AwsInterface {
             Err(e) => {
                 error!("{:?}", e);
                 bail!(
-                    "Failed to associate Elastic IP '{}' with Instance '{}'",
+                    "Failed to associate Elastic IP '{}' with Elastic Network Interface '{}'",
                     eip_id,
-                    instance_id
+                    eni_id
                 );
             }
         };
 
-        if let Some(association_id) = associate_eip_with_instance_response.association_id() {
+        if let Some(association_id) = associate_eip_with_eni_response.association_id() {
             info!(
-                "Successfully associated Elastic IP '{}' with Instance '{}' (association ID: '{}')",
-                eip_id, instance_id, association_id
+                "Successfully associated Elastic IP '{}' with Network Interface '{}' (association ID: '{}')",
+                eip_id, eni_id, association_id
             );
             return Ok(());
         }
 
-        warn!("{:?}", associate_eip_with_instance_response);
         bail!(
-            "Failure finding the id of the created Elastic IP '{}' association with Instance '{}'",
-            eip_id,
-            instance_id
+            "No association id returned for Elastic IP association with Elastic Network Interface"
         );
-    }*/
+    }
 }

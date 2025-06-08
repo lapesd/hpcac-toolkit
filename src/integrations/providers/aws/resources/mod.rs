@@ -1,4 +1,6 @@
-pub mod ec2_instance;
+pub mod elastic_compute;
+pub mod elastic_file_system_device;
+pub mod elastic_file_system_mount_target;
 pub mod elastic_ip;
 pub mod elastic_network_interface;
 pub mod internet_gateway;

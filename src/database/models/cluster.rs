@@ -18,6 +18,7 @@ pub struct Cluster {
     pub availability_zone: String,
     pub use_node_affinity: bool,
     pub use_elastic_fabric_adapters: bool,
+    pub use_elastic_file_system: bool,
     pub created_at: NaiveDateTime,
 }
 
@@ -42,6 +43,10 @@ impl Cluster {
         println!(
             "{:<20}: {}",
             "Use Elastic Fabric Adapters (EFAs)", self.use_elastic_fabric_adapters
+        );
+        println!(
+            "{:<20}: {}",
+            "Use Elastic File System (EFS)", self.use_elastic_file_system
         );
         println!(
             "{:<20}: {}",
@@ -120,6 +125,7 @@ impl Cluster {
                     availability_zone,
                     use_node_affinity,
                     use_elastic_fabric_adapters,
+                    use_elastic_file_system,
                     created_at
                 FROM clusters
                 WHERE id = ?
@@ -154,6 +160,7 @@ impl Cluster {
                     availability_zone,
                     use_node_affinity,
                     use_elastic_fabric_adapters,
+                    use_elastic_file_system,
                     created_at
                 FROM clusters
             "#,
@@ -205,9 +212,10 @@ impl Cluster {
                     availability_zone,
                     use_node_affinity,
                     use_elastic_fabric_adapters,
+                    use_elastic_file_system,
                     created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
             self.id,
             self.display_name,
@@ -219,6 +227,7 @@ impl Cluster {
             self.availability_zone,
             self.use_node_affinity,
             self.use_elastic_fabric_adapters,
+            self.use_elastic_file_system,
             self.created_at,
         )
         .execute(&mut *tx)

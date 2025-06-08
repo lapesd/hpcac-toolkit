@@ -22,6 +22,7 @@ struct ClusterYaml {
     availability_zone: String,
     use_node_affinity: bool,
     use_elastic_fabric_adapters: bool,
+    use_elastic_file_system: bool,
     nodes: Vec<NodeYaml>,
 }
 
@@ -59,7 +60,11 @@ pub async fn create(
         }
         Err(e) => {
             error!("{}", e.to_string());
-            anyhow::bail!("Failed to parse yaml file: '{}'", yaml_file_path)
+            anyhow::bail!(
+                "Failed to parse yaml file: '{}': {:?}",
+                yaml_file_path,
+                e.to_string()
+            )
         }
     };
 
@@ -337,7 +342,7 @@ pub async fn create(
             private_ip: None,
             public_ip: None,
         });
-        nodes_tracker.inc();
+        nodes_tracker.inc(1);
     }
     nodes_tracker.finish_with_message(&format!("Validated {} nodes", node_count));
 
@@ -355,6 +360,10 @@ pub async fn create(
     println!(
         "{:<20}: {}",
         "Use Elastic Fabric Adapters (EFAs)", cluster_yaml.use_elastic_fabric_adapters
+    );
+    println!(
+        "{:<20}: {}",
+        "Use Elastic File System (EFS)", cluster_yaml.use_elastic_file_system
     );
     println!(
         "{:<20}: {}",
@@ -428,6 +437,7 @@ pub async fn create(
         availability_zone: zone,
         use_node_affinity: cluster_yaml.use_node_affinity,
         use_elastic_fabric_adapters: cluster_yaml.use_elastic_fabric_adapters,
+        use_elastic_file_system: cluster_yaml.use_elastic_file_system,
         created_at: Utc::now().naive_utc(),
     };
     cluster

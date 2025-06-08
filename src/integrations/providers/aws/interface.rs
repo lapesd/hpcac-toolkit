@@ -3,15 +3,18 @@ use crate::database::models::{Cluster, ConfigVar, ConfigVarFinder};
 use anyhow::{Result, bail};
 use aws_config::{BehaviorVersion, Region, SdkConfig};
 use aws_credential_types::{Credentials, provider::SharedCredentialsProvider};
-use aws_sdk_ec2::Client as EC2Client;
+use aws_sdk_ec2::Client as Ec2Client;
+use aws_sdk_efs::Client as EfsClient;
 use aws_sdk_pricing::Client as PricingClient;
 use aws_sdk_servicequotas::Client as ServiceQuotasClient;
+use std::collections::HashMap;
 
 /// Context struct containing all cluster-related information and resource identifiers
 /// used throughout the cluster lifecycle operations
 pub struct AwsClusterContext {
-    // AWS SDK Client
-    pub client: EC2Client,
+    // AWS SDK Clients
+    pub client: Ec2Client,
+    pub efs_client: EfsClient,
 
     // Core cluster information for tagging and filtering
     pub cluster_id: String,
@@ -26,6 +29,7 @@ pub struct AwsClusterContext {
     pub security_group_name: String,
     pub placement_group_name: String,
     pub ssh_key_name: String,
+    pub efs_device_name: String,
 
     // Resource identifiers (populated during creation/discovery)
     pub vpc_id: Option<String>,
@@ -35,6 +39,11 @@ pub struct AwsClusterContext {
     pub security_group_ids: Vec<String>,
     pub placement_group_name_actual: Option<String>,
     pub ssh_key_id: Option<String>,
+    pub elastic_network_interface_ids: HashMap<usize, String>,
+    pub elastic_ip_ids: HashMap<usize, String>,
+    pub ec2_instance_ids: Vec<String>,
+    pub efs_device_id: Option<String>,
+    pub efs_mount_target_id: Option<String>,
 
     // Cluster and network configuration
     pub availability_zone: String,
@@ -47,7 +56,7 @@ pub struct AwsClusterContext {
 
 impl AwsClusterContext {
     /// Create a new ClusterContext from a Cluster and EC2Client
-    pub fn new(cluster: &Cluster, client: EC2Client) -> Self {
+    pub fn new(cluster: &Cluster, client: Ec2Client, efs_client: EfsClient) -> Self {
         let cluster_id = cluster.id.to_string();
         let cluster_id_tag = aws_sdk_ec2::types::Tag::builder()
             .key("ClusterId")
@@ -63,6 +72,7 @@ impl AwsClusterContext {
             cluster_id_tag,
             cluster_id_filter,
             client,
+            efs_client,
 
             // Generate resource names
             vpc_name: format!("{}-VPC", cluster_id),
@@ -72,6 +82,7 @@ impl AwsClusterContext {
             security_group_name: format!("{}-SG", cluster_id),
             placement_group_name: format!("{}-PG", cluster_id),
             ssh_key_name: format!("{}-KEY", cluster_id),
+            efs_device_name: format!("{}-EFS", cluster_id),
 
             // Initialize resource IDs as None/empty
             vpc_id: None,
@@ -81,6 +92,11 @@ impl AwsClusterContext {
             security_group_ids: Vec::new(),
             placement_group_name_actual: None,
             ssh_key_id: None,
+            elastic_network_interface_ids: HashMap::new(),
+            elastic_ip_ids: HashMap::new(),
+            ec2_instance_ids: Vec::new(),
+            efs_device_id: None,
+            efs_mount_target_id: None,
 
             // Copy some cluster configuration for convenience
             availability_zone: cluster.availability_zone.clone(),
@@ -89,7 +105,7 @@ impl AwsClusterContext {
             public_ssh_key_path: cluster.public_ssh_key_path.clone(),
             // TODO: Evaluate if it's desired to make the CIDR blocks configurable
             vpc_cidr_block: "10.0.0.0/16".to_string(),
-            subnet_cidr_block: "10.0.1.0/24".to_string(),
+            subnet_cidr_block: "10.0.0.0/24".to_string(),
         }
     }
 
@@ -110,7 +126,7 @@ impl AwsClusterContext {
 
     /// Generate private IP for a specific node index
     pub fn network_interface_private_ip(&self, node_index: usize) -> String {
-        format!("10.0.1.{}", node_index + 10)
+        format!("10.0.0.{}", node_index + 10)
     }
 }
 
@@ -146,9 +162,15 @@ impl AwsInterface {
     }
 
     /// Get an EC2 client configured with the provided credentials and region.
-    pub fn get_ec2_client(&self, region: &str) -> Result<EC2Client> {
+    pub fn get_ec2_client(&self, region: &str) -> Result<Ec2Client> {
         let config = self.get_config(region)?;
-        Ok(EC2Client::new(&config))
+        Ok(Ec2Client::new(&config))
+    }
+
+    /// Get an EFS client configured with the provided credentials and region.
+    pub fn get_efs_client(&self, region: &str) -> Result<EfsClient> {
+        let config = self.get_config(region)?;
+        Ok(EfsClient::new(&config))
     }
 
     /// Get a Pricing client configured with the provided credentials and region.
@@ -166,6 +188,7 @@ impl AwsInterface {
     /// Create a ClusterContext for the given cluster
     pub fn create_cluster_context(&self, cluster: &Cluster) -> Result<AwsClusterContext> {
         let client = self.get_ec2_client(&cluster.region)?;
-        Ok(AwsClusterContext::new(cluster, client))
+        let efs_client = self.get_efs_client(&cluster.region)?;
+        Ok(AwsClusterContext::new(cluster, client, efs_client))
     }
 }

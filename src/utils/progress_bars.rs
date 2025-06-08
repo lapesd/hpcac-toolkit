@@ -95,9 +95,9 @@ impl ProgressTracker {
         self.progress_bar.set_position(position);
     }
 
-    /// Increments the progress counter by one step
-    pub fn inc(&self) {
-        self.progress_bar.inc(1);
+    /// Increments the progress counter by N steps
+    pub fn inc(&self, steps: u64) {
+        self.progress_bar.inc(steps);
     }
 
     /// Updates the message displayed alongside the progress bar

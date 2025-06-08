@@ -347,7 +347,7 @@ impl CloudInfoProvider for AwsInterface {
                                 "Error parsing price data for {}: {}",
                                 it_name, e
                             ));
-                            tracker.inc();
+                            tracker.inc(1);
                             continue;
                         }
                     },
@@ -356,7 +356,7 @@ impl CloudInfoProvider for AwsInterface {
                             "Pricing data for instance_type '{}' not found",
                             it_name
                         ));
-                        tracker.inc();
+                        tracker.inc(1);
                         continue;
                     }
                 },
@@ -365,7 +365,7 @@ impl CloudInfoProvider for AwsInterface {
                         "No pricing data returned for instance_type: '{}'",
                         it_name
                     ));
-                    tracker.inc();
+                    tracker.inc(1);
                     continue;
                 }
             };
@@ -378,7 +378,7 @@ impl CloudInfoProvider for AwsInterface {
                             "Data mismatch found in pricing record for instance_type: '{}'",
                             it_name
                         ));
-                        tracker.inc();
+                        tracker.inc(1);
                         continue;
                     }
                 }
@@ -387,7 +387,7 @@ impl CloudInfoProvider for AwsInterface {
                         "Product attributes not found for instance_type: '{}'",
                         it_name
                     ));
-                    tracker.inc();
+                    tracker.inc(1);
                     continue;
                 }
             };
@@ -407,14 +407,14 @@ impl CloudInfoProvider for AwsInterface {
                                         Some(price_str) => match price_str.parse::<f64>() {
                                             Ok(price) => {
                                                 price_map.insert(it_name.clone(), price);
-                                                tracker.inc();
+                                                tracker.inc(1);
                                             }
                                             Err(_) => {
                                                 tracker.progress_bar.println(format!(
                                                     "Failed to parse price for instance_type: '{}'",
                                                     it_name
                                                 ));
-                                                tracker.inc();
+                                                tracker.inc(1);
                                             }
                                         },
                                         None => {
@@ -422,7 +422,7 @@ impl CloudInfoProvider for AwsInterface {
                                                 "USD price not found for instance_type: '{}'",
                                                 it_name
                                             ));
-                                            tracker.inc();
+                                            tracker.inc(1);
                                         }
                                     }
                                 }
@@ -431,7 +431,7 @@ impl CloudInfoProvider for AwsInterface {
                                         "No price dimension found for instance_type: '{}'",
                                         it_name
                                     ));
-                                    tracker.inc();
+                                    tracker.inc(1);
                                 }
                             },
                             None => {
@@ -439,7 +439,7 @@ impl CloudInfoProvider for AwsInterface {
                                     "priceDimensions object missing for instance_type: '{}'",
                                     it_name
                                 ));
-                                tracker.inc();
+                                tracker.inc(1);
                             }
                         }
                     }
@@ -448,7 +448,7 @@ impl CloudInfoProvider for AwsInterface {
                             "No on-demand offer found for instance_type: '{}'",
                             it_name
                         ));
-                        tracker.inc();
+                        tracker.inc(1);
                     }
                 },
                 None => {
@@ -456,7 +456,7 @@ impl CloudInfoProvider for AwsInterface {
                         "On-demand price dimensions not found for instance_type: '{}'",
                         it_name
                     ));
-                    tracker.inc();
+                    tracker.inc(1);
                     continue;
                 }
             };
