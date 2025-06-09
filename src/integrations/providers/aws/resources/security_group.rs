@@ -8,7 +8,7 @@ impl AwsInterface {
         let context_vpc_id = context.vpc_id.as_ref().unwrap();
 
         let describe_security_groups_response = match context
-            .client
+            .ec2_client
             .describe_security_groups()
             .filters(context.cluster_id_filter.clone())
             .send()
@@ -51,7 +51,7 @@ impl AwsInterface {
         info!("No existing Security Groups found, creating a new one...");
 
         let create_security_group_response = match context
-            .client
+            .ec2_client
             .create_security_group()
             .group_name(context.security_group_name.clone())
             .description("Allow all traffic")
@@ -87,7 +87,7 @@ impl AwsInterface {
                 security_group_id
             );
             match context
-                .client
+                .ec2_client
                 .authorize_security_group_ingress()
                 .group_id(security_group_id)
                 .ip_permissions(
@@ -126,7 +126,7 @@ impl AwsInterface {
                 security_group_id
             );
             match context
-                .client
+                .ec2_client
                 .authorize_security_group_ingress()
                 .group_id(security_group_id)
                 .ip_permissions(
@@ -167,7 +167,7 @@ impl AwsInterface {
 
     pub async fn cleanup_security_group(&self, context: &AwsClusterContext) -> Result<()> {
         let describe_security_groups_response = match context
-            .client
+            .ec2_client
             .describe_security_groups()
             .filters(context.cluster_id_filter.clone())
             .send()
@@ -191,7 +191,7 @@ impl AwsInterface {
                 info!("Found Security Group to cleanup: '{}'", sg_id);
                 info!("Deleting Security Group '{}'...", sg_id);
                 match context
-                    .client
+                    .ec2_client
                     .delete_security_group()
                     .group_id(sg_id)
                     .send()

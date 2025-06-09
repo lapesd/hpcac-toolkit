@@ -6,7 +6,7 @@ use tracing::{error, info, warn};
 impl AwsInterface {
     pub async fn ensure_placement_group(&self, context: &AwsClusterContext) -> Result<String> {
         let describe_placement_groups_response = match context
-            .client
+            .ec2_client
             .describe_placement_groups()
             .filters(context.cluster_id_filter.clone())
             .send()
@@ -30,7 +30,7 @@ impl AwsInterface {
         info!("No existing Placement Group found, creating a new one...");
 
         let create_placement_group_response = match context
-            .client
+            .ec2_client
             .create_placement_group()
             .group_name(context.placement_group_name.clone())
             .strategy(aws_sdk_ec2::types::PlacementStrategy::Cluster)
@@ -60,7 +60,7 @@ impl AwsInterface {
         // we need to verify it was created by querying for it
         info!("Verifying Placement Group creation...");
         let verify_response = match context
-            .client
+            .ec2_client
             .describe_placement_groups()
             .filters(context.cluster_id_filter.clone())
             .send()
@@ -87,7 +87,7 @@ impl AwsInterface {
 
     pub async fn cleanup_placement_group(&self, context: &AwsClusterContext) -> Result<()> {
         let describe_placement_groups_response = match context
-            .client
+            .ec2_client
             .describe_placement_groups()
             .filters(context.cluster_id_filter.clone())
             .send()
@@ -106,7 +106,7 @@ impl AwsInterface {
                 info!("Found Placement Group to cleanup: '{}'", group_name);
                 info!("Deleting Placement Group '{}'...", group_name);
                 match context
-                    .client
+                    .ec2_client
                     .delete_placement_group()
                     .group_name(group_name)
                     .send()

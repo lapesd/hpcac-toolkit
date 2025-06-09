@@ -1,4 +1,6 @@
 use crate::database::models::Cluster;
+
+use anyhow::Result;
 use sqlx::sqlite::SqlitePool;
 use tabled::{Table, Tabled, settings::Style};
 
@@ -12,11 +14,11 @@ struct ClusterDisplay {
     display_name: String,
     #[tabled(rename = "Nodes")]
     node_count: usize,
-    #[tabled(rename = "Created At")]
+    #[tabled(rename = "Saved At")]
     created_at: String,
 }
 
-pub async fn list(pool: &SqlitePool) -> anyhow::Result<()> {
+pub async fn list(pool: &SqlitePool) -> Result<()> {
     let clusters = Cluster::fetch_all(pool).await?;
     let total = clusters.len();
 

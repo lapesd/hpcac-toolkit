@@ -15,7 +15,7 @@ impl AwsInterface {
         let instance_name = context.ec2_instance_name(node_index);
 
         let describe_instances_response = match context
-            .client
+            .ec2_client
             .describe_instances()
             .filters(
                 aws_sdk_ec2::types::Filter::builder()
@@ -98,7 +98,7 @@ impl AwsInterface {
         };
 
         let mut run_instances_request = context
-            .client
+            .ec2_client
             .run_instances()
             .image_id(&node.image_id)
             .instance_type(aws_sdk_ec2::types::InstanceType::from(
@@ -168,11 +168,10 @@ impl AwsInterface {
             return Ok(());
         }
 
-        // Give a couple of seconds for AWS to update the existing EC2 Instance ids...
         sleep(Duration::from_secs(5)).await;
 
-        let max_wait_time = Duration::from_secs(600); // 10 minutes timeout for all instances
-        let poll_interval = Duration::from_secs(15); // Poll every 15 seconds
+        let max_wait_time = Duration::from_secs(600);
+        let poll_interval = Duration::from_secs(15);
         let start_time = std::time::Instant::now();
 
         loop {
@@ -184,7 +183,7 @@ impl AwsInterface {
                 bail!("Timeout waiting for EC2 Instances to reach Running state");
             }
 
-            let mut describe_request = context.client.describe_instances();
+            let mut describe_request = context.ec2_client.describe_instances();
             for instance_id in &context.ec2_instance_ids {
                 describe_request = describe_request.instance_ids(instance_id);
             }
@@ -275,7 +274,6 @@ impl AwsInterface {
                 );
             }
 
-            // Wait before next poll
             sleep(poll_interval).await;
         }
 
@@ -286,9 +284,8 @@ impl AwsInterface {
         &self,
         context: &AwsClusterContext,
     ) -> Result<()> {
-        // Find all instances belonging to this cluster using the cluster ID tag
         let describe_instances_response = match context
-            .client
+            .ec2_client
             .describe_instances()
             .filters(context.cluster_id_filter.clone())
             .send()
@@ -352,9 +349,8 @@ impl AwsInterface {
             context.cluster_id
         );
 
-        // Terminate all cluster instances at once
         match context
-            .client
+            .ec2_client
             .terminate_instances()
             .set_instance_ids(Some(instances_to_terminate.clone()))
             .send()
@@ -382,8 +378,8 @@ impl AwsInterface {
     ) -> Result<()> {
         info!("Ensuring all cluster EC2 instances are terminated...");
 
-        let max_wait_time = Duration::from_secs(300); // 5 minutes timeout for termination
-        let poll_interval = Duration::from_secs(10); // Poll every 10 seconds
+        let max_wait_time = Duration::from_secs(300);
+        let poll_interval = Duration::from_secs(10);
         let start_time = std::time::Instant::now();
 
         loop {
@@ -396,9 +392,8 @@ impl AwsInterface {
                 bail!("Timeout waiting for EC2 instances to reach Terminated state");
             }
 
-            // Get all instances for this cluster using the cluster ID filter
             let describe_instances_response = match context
-                .client
+                .ec2_client
                 .describe_instances()
                 .filters(context.cluster_id_filter.clone())
                 .send()
@@ -484,16 +479,6 @@ impl AwsInterface {
             sleep(poll_interval).await;
         }
 
-        Ok(())
-    }
-
-    pub async fn run_shell_commands(
-        &self,
-        context: &AwsClusterContext,
-        node: &Node,
-        node_index: usize,
-        shell_commands: Vec<String>,
-    ) -> Result<()> {
         Ok(())
     }
 }

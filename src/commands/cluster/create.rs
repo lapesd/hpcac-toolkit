@@ -3,6 +3,8 @@ use crate::database::models::{
 };
 use crate::integrations::{cloud_interface::CloudInfoProvider, providers::aws::AwsInterface};
 use crate::utils;
+
+use anyhow::{Result, bail};
 use chrono::Utc;
 use inquire::Select;
 use serde::{Deserialize, Serialize};
@@ -39,8 +41,7 @@ pub async fn create(
     pool: &SqlitePool,
     yaml_file_path: &str,
     skip_confirmation: bool,
-) -> anyhow::Result<()> {
-    // Open and parse the cluster yaml file
+) -> Result<()> {
     let path = Path::new(yaml_file_path);
     let cluster_yaml_str: String = match fs::read_to_string(path) {
         Ok(result) => {
@@ -49,7 +50,7 @@ pub async fn create(
         }
         Err(e) => {
             error!("{}", e.to_string());
-            anyhow::bail!("Failed to read file '{}'", yaml_file_path)
+            bail!("Failed to read file '{}'", yaml_file_path)
         }
     };
 
@@ -60,7 +61,7 @@ pub async fn create(
         }
         Err(e) => {
             error!("{}", e.to_string());
-            anyhow::bail!(
+            bail!(
                 "Failed to parse yaml file: '{}': {:?}",
                 yaml_file_path,
                 e.to_string()
@@ -78,7 +79,7 @@ pub async fn create(
         }
         Err(e) => {
             error!("{}", e.to_string());
-            anyhow::bail!("Failed to read file: '{}'", &public_key_path_string)
+            bail!("Failed to read file: '{}'", &public_key_path_string)
         }
     };
     let private_key_path_string = utils::expand_tilde(&cluster_yaml.private_ssh_key_path);
@@ -90,7 +91,7 @@ pub async fn create(
         }
         Err(e) => {
             error!("{}", e.to_string());
-            anyhow::bail!("Failed to read file: '{}'", &private_key_path_string)
+            bail!("Failed to read file: '{}'", &private_key_path_string)
         }
     };
 
@@ -104,7 +105,7 @@ pub async fn create(
                     result
                 }
                 None => {
-                    anyhow::bail!("Provider Configuration: '{}' not found", config_id)
+                    bail!("Provider Configuration: '{}' not found", config_id)
                 }
             }
         }
@@ -118,12 +119,12 @@ pub async fn create(
                             result
                         }
                         None => {
-                            anyhow::bail!("Provider '{}' not found", provider_id)
+                            bail!("Provider '{}' not found", provider_id)
                         }
                     }
                 }
                 None => {
-                    anyhow::bail!(
+                    bail!(
                         "Neither 'provider_id' or 'provider_configuration_id' are defined in '{}'",
                         yaml_file_path
                     )
@@ -132,9 +133,7 @@ pub async fn create(
 
             let mut configs = ProviderConfig::fetch_all_by_provider(pool, &provider.id).await?;
             if configs.is_empty() {
-                anyhow::bail!(
-                    "No Provider Configurations found. Use 'provider-config create' to setup one"
-                )
+                bail!("No Provider Configurations found. Use 'provider-config create' to setup one")
             } else if configs.len() == 1 {
                 // Use the only config available
                 configs.swap_remove(0)
@@ -149,7 +148,7 @@ pub async fn create(
                         Ok(selection) => selection,
                         Err(e) => {
                             error!("{}", e.to_string());
-                            anyhow::bail!("Failed to get user selection")
+                            bail!("Failed to get user selection")
                         }
                     };
 
@@ -169,7 +168,7 @@ pub async fn create(
     let cloud_interface = match provider_id.as_str() {
         "aws" => AwsInterface { config_vars },
         _ => {
-            anyhow::bail!("Provider '{}' is currently not supported.", &provider_id)
+            bail!("Provider '{}' is currently not supported.", &provider_id)
         }
     };
 
@@ -185,7 +184,7 @@ pub async fn create(
     ));
     let region = cluster_yaml.region.clone();
     if !regions.contains(&region) {
-        anyhow::bail!(
+        bail!(
             "Region '{}' is not available. Possible options: {:?}",
             region,
             regions
@@ -202,7 +201,7 @@ pub async fn create(
     ));
     let zone = cluster_yaml.availability_zone.clone();
     if !zones.contains(&zone) {
-        anyhow::bail!(
+        bail!(
             "Availability Zone '{}' is not available. Possible options: {:?}",
             zone,
             zones
@@ -229,7 +228,7 @@ pub async fn create(
         {
             Ok(Some(details)) => details,
             Ok(None) => {
-                anyhow::bail!(
+                bail!(
                     "Instance type '{}' is unavailable in provider '{}' at region '{}'.\n\
                     Are the instance_types loaded? Use 'instance_type list' to check loaded data",
                     &instance_type_name,
@@ -239,7 +238,7 @@ pub async fn create(
             }
             Err(e) => {
                 error!("{}", e.to_string());
-                anyhow::bail!("DB Operation Failure")
+                bail!("DB Operation Failure")
             }
         };
 
@@ -249,7 +248,7 @@ pub async fn create(
                 "spot" => match instance_type_details.supports_spot {
                     true => mode.to_string(),
                     false => {
-                        anyhow::bail!(
+                        bail!(
                             "Failed validating allocation_mode for node '{}': 'spot' mode not \
                             available for instance_type '{}' in region '{}'",
                             i,
@@ -260,7 +259,7 @@ pub async fn create(
                 },
                 "on-demand" | "on_demand" => "on-demand".to_string(),
                 invalid_mode => {
-                    anyhow::bail!(
+                    bail!(
                         "Failed validating allocation_mode for node '{}': '{}' is not a valid \
                         allocation_mode",
                         i,
@@ -273,7 +272,7 @@ pub async fn create(
 
         // Validade node_affinity
         if cluster_yaml.use_node_affinity && !instance_type_details.has_affinity_settings {
-            anyhow::bail!(
+            bail!(
                 "Instance type '{}' does not support node affinity settings",
                 &instance_type_name
             )
@@ -281,7 +280,7 @@ pub async fn create(
 
         // Validate elastic fabric adapters support
         if cluster_yaml.use_elastic_fabric_adapters && !instance_type_details.supports_efa {
-            anyhow::bail!(
+            bail!(
                 "Instance type '{}' does not support elastic fabric adapters",
                 &instance_type_name
             )
@@ -296,7 +295,7 @@ pub async fn create(
                     Some(burstable_mode)
                 }
                 false => {
-                    anyhow::bail!(
+                    bail!(
                         "Failed validating burstable_mode for instance '{}': 'burstable' mode \
                         not available for instance_type '{}' in region '{}'",
                         i,
@@ -346,30 +345,30 @@ pub async fn create(
     }
     nodes_tracker.finish_with_message(&format!("Validated {} nodes", node_count));
 
-    println!("\n=== New Cluster Information ===");
-    println!("{:<20}: {}", "Provider", provider_config.provider_id);
-    println!("{:<20}: {}", "Region", region);
+    println!("\n{:<40}: {}", "Cluster Name", cluster_yaml.display_name);
+    println!("{:<40}: {}", "Provider", provider_config.provider_id);
+    println!("{:<40}: {}", "Region", region);
     println!(
-        "{:<20}: {}",
+        "{:<40}: {}",
         "Availability Zone", cluster_yaml.availability_zone
     );
     println!(
-        "{:<20}: {}",
+        "{:<40}: {}",
         "Use Node Affinity", cluster_yaml.use_node_affinity
     );
     println!(
-        "{:<20}: {}",
+        "{:<40}: {}",
         "Use Elastic Fabric Adapters (EFAs)", cluster_yaml.use_elastic_fabric_adapters
     );
     println!(
-        "{:<20}: {}",
+        "{:<40}: {}",
         "Use Elastic File System (EFS)", cluster_yaml.use_elastic_file_system
     );
     println!(
-        "{:<20}: {}",
+        "{:<40}: {}",
         "Provider Config", provider_config.display_name
     );
-    println!("{:<20}: {}\n", "Node Count", cluster_yaml.nodes.len());
+    println!("{:<40}: {}\n", "Node Count", cluster_yaml.nodes.len());
 
     println!("Node Details:");
     for (i, node) in cluster_yaml.nodes.iter().enumerate() {

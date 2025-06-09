@@ -35,24 +35,24 @@ impl Cluster {
 
         let nodes = self.get_nodes(pool).await?;
 
-        println!("\n=== Cluster '{}' ===", self.display_name);
-        println!("{:<20}: {}", "Provider", self.provider_id);
-        println!("{:<20}: {}", "Region", self.region);
-        println!("{:<20}: {}", "Availability Zone", self.availability_zone);
-        println!("{:<20}: {}", "Use Node Affinity", self.use_node_affinity);
+        println!("\n{:<35}: {}", "Cluster Name", self.display_name);
+        println!("{:<35}: {}", "Provider", self.provider_id);
+        println!("{:<35}: {}", "Region", self.region);
+        println!("{:<35}: {}", "Availability Zone", self.availability_zone);
+        println!("{:<35}: {}", "Use Node Affinity", self.use_node_affinity);
         println!(
-            "{:<20}: {}",
+            "{:<35}: {}",
             "Use Elastic Fabric Adapters (EFAs)", self.use_elastic_fabric_adapters
         );
         println!(
-            "{:<20}: {}",
+            "{:<35}: {}",
             "Use Elastic File System (EFS)", self.use_elastic_file_system
         );
         println!(
-            "{:<20}: {}",
+            "{:<35}: {}",
             "Provider Config", provider_config.display_name
         );
-        println!("{:<20}: {}\n", "Node Count", nodes.len());
+        println!("{:<35}: {}\n", "Node Count", nodes.len());
 
         println!("Node Details:");
         for (i, node) in nodes.iter().enumerate() {

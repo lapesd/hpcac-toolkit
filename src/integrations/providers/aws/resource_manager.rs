@@ -9,7 +9,7 @@ use tracing::info;
 impl CloudResourceManager for AwsInterface {
     async fn spawn_cluster(&self, cluster: Cluster, nodes: Vec<Node>) -> Result<()> {
         let mut context = self.create_cluster_context(&cluster)?;
-        let mut steps = (4 * nodes.len()) + 6;
+        let mut steps = (4 * nodes.len()) + 7;
         if cluster.use_node_affinity {
             steps += 1;
         }
@@ -34,21 +34,22 @@ impl CloudResourceManager for AwsInterface {
          * 4. Create Internet Gateway
          * 5. Create Route Table (and Routing Rules and Internet Gateway and Subnet attachments)
          * 6. Create Security Groups (and attach all of them to the VPC)
-         * 7. (conditional) Wait for EFS device to be ready
-         * 8. (conditional) Request EFS mount target
-         * 9. Create SSH Key Pair
-         * 10. (conditional) Create Placement Group
-         * 11. for each node {
-         *     11.1. Create ENI device
-         *     11.2. Create Elastic IP
-         *     11.3. Associate Elastic IP with ENI device
-         * }
+         * 7. Create IAM Role and attach Trust Policies
+         * 8. (conditional) Wait for EFS device to be ready
+         * 9. (conditional) Request EFS mount target
+         * 10. Create SSH Key Pair
+         * 11. (conditional) Create Placement Group
          * 12. for each node {
-         *     12.1. Request EC2 instance creation
+         *     12.1. Create ENI device
+         *     12.2. Create Elastic IP
+         *     12.3. Associate Elastic IP with ENI device
          * }
-         * 13. Wait for all EC2 instances to be ready
-         * 14. Wait for EFS mount target to be ready
-         * 15. Attach EC2 Instances to EFS mount target
+         * 13. for each node {
+         *     13.1. Request EC2 instance creation
+         * }
+         * 14. Wait for all EC2 instances to be ready
+         * 15. Wait for EFS mount target to be ready
+         * 16. Attach EC2 Instances to EFS mount target
          */
 
         // 1. Request EFS device creation...
@@ -87,15 +88,20 @@ impl CloudResourceManager for AwsInterface {
         context.security_group_ids = self.ensure_security_group(&context).await?;
         main_progress.inc(1);
 
+        // 7. Create IAM Role and attach Trust Policies
+        operation_spinner.update_message("Creating IAM Role and Trust Policies...");
+        self.ensure_iam_role_and_trust_policies(&context).await?;
+        main_progress.inc(1);
+
         if cluster.use_elastic_file_system {
-            // 7. Wait for EFS device to be ready...
+            // 8. Wait for EFS device to be ready...
             operation_spinner
                 .update_message("Waiting for Elastic File System (EFS) device to be ready...");
             self.wait_for_elastic_file_system_device_to_be_ready(&context)
                 .await?;
             main_progress.inc(1);
 
-            // 8. Request EFS mount target creation...
+            // 9. Request EFS mount target creation...
             operation_spinner
                 .update_message("Requesting Elastic File System (EFS) mount target creation...");
             context.efs_mount_target_id = Some(
@@ -105,12 +111,12 @@ impl CloudResourceManager for AwsInterface {
             main_progress.inc(1);
         }
 
-        // 9. Create SSH Key Pair
+        // 10. Create SSH Key Pair
         operation_spinner.update_message("Importing the SSH key pair...");
         context.ssh_key_id = Some(self.ensure_ssh_key(&context).await?);
         main_progress.inc(1);
 
-        // 10. Create Placement Group
+        // 11. Create Placement Group
         if context.use_node_affinity {
             operation_spinner.update_message("Creating a Placement Group...");
             context.placement_group_name_actual =
@@ -118,9 +124,9 @@ impl CloudResourceManager for AwsInterface {
             main_progress.inc(1);
         }
 
-        // 11. Create ENI devices, Elastic IPs, and associate them
+        // 12. Create ENI devices, Elastic IPs, and associate them
         for (node_index, _node) in nodes.iter().enumerate() {
-            // 11.1. Create ENI device
+            // 12.1. Create ENI device
             operation_spinner.update_message(&format!(
                 "Creating {} of {} Elastic Network Interface (ENI) devices",
                 node_index + 1,
@@ -134,7 +140,7 @@ impl CloudResourceManager for AwsInterface {
                 .insert(node_index, eni_id.clone());
             main_progress.inc(1);
 
-            // 11.2. Create Elastic IP
+            // 12.2. Create Elastic IP
             operation_spinner.update_message(&format!(
                 "Allocating {} of {} Elastic IPs",
                 node_index + 1,
@@ -144,7 +150,7 @@ impl CloudResourceManager for AwsInterface {
             context.elastic_ip_ids.insert(node_index, eip_id.clone());
             main_progress.inc(1);
 
-            // 11.3. Attach Elastic IP to ENI device
+            // 12.3. Attach Elastic IP to ENI device
             operation_spinner.update_message(&format!(
                 "Associating allocated Elastic IP {} with Elastic Network Interface (ENI) device {}...",
                 eip_id, eni_id
@@ -154,7 +160,7 @@ impl CloudResourceManager for AwsInterface {
             main_progress.inc(1);
         }
 
-        // 12. Request EC2 Instances
+        // 13. Request EC2 Instances
         // TODO: Add Spot support
         for (node_index, node) in nodes.iter().enumerate() {
             // 12.1. Request EC2 instance creation...
@@ -171,20 +177,20 @@ impl CloudResourceManager for AwsInterface {
             main_progress.inc(1);
         }
 
-        // 13. Wait for all EC2 Instances to be available
+        // 14. Wait for all EC2 Instances to be available
         operation_spinner.update_message("Waiting for all EC2 Instances to be available...");
         self.wait_for_all_elastic_compute_instances_to_be_available(&context)
             .await?;
         main_progress.inc(1);
 
         if cluster.use_elastic_file_system {
-            // 14. Wait for EFS mount target to be ready
+            // 15. Wait for EFS mount target to be ready
             operation_spinner.update_message("Waiting for the EFS mount target to be ready...");
             self.wait_for_elastic_file_system_mount_target_to_be_ready(&context)
                 .await?;
             main_progress.inc(1);
 
-            // 15. Attach EC2 Instances to EFS mount target
+            // 16. Attach EC2 Instances to EFS mount target
             for (node_index, _) in nodes.iter().enumerate() {
                 let op_msg = format!(
                     "Attaching Node {} of {} to EFS Mount Target...",
@@ -192,7 +198,12 @@ impl CloudResourceManager for AwsInterface {
                     nodes.len()
                 );
                 operation_spinner.update_message(&op_msg);
-                // TODO: attach EC2 instances to EFS mount target (this is done via efs mount helper)
+                // TODO: attach EC2 instances to EFS mount target using SSM
+                // in the system_manager_agent.rs file, you need to add a method called
+                // `run_commands_with_ssm() which will use the node_index to fetch the node_id from
+                // the context and run a Vec<string> of commands. the commands state need to be
+                // polled for 10 minuts (timeout after that) and return when they are successful.
+                // if failed, return with bail.
                 main_progress.inc(1);
             }
         }
@@ -208,7 +219,7 @@ impl CloudResourceManager for AwsInterface {
 
     async fn destroy_cluster(&self, cluster: Cluster, nodes: Vec<Node>) -> Result<()> {
         let context = self.create_cluster_context(&cluster)?;
-        let mut steps = (4 * nodes.len()) + 6;
+        let mut steps = (4 * nodes.len()) + 7;
         if cluster.use_node_affinity {
             steps += 1;
         }
@@ -238,12 +249,13 @@ impl CloudResourceManager for AwsInterface {
          * }
          * 7. Destroy Placement Group
          * 8. Destroy SSH Key Pair
-         * 9. Destroy Security Groups
-         * 10. Destroy Route Table
-         * 11. Destroy Internet Gateway
-         * 12. Destroy Subnet
-         * 13. Destroy VPC
-         * 14. Wait for EFS device to be deleted
+         * 9. Destroy IAM Role
+         * 10. Destroy Security Groups
+         * 11. Destroy Route Table
+         * 12. Destroy Internet Gateway
+         * 13. Destroy Subnet
+         * 14. Destroy VPC
+         * 15. Wait for EFS device to be deleted
          */
 
         // 1. Request EFS mount target deletion
@@ -327,27 +339,32 @@ impl CloudResourceManager for AwsInterface {
         self.cleanup_security_group(&context).await?;
         main_progress.inc(1);
 
-        // 10. Destroy Route Table
+        // 10. Destroy IAM Role
+        operation_spinner.update_message("Destroying IAM Role and Trust Policies...");
+        self.cleanup_trust_policies_and_iam_role(&context).await?;
+        main_progress.inc(1);
+
+        // 11. Destroy Route Table
         operation_spinner.update_message("Destroying Routing Rules and Route Table...");
         self.cleanup_route_table(&context).await?;
         main_progress.inc(1);
 
-        // 11. Destroy Internet Gateway
+        // 12. Destroy Internet Gateway
         operation_spinner.update_message("Destroying Internet Gateway...");
         self.cleanup_internet_gateway(&context).await?;
         main_progress.inc(1);
 
-        // 12. Destroy Subnet
+        // 13. Destroy Subnet
         operation_spinner.update_message("Destroying Subnet...");
         self.cleanup_subnet(&context).await?;
         main_progress.inc(1);
 
-        // 13. Destroy VPC
+        // 14. Destroy VPC
         operation_spinner.update_message("Destroying VPC...");
         self.cleanup_vpc(&context).await?;
         main_progress.inc(1);
 
-        // 14. Wait for EFS device to be deleted
+        // 15. Wait for EFS device to be deleted
         if cluster.use_elastic_file_system {
             operation_spinner.update_message("Waiting for EFS device to be deleted...");
             self.wait_for_elastic_file_system_device_to_be_deleted(&context)

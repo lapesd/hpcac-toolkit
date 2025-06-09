@@ -1,4 +1,4 @@
-display_name: MiniCluster
+display_name: DefaultCluster
 public_ssh_key_path: ~/.ssh/id_ed25519.pub
 private_ssh_key_path: ~/.ssh/id_ed25519
 provider_id: aws
@@ -10,11 +10,11 @@ use_elastic_file_system: true
 nodes:
   - instance_type: t2.micro
     allocation_mode: on-demand
-    image_id: ami-0387168b4a09b1490
+    image_id: ami-02457590d33d576c3
     init_commands:
       - ls
   - instance_type: t2.micro
     allocation_mode: on-demand
-    image_id: ami-0387168b4a09b1490
+    image_id: ami-02457590d33d576c3
     init_commands:
       - ls

@@ -16,7 +16,7 @@ impl AwsInterface {
         let context_security_group_ids = &context.security_group_ids;
 
         let describe_eni_response = match context
-            .client
+            .ec2_client
             .describe_network_interfaces()
             .filters(
                 aws_sdk_ec2::types::Filter::builder()
@@ -54,7 +54,7 @@ impl AwsInterface {
         );
 
         let mut create_request = context
-            .client
+            .ec2_client
             .create_network_interface()
             .subnet_id(context_subnet_id)
             .set_groups(Some(context_security_group_ids.clone()))
@@ -112,7 +112,7 @@ impl AwsInterface {
         let eni_name = context.network_interface_name(node_index);
 
         let describe_eni_response = match context
-            .client
+            .ec2_client
             .describe_network_interfaces()
             .filters(
                 aws_sdk_ec2::types::Filter::builder()
@@ -146,7 +146,7 @@ impl AwsInterface {
                         );
                         if let Some(attachment_id) = attachment.attachment_id() {
                             match context
-                                .client
+                                .ec2_client
                                 .detach_network_interface()
                                 .attachment_id(attachment_id)
                                 .force(true) // Force detachment
@@ -180,7 +180,7 @@ impl AwsInterface {
 
                 info!("Deleting Elastic Network Interface '{}'...", eni_id);
                 match context
-                    .client
+                    .ec2_client
                     .delete_network_interface()
                     .network_interface_id(eni_id)
                     .send()
@@ -215,7 +215,7 @@ impl AwsInterface {
 
         for attempt in 1..=max_attempts {
             match context
-                .client
+                .ec2_client
                 .describe_network_interfaces()
                 .network_interface_ids(eni_id)
                 .send()

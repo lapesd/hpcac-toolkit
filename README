@@ -18,23 +18,8 @@ Run this the following to get help with the available commands:
 cargo run -- help
 
 The first thing you'll want to do is probably to set up provider credentials with the provider-config command.
-Currently two providers are supported: vultr and AWS.
+Currently two providers are supported: Vultr and AWS.
 To fetch your credentials, follow each documentation:
 
 Creating AWS access keys: https://docs.aws.amazon.com/keyspaces/latest/devguide/create.keypair.html
 Creating a Vultr API key: https://docs.vultr.com/platform/other/api/regenerate-user-api-key
-
-# Cloud Interface Implementation
-
-The table below presents the current state of the cloud provider integration into HPC@Cloud Toolkit CLI.
-
-| Function               |  AWS  | Vultr |
-|------------------------|:-----:|:-----:|
-| `fetch_regions`        |  YES  |  YES  |
-| `fetch_zones`          |  YES  |  YES  |
-| `fetch_instance_types` |  YES  |  YES  |
-| `fetch_prices`         |  YES  |  YES  |
-| `fetch_machine_image`  |  YES  |   -   |
-| `spawn_cluster`        |   -   |   -   |
-| `despawn_cluster`      |   -   |   -   |
-| `run_task`             |   -   |   -   |

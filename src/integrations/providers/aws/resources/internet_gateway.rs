@@ -7,7 +7,7 @@ impl AwsInterface {
     pub async fn ensure_internet_gateway(&self, context: &AwsClusterContext) -> Result<String> {
         let context_vpc_id = context.vpc_id.as_ref().unwrap();
         let describe_internet_gateways_response = match context
-            .client
+            .ec2_client
             .describe_internet_gateways()
             .filters(context.cluster_id_filter.clone())
             .send()
@@ -48,7 +48,7 @@ impl AwsInterface {
                     gateway_id, context_vpc_id
                 );
                 match context
-                    .client
+                    .ec2_client
                     .attach_internet_gateway()
                     .internet_gateway_id(gateway_id)
                     .vpc_id(context_vpc_id)
@@ -73,7 +73,7 @@ impl AwsInterface {
         info!("No existing Internet Gateway found, creating a new one...");
 
         let create_internet_gateway_response = match context
-            .client
+            .ec2_client
             .create_internet_gateway()
             .tag_specifications(
                 aws_sdk_ec2::types::TagSpecification::builder()
@@ -107,7 +107,7 @@ impl AwsInterface {
                 gateway_id, context_vpc_id
             );
             match context
-                .client
+                .ec2_client
                 .attach_internet_gateway()
                 .internet_gateway_id(gateway_id)
                 .vpc_id(context_vpc_id)
@@ -134,7 +134,7 @@ impl AwsInterface {
 
     pub async fn cleanup_internet_gateway(&self, context: &AwsClusterContext) -> Result<()> {
         let describe_gateways_response = match context
-            .client
+            .ec2_client
             .describe_internet_gateways()
             .filters(context.cluster_id_filter.clone())
             .send()
@@ -162,7 +162,7 @@ impl AwsInterface {
                             gateway_id, attached_vpc_id
                         );
                         match context
-                            .client
+                            .ec2_client
                             .detach_internet_gateway()
                             .internet_gateway_id(gateway_id)
                             .vpc_id(attached_vpc_id)
@@ -185,7 +185,7 @@ impl AwsInterface {
 
                 info!("Deleting Internet Gateway '{}'...", gateway_id);
                 match context
-                    .client
+                    .ec2_client
                     .delete_internet_gateway()
                     .internet_gateway_id(gateway_id)
                     .send()

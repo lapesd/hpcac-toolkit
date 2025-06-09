@@ -12,7 +12,7 @@ impl AwsInterface {
         let eip_name = context.elastic_ip_name(node_index);
 
         let describe_elastic_ips_response = match context
-            .client
+            .ec2_client
             .describe_addresses()
             .filters(
                 aws_sdk_ec2::types::Filter::builder()
@@ -43,7 +43,7 @@ impl AwsInterface {
         );
 
         let create_elastic_ip_response = match context
-            .client
+            .ec2_client
             .allocate_address()
             .domain(aws_sdk_ec2::types::DomainType::Vpc)
             .tag_specifications(
@@ -88,7 +88,7 @@ impl AwsInterface {
         let eip_name = context.elastic_ip_name(node_index);
 
         let describe_elastic_ips_response = match context
-            .client
+            .ec2_client
             .describe_addresses()
             .filters(
                 aws_sdk_ec2::types::Filter::builder()
@@ -128,7 +128,7 @@ impl AwsInterface {
         );
 
         let describe_eip_allocation_response = match context
-            .client
+            .ec2_client
             .describe_addresses()
             .allocation_ids(&allocation_id)
             .send()
@@ -152,7 +152,7 @@ impl AwsInterface {
                 );
 
                 match context
-                    .client
+                    .ec2_client
                     .disassociate_address()
                     .association_id(association_id)
                     .send()
@@ -179,7 +179,7 @@ impl AwsInterface {
         );
 
         match context
-            .client
+            .ec2_client
             .release_address()
             .allocation_id(&allocation_id)
             .send()
@@ -203,7 +203,7 @@ impl AwsInterface {
         eni_id: &str,
     ) -> Result<()> {
         let describe_eip_response = match context
-            .client
+            .ec2_client
             .describe_addresses()
             .allocation_ids(eip_id)
             .send()
@@ -234,7 +234,7 @@ impl AwsInterface {
         );
 
         let associate_eip_with_eni_response = match context
-            .client
+            .ec2_client
             .associate_address()
             .allocation_id(eip_id)
             .network_interface_id(eni_id)

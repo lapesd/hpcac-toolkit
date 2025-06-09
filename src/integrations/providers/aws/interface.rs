@@ -5,16 +5,20 @@ use aws_config::{BehaviorVersion, Region, SdkConfig};
 use aws_credential_types::{Credentials, provider::SharedCredentialsProvider};
 use aws_sdk_ec2::Client as Ec2Client;
 use aws_sdk_efs::Client as EfsClient;
+use aws_sdk_iam::Client as IamClient;
 use aws_sdk_pricing::Client as PricingClient;
 use aws_sdk_servicequotas::Client as ServiceQuotasClient;
+use aws_sdk_ssm::Client as SsmClient;
 use std::collections::HashMap;
 
 /// Context struct containing all cluster-related information and resource identifiers
 /// used throughout the cluster lifecycle operations
 pub struct AwsClusterContext {
     // AWS SDK Clients
-    pub client: Ec2Client,
+    pub ec2_client: Ec2Client,
     pub efs_client: EfsClient,
+    pub ssm_client: SsmClient,
+    pub iam_client: IamClient,
 
     // Core cluster information for tagging and filtering
     pub cluster_id: String,
@@ -30,6 +34,7 @@ pub struct AwsClusterContext {
     pub placement_group_name: String,
     pub ssh_key_name: String,
     pub efs_device_name: String,
+    pub iam_role_name: String,
 
     // Resource identifiers (populated during creation/discovery)
     pub vpc_id: Option<String>,
@@ -55,8 +60,14 @@ pub struct AwsClusterContext {
 }
 
 impl AwsClusterContext {
-    /// Create a new ClusterContext from a Cluster and EC2Client
-    pub fn new(cluster: &Cluster, client: Ec2Client, efs_client: EfsClient) -> Self {
+    /// Create a new ClusterContext from a Cluster and AWS clients
+    pub fn new(
+        cluster: &Cluster,
+        ec2_client: Ec2Client,
+        efs_client: EfsClient,
+        ssm_client: SsmClient,
+        iam_client: IamClient,
+    ) -> Self {
         let cluster_id = cluster.id.to_string();
         let cluster_id_tag = aws_sdk_ec2::types::Tag::builder()
             .key("ClusterId")
@@ -71,8 +82,10 @@ impl AwsClusterContext {
             cluster_id: cluster_id.clone(),
             cluster_id_tag,
             cluster_id_filter,
-            client,
+            ec2_client,
             efs_client,
+            ssm_client,
+            iam_client,
 
             // Generate resource names
             vpc_name: format!("{}-VPC", cluster_id),
@@ -83,6 +96,7 @@ impl AwsClusterContext {
             placement_group_name: format!("{}-PG", cluster_id),
             ssh_key_name: format!("{}-KEY", cluster_id),
             efs_device_name: format!("{}-EFS", cluster_id),
+            iam_role_name: format!("{}-IAM-ROLE", cluster_id),
 
             // Initialize resource IDs as None/empty
             vpc_id: None,
@@ -173,6 +187,18 @@ impl AwsInterface {
         Ok(EfsClient::new(&config))
     }
 
+    /// Get an IAM client configured with the provided credentials and region.
+    pub fn get_iam_client(&self, region: &str) -> Result<IamClient> {
+        let config = self.get_config(region)?;
+        Ok(IamClient::new(&config))
+    }
+
+    /// Get an SSM client configured with the provided credentials and region.
+    pub fn get_ssm_client(&self, region: &str) -> Result<SsmClient> {
+        let config = self.get_config(region)?;
+        Ok(SsmClient::new(&config))
+    }
+
     /// Get a Pricing client configured with the provided credentials and region.
     pub fn get_pricing_client(&self) -> Result<PricingClient> {
         let config = self.get_config("us-east-1")?;
@@ -187,8 +213,12 @@ impl AwsInterface {
 
     /// Create a ClusterContext for the given cluster
     pub fn create_cluster_context(&self, cluster: &Cluster) -> Result<AwsClusterContext> {
-        let client = self.get_ec2_client(&cluster.region)?;
+        let ec2_client = self.get_ec2_client(&cluster.region)?;
         let efs_client = self.get_efs_client(&cluster.region)?;
-        Ok(AwsClusterContext::new(cluster, client, efs_client))
+        let ssm_client = self.get_ssm_client(&cluster.region)?;
+        let iam_client = self.get_iam_client(&cluster.region)?;
+        Ok(AwsClusterContext::new(
+            cluster, ec2_client, efs_client, ssm_client, iam_client,
+        ))
     }
 }

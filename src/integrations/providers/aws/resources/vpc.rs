@@ -6,7 +6,7 @@ use tracing::{error, info, warn};
 impl AwsInterface {
     pub async fn ensure_vpc(&self, context: &AwsClusterContext) -> Result<String> {
         let describe_vpcs_response = match context
-            .client
+            .ec2_client
             .describe_vpcs()
             .filters(context.cluster_id_filter.clone())
             .send()
@@ -30,9 +30,10 @@ impl AwsInterface {
         info!("No existing VPC found, creating a new one...");
 
         let create_vpc_response = match context
-            .client
+            .ec2_client
             .create_vpc()
             .cidr_block(context.vpc_cidr_block.clone())
+            .amazon_provided_ipv6_cidr_block(false)
             // TODO: Evaluate the possibility of using Dedicated tenancy
             .instance_tenancy(aws_sdk_ec2::types::Tenancy::Default)
             .tag_specifications(
@@ -59,6 +60,48 @@ impl AwsInterface {
 
         if let Some(vpc_id) = create_vpc_response.vpc().and_then(|vpc| vpc.vpc_id()) {
             info!("Created new VPC '{}'", vpc_id);
+            match context
+                .ec2_client
+                .modify_vpc_attribute()
+                .vpc_id(vpc_id)
+                .enable_dns_hostnames(
+                    aws_sdk_ec2::types::AttributeBooleanValue::builder()
+                        .value(true)
+                        .build(),
+                )
+                .send()
+                .await
+            {
+                Ok(_) => {
+                    info!("Enabled DNS hostnames for VPC (id='{}')", vpc_id);
+                }
+                Err(e) => {
+                    error!("{:?}", e);
+                    bail!("Failure enabling DNS hostnames for VPC (id='{}')", vpc_id);
+                }
+            };
+
+            match context
+                .ec2_client
+                .modify_vpc_attribute()
+                .vpc_id(vpc_id)
+                .enable_dns_support(
+                    aws_sdk_ec2::types::AttributeBooleanValue::builder()
+                        .value(true)
+                        .build(),
+                )
+                .send()
+                .await
+            {
+                Ok(_) => {
+                    info!("Enabled DNS support for VPC (id='{}')", vpc_id);
+                }
+                Err(e) => {
+                    error!("{:?}", e);
+                    bail!("Failure enabling DNS support for VPC (id='{}')", vpc_id);
+                }
+            }
+
             return Ok(vpc_id.to_string());
         }
 
@@ -68,7 +111,7 @@ impl AwsInterface {
 
     pub async fn cleanup_vpc(&self, context: &AwsClusterContext) -> Result<()> {
         let describe_vpcs_response = match context
-            .client
+            .ec2_client
             .describe_vpcs()
             .filters(context.cluster_id_filter.clone())
             .send()
@@ -86,7 +129,7 @@ impl AwsInterface {
             if let Some(vpc_id) = vpc.vpc_id() {
                 info!("Found existing VPC to cleanup: '{}'", vpc_id);
                 info!("Deleting VPC '{}'...", vpc_id);
-                match context.client.delete_vpc().vpc_id(vpc_id).send().await {
+                match context.ec2_client.delete_vpc().vpc_id(vpc_id).send().await {
                     Ok(_) => {
                         info!("VPC '{}' deleted successfully", vpc_id);
                         return Ok(());

@@ -6,7 +6,7 @@ use tracing::{error, info, warn};
 impl AwsInterface {
     pub async fn ensure_subnet(&self, context: &AwsClusterContext) -> Result<String> {
         let describe_subnets_response = match context
-            .client
+            .ec2_client
             .describe_subnets()
             .filters(context.cluster_id_filter.clone())
             .send()
@@ -30,7 +30,7 @@ impl AwsInterface {
         info!("No existing Subnet found, creating a new one...");
 
         let create_subnet_response = match context
-            .client
+            .ec2_client
             .create_subnet()
             .vpc_id(context.vpc_id.as_ref().unwrap())
             .cidr_block(context.subnet_cidr_block.clone())
@@ -71,7 +71,7 @@ impl AwsInterface {
 
     pub async fn cleanup_subnet(&self, context: &AwsClusterContext) -> Result<()> {
         let describe_subnets_response = match context
-            .client
+            .ec2_client
             .describe_subnets()
             .filters(context.cluster_id_filter.clone())
             .send()
@@ -90,7 +90,7 @@ impl AwsInterface {
                 info!("Found existing Subnet to cleanup: '{}'", subnet_id);
                 info!("Deleting Subnet '{}'...", subnet_id);
                 match context
-                    .client
+                    .ec2_client
                     .delete_subnet()
                     .subnet_id(subnet_id)
                     .send()

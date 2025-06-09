@@ -7,7 +7,7 @@ use tracing::{error, info, warn};
 impl AwsInterface {
     pub async fn ensure_ssh_key(&self, context: &AwsClusterContext) -> Result<String> {
         let describe_key_pairs_response = match context
-            .client
+            .ec2_client
             .describe_key_pairs()
             .filters(context.cluster_id_filter.clone())
             .send()
@@ -42,7 +42,7 @@ impl AwsInterface {
         };
 
         let import_key_pair_response = match context
-            .client
+            .ec2_client
             .import_key_pair()
             .key_name(context.ssh_key_name.clone())
             .public_key_material(aws_sdk_ec2::primitives::Blob::new(
@@ -81,7 +81,7 @@ impl AwsInterface {
 
     pub async fn cleanup_ssh_key(&self, context: &AwsClusterContext) -> Result<()> {
         let describe_key_pairs_response = match context
-            .client
+            .ec2_client
             .describe_key_pairs()
             .filters(context.cluster_id_filter.clone())
             .send()
@@ -101,7 +101,7 @@ impl AwsInterface {
 
                 info!("Deleting SSH Key '{}'...", key_id);
                 match context
-                    .client
+                    .ec2_client
                     .delete_key_pair()
                     .key_pair_id(key_id)
                     .send()

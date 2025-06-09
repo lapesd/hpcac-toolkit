@@ -10,7 +10,7 @@ impl AwsInterface {
         let context_subnet_id = context.subnet_id.as_ref().unwrap();
 
         let describe_route_tables_response = match context
-            .client
+            .ec2_client
             .describe_route_tables()
             .filters(context.cluster_id_filter.clone())
             .send()
@@ -55,7 +55,7 @@ impl AwsInterface {
                                 route_table_id, context_subnet_id
                             );
                             match context
-                                .client
+                                .ec2_client
                                 .associate_route_table()
                                 .route_table_id(route_table_id)
                                 .subnet_id(context_subnet_id)
@@ -103,7 +103,7 @@ impl AwsInterface {
                                 context_gateway_id, route_table_id
                             );
                             match context
-                                .client
+                                .ec2_client
                                 .create_route()
                                 .route_table_id(route_table_id)
                                 .destination_cidr_block("0.0.0.0/0")
@@ -143,7 +143,7 @@ impl AwsInterface {
         info!("No existing Route Table found, creating a new one...");
 
         let create_route_table_response = match context
-            .client
+            .ec2_client
             .create_route_table()
             .vpc_id(context_vpc_id)
             .tag_specifications(
@@ -178,7 +178,7 @@ impl AwsInterface {
                 route_table_id, context_subnet_id
             );
             match context
-                .client
+                .ec2_client
                 .associate_route_table()
                 .route_table_id(route_table_id)
                 .subnet_id(context_subnet_id)
@@ -206,7 +206,7 @@ impl AwsInterface {
                 context_gateway_id, route_table_id,
             );
             match context
-                .client
+                .ec2_client
                 .create_route()
                 .route_table_id(route_table_id)
                 .destination_cidr_block("0.0.0.0/0")
@@ -239,7 +239,7 @@ impl AwsInterface {
 
     pub async fn cleanup_route_table(&self, context: &AwsClusterContext) -> Result<()> {
         let describe_route_tables_response = match context
-            .client
+            .ec2_client
             .describe_route_tables()
             .filters(context.cluster_id_filter.clone())
             .send()
@@ -268,7 +268,7 @@ impl AwsInterface {
                     if let Some(association_id) = association.route_table_association_id() {
                         info!("Deleting Route Table association '{}'...", association_id);
                         match context
-                            .client
+                            .ec2_client
                             .disassociate_route_table()
                             .association_id(association_id)
                             .send()
@@ -290,7 +290,7 @@ impl AwsInterface {
 
                 info!("Deleting Route Table '{}'...", route_table_id);
                 match context
-                    .client
+                    .ec2_client
                     .delete_route_table()
                     .route_table_id(route_table_id)
                     .send()
