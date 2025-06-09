@@ -129,6 +129,47 @@ impl AwsInterface {
         let role_name = context.iam_role_name.clone();
         info!("Cleaning up IAM Role (name='{}')...", role_name);
 
+        match context
+            .iam_client
+            .get_role()
+            .role_name(&role_name)
+            .send()
+            .await
+        {
+            Ok(response) => {
+                if let Some(role) = response.role() {
+                    let iam_role_id = role.role_id();
+                    info!(
+                        "Found existing IAM Role (id='{}'), proceeding with deletion...",
+                        iam_role_id
+                    );
+                } else {
+                    info!(
+                        "IAM Role (name='{}') does not exist, skipping deletion...",
+                        role_name
+                    );
+                    return Ok(());
+                }
+            }
+            Err(SdkError::ServiceError(service_err)) => match service_err.err() {
+                GetRoleError::NoSuchEntityException(_) => {
+                    info!(
+                        "IAM Role (name='{}') does not exist, skipping deletion...",
+                        role_name
+                    );
+                    return Ok(());
+                }
+                _ => {
+                    error!("{:?}", service_err);
+                    bail!("Failure describing IAM Role '{}'", role_name);
+                }
+            },
+            Err(e) => {
+                error!("{:?}", e);
+                bail!("Failure describing IAM Role '{}'", role_name);
+            }
+        }
+
         let _detach_ssm_policy_from_iam_role_response = match context
             .iam_client
             .detach_role_policy()
