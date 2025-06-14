@@ -19,6 +19,7 @@ nodes:
     burstable_mode: Unlimited # Unlimited or Standard
     image_id: ami-0845a3d4093ba6e49
     init_commands:
+      - ls
   - instance_type: m5.2xlarge
     allocation_mode: on-demand
     image_id: ami-0845a3d4093ba6e49
