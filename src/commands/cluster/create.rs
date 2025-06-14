@@ -290,8 +290,14 @@ pub async fn create(
         let burstable_mode = match &node_definition.burstable_mode {
             Some(burstable_mode) => match instance_type_details.is_burstable {
                 true => {
-                    // TODO: validate if the burstable_mode string matches a supported burstable
-                    // performance mode.
+                    let valid_modes = ["unlimited", "standard"];
+                    if !valid_modes.contains(&burstable_mode.to_lowercase().as_str()) {
+                        anyhow::bail!(
+                            "Invalid burstable mode '{}' specified for node '{}'.\
+                            The instance type '{}' in region '{}' only supports the following burstale modes: {}",
+                            burstable_mode, i+1, &instance_type_name, &region, valid_modes.join(", ")
+                        )
+                    }
                     Some(burstable_mode)
                 }
                 false => {
