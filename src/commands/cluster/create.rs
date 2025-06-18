@@ -292,7 +292,7 @@ pub async fn create(
                 true => {
                     let valid_modes = ["unlimited", "standard"];
                     if !valid_modes.contains(&burstable_mode.to_lowercase().as_str()) {
-                        anyhow::bail!(
+                        bail!(
                             "Invalid burstable mode '{}' specified for node '{}'.\
                             The instance type '{}' in region '{}' only supports the following burstale modes: {}",
                             burstable_mode, i+1, &instance_type_name, &region, valid_modes.join(", ")
