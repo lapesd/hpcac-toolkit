@@ -114,6 +114,14 @@ impl AwsInterface {
                     .build(),
             );
 
+
+        if let Some(burstable_mode) = &node.burstable_mode {
+            let credit_spec = aws_sdk_ec2::types::CreditSpecificationRequest::builder()
+                .cpu_credits(burstable_mode.to_lowercase())
+                .build();
+            run_instances_request = run_instances_request.credit_specification(credit_spec);
+        } 
+
         if context.use_node_affinity {
             if let Some(placement_group_name) = &context.placement_group_name_actual {
                 run_instances_request = run_instances_request.placement(
