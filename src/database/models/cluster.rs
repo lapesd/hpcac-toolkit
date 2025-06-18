@@ -1,10 +1,59 @@
 use crate::database::models::{InstanceType, Node, ProviderConfig, ShellCommand};
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
-use sqlx::sqlite::SqlitePool;
-use tracing::{debug, error};
+use sqlx::{Type, sqlite::SqlitePool};
+use tracing::{error, info, warn};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, Default)]
+#[sqlx(type_name = "TEXT")]
+#[serde(rename_all = "snake_case")]
+pub enum ClusterState {
+    #[default]
+    #[sqlx(rename = "pending")]
+    Pending,
+    #[sqlx(rename = "spawning")]
+    Spawning,
+    #[sqlx(rename = "running")]
+    Running,
+    #[sqlx(rename = "terminating")]
+    Terminating,
+    #[sqlx(rename = "terminated")]
+    Terminated,
+    #[sqlx(rename = "failed")]
+    Failed,
+}
+
+impl std::fmt::Display for ClusterState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let state_str = match self {
+            ClusterState::Pending => "pending",
+            ClusterState::Spawning => "spawning",
+            ClusterState::Running => "running",
+            ClusterState::Terminating => "terminating",
+            ClusterState::Terminated => "terminated",
+            ClusterState::Failed => "failed",
+        };
+        write!(f, "{}", state_str)
+    }
+}
+
+impl std::str::FromStr for ClusterState {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "pending" => Ok(ClusterState::Pending),
+            "spawning" => Ok(ClusterState::Spawning),
+            "running" => Ok(ClusterState::Running),
+            "terminating" => Ok(ClusterState::Terminating),
+            "terminated" => Ok(ClusterState::Terminated),
+            "failed" => Ok(ClusterState::Failed),
+            _ => Err(format!("Invalid cluster state: '{}'", s)),
+        }
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Cluster {
@@ -20,6 +69,7 @@ pub struct Cluster {
     pub use_elastic_fabric_adapters: bool,
     pub use_elastic_file_system: bool,
     pub created_at: NaiveDateTime,
+    pub state: ClusterState,
 }
 
 impl Cluster {
@@ -29,7 +79,7 @@ impl Cluster {
                 Some(config) => config,
                 None => {
                     error!("Missing ProviderConfig '{}'", self.provider_config_id);
-                    anyhow::bail!("Data Consistency Failure");
+                    bail!("Data Consistency Failure");
                 }
             };
 
@@ -67,7 +117,7 @@ impl Cluster {
                 Some(instance_type) => instance_type,
                 None => {
                     error!("Missing InstanceType '{}'", instance_type_name);
-                    anyhow::bail!("Data Consistency Failure");
+                    bail!("Data Consistency Failure");
                 }
             };
 
@@ -126,7 +176,8 @@ impl Cluster {
                     use_node_affinity,
                     use_elastic_fabric_adapters,
                     use_elastic_file_system,
-                    created_at
+                    created_at,
+                    state as "state: ClusterState"
                 FROM clusters
                 WHERE id = ?
             "#,
@@ -137,8 +188,8 @@ impl Cluster {
         {
             Ok(result) => result,
             Err(e) => {
-                error!("SQLx Error: {}", e.to_string());
-                anyhow::bail!("DB Operation Failure");
+                error!("SQLx Error: {:?}", e);
+                bail!("DB Operation Failure");
             }
         };
 
@@ -161,7 +212,8 @@ impl Cluster {
                     use_node_affinity,
                     use_elastic_fabric_adapters,
                     use_elastic_file_system,
-                    created_at
+                    created_at,
+                    state as "state: ClusterState"
                 FROM clusters
             "#,
         )
@@ -170,8 +222,8 @@ impl Cluster {
         {
             Ok(result) => result,
             Err(e) => {
-                error!("SQLx Error: {}", e.to_string());
-                anyhow::bail!("DB Operation Failure");
+                error!("SQLx Error: {:?}", e);
+                bail!("DB Operation Failure");
             }
         };
 
@@ -184,7 +236,7 @@ impl Cluster {
         nodes: Vec<Node>,
         commands: Vec<ShellCommand>,
     ) -> Result<()> {
-        debug!(
+        info!(
             "Starting cluster insertion transaction for cluster_id: {}",
             self.id
         );
@@ -192,13 +244,12 @@ impl Cluster {
         let mut tx = match pool.begin().await {
             Ok(result) => result,
             Err(e) => {
-                error!("Failed to begin transaction: {}", e.to_string());
-                anyhow::bail!("DB Operation Failure");
+                error!("SQLx Error: {:?}", e);
+                bail!("DB Operation Failure");
             }
         };
 
-        // Insert the cluster first using the transaction
-        debug!("Inserting cluster with id: {}", self.id);
+        info!("Inserting Cluster (id='{}')", self.id);
         match sqlx::query!(
             r#"
                 INSERT INTO clusters (
@@ -213,9 +264,10 @@ impl Cluster {
                     use_node_affinity,
                     use_elastic_fabric_adapters,
                     use_elastic_file_system,
-                    created_at
+                    created_at,
+                    state
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
             self.id,
             self.display_name,
@@ -229,47 +281,45 @@ impl Cluster {
             self.use_elastic_fabric_adapters,
             self.use_elastic_file_system,
             self.created_at,
+            self.state,
         )
         .execute(&mut *tx)
         .await
         {
             Ok(_) => {
-                debug!("Successfully inserted cluster with id: {}", self.id);
+                info!("Successfully inserted cluster with id: {}", self.id);
             }
             Err(e) => {
-                error!("Failed to insert cluster: {}", e.to_string());
-                anyhow::bail!("DB Operation Failure: Cluster insertion failed");
+                error!("SQLx Error: {:?}", e);
+                bail!("DB Operation Failure");
             }
         };
 
-        debug!("Inserting {} nodes", nodes.len());
+        info!("Inserting {} Nodes", nodes.len());
         for (i, node) in nodes.iter().enumerate() {
-            debug!(
-                "Inserting node {}/{} with id: {}, cluster_id: {}",
+            info!(
+                "Inserting Node (id='{}') {} of {} for Cluster (id='{}')",
+                node.id,
                 i + 1,
                 nodes.len(),
-                node.id,
-                node.cluster_id
+                node.cluster_id,
             );
 
             if node.cluster_id != self.id {
                 error!(
-                    "Node {} has cluster_id {} but we're inserting cluster {}",
+                    "Node (id='{}') has cluster_id '{}' but we're inserting Cluster (id='{}')",
                     node.id, node.cluster_id, self.id
                 );
-                anyhow::bail!("Node cluster_id mismatch");
+                bail!("DB Operation Failure");
             }
 
-            if let Err(e) = node.insert(&mut tx).await {
-                error!("Failed to insert node {}: {}", node.id, e);
-                return Err(e);
-            }
+            node.insert(&mut tx).await?;
         }
 
-        debug!("Inserting {} commands", commands.len());
+        info!("Inserting {} Commands", commands.len());
         for (i, command) in commands.iter().enumerate() {
-            debug!(
-                "Inserting command {}/{} for node_id: {}",
+            info!(
+                "Inserting Command {} of {} for Node: (id='{}')",
                 i + 1,
                 commands.len(),
                 command.node_id
@@ -277,26 +327,132 @@ impl Cluster {
 
             if !nodes.iter().any(|n| n.id == command.node_id) {
                 error!(
-                    "Command references node_id {} which is not in our nodes list",
+                    "Command references Node (id='{}') which is not in our nodes list",
                     command.node_id
                 );
-                anyhow::bail!("Command references non-existent node");
+                bail!("DB Operation Failure");
             }
 
-            if let Err(e) = command.insert(&mut tx).await {
-                error!("Failed to insert command: {}", e);
-                return Err(e);
-            }
+            command.insert(&mut tx).await?;
         }
 
-        debug!("Committing transaction");
+        info!("Committing transaction");
         match tx.commit().await {
             Ok(_) => {
-                debug!("Transaction committed successfully");
+                info!("Transaction committed successfully");
             }
             Err(e) => {
-                error!("Failed to commit transaction: {}", e.to_string());
-                anyhow::bail!("DB Operation Failure: Transaction commit failed");
+                error!("SQLx Error: {:?}", e);
+                bail!("DB Operation Failure");
+            }
+        };
+
+        Ok(())
+    }
+
+    pub async fn delete(pool: &SqlitePool, cluster_id: &str) -> Result<()> {
+        info!("Starting deletion of Cluster (id='{}')", cluster_id);
+
+        let mut tx = match pool.begin().await {
+            Ok(result) => result,
+            Err(e) => {
+                error!("SQLx Error: {:?}", e);
+                bail!("DB Operation Failure");
+            }
+        };
+
+        // First, delete all commands associated with nodes in this cluster
+        info!("Deleting commands for Cluster (id='{}')", cluster_id);
+        match sqlx::query!(
+            r#"
+                DELETE FROM shell_commands 
+                WHERE node_id IN (
+                    SELECT id FROM nodes WHERE cluster_id = ?
+                )
+            "#,
+            cluster_id
+        )
+        .execute(&mut *tx)
+        .await
+        {
+            Ok(result) => {
+                info!(
+                    "Deleted {} commands for Cluster (id='{}')",
+                    result.rows_affected(),
+                    cluster_id
+                );
+            }
+            Err(e) => {
+                error!("SQLx Error: {:?}", e);
+                bail!("DB Operation Failure");
+            }
+        };
+
+        // Then, delete all nodes associated with this cluster
+        info!("Deleting nodes for Cluster (id='{}')", cluster_id);
+        match sqlx::query!(
+            r#"
+                DELETE FROM nodes 
+                WHERE cluster_id = ?
+            "#,
+            cluster_id
+        )
+        .execute(&mut *tx)
+        .await
+        {
+            Ok(result) => {
+                info!(
+                    "Deleted {} nodes for Cluster (id='{}')",
+                    result.rows_affected(),
+                    cluster_id
+                );
+            }
+            Err(e) => {
+                error!("SQLx Error: {:?}", e);
+                bail!("DB Operation Failure");
+            }
+        };
+
+        // Finally, delete the cluster itself
+        info!("Deleting Cluster (id='{}')", cluster_id);
+        match sqlx::query!(
+            r#"
+                DELETE FROM clusters 
+                WHERE id = ?
+            "#,
+            cluster_id
+        )
+        .execute(&mut *tx)
+        .await
+        {
+            Ok(result) => {
+                if result.rows_affected() == 0 {
+                    warn!("No cluster found with id '{}' for deletion", cluster_id);
+                    bail!("Cluster not found");
+                }
+                info!("Successfully deleted Cluster (id='{}')", cluster_id);
+            }
+            Err(e) => {
+                error!("SQLx Error: {:?}", e);
+                bail!("DB Operation Failure");
+            }
+        };
+
+        // Commit the transaction
+        info!(
+            "Committing deletion transaction for Cluster (id='{}')",
+            cluster_id
+        );
+        match tx.commit().await {
+            Ok(_) => {
+                info!(
+                    "Successfully deleted Cluster (id='{}') and all associated data",
+                    cluster_id
+                );
+            }
+            Err(e) => {
+                error!("SQLx Error: {:?}", e);
+                bail!("DB Operation Failure");
             }
         };
 
@@ -327,11 +483,56 @@ impl Cluster {
         {
             Ok(result) => result,
             Err(e) => {
-                error!("{}", e.to_string());
-                anyhow::bail!("DB Operation Failure")
+                error!("SQLx Error: {:?}", e);
+                bail!("DB Operation Failure");
             }
         };
 
         Ok(nodes)
+    }
+
+    pub async fn update_cluster_state(
+        pool: &SqlitePool,
+        cluster_id: &str,
+        new_state: ClusterState,
+    ) -> Result<()> {
+        info!(
+            "Transitioning Cluster (id='{}') to state '{}'",
+            cluster_id, new_state
+        );
+
+        match sqlx::query!(
+            r#"
+                UPDATE clusters 
+                SET state = ? 
+                WHERE id = ?
+            "#,
+            new_state,
+            cluster_id
+        )
+        .execute(pool)
+        .await
+        {
+            Ok(result) => {
+                if result.rows_affected() == 0 {
+                    error!(
+                        "No cluster found with id '{}' for state transition",
+                        cluster_id
+                    );
+                    bail!("DB Operation Failure");
+                }
+
+                info!(
+                    "Successfully transitioned Cluster (id='{}') to '{}'",
+                    cluster_id, new_state
+                );
+            }
+            Err(e) => {
+                error!("SQLx Error: {:?}", e);
+                bail!("DB Operation Failure");
+            }
+        }
+
+        Ok(())
     }
 }

@@ -1,5 +1,5 @@
 use crate::database::models::{
-    Cluster, InstanceType, Node, Provider, ProviderConfig, ShellCommand,
+    Cluster, ClusterState, InstanceType, Node, Provider, ProviderConfig, ShellCommand,
 };
 use crate::integrations::{cloud_interface::CloudInfoProvider, providers::aws::AwsInterface};
 use crate::utils;
@@ -351,30 +351,31 @@ pub async fn create(
     }
     nodes_tracker.finish_with_message(&format!("Validated {} nodes", node_count));
 
-    println!("\n{:<40}: {}", "Cluster Name", cluster_yaml.display_name);
-    println!("{:<40}: {}", "Provider", provider_config.provider_id);
-    println!("{:<40}: {}", "Region", region);
+    // TODO: find a way to remove the code duplication here and in `database/models/cluster.rs`
+    println!("\n{:<35}: {}", "Cluster Name", cluster_yaml.display_name);
+    println!("{:<35}: {}", "Provider", provider_config.provider_id);
+    println!("{:<35}: {}", "Region", region);
     println!(
-        "{:<40}: {}",
+        "{:<35}: {}",
         "Availability Zone", cluster_yaml.availability_zone
     );
     println!(
-        "{:<40}: {}",
+        "{:<35}: {}",
         "Use Node Affinity", cluster_yaml.use_node_affinity
     );
     println!(
-        "{:<40}: {}",
+        "{:<35}: {}",
         "Use Elastic Fabric Adapters (EFAs)", cluster_yaml.use_elastic_fabric_adapters
     );
     println!(
-        "{:<40}: {}",
+        "{:<35}: {}",
         "Use Elastic File System (EFS)", cluster_yaml.use_elastic_file_system
     );
     println!(
-        "{:<40}: {}",
+        "{:<35}: {}",
         "Provider Config", provider_config.display_name
     );
-    println!("{:<40}: {}\n", "Node Count", cluster_yaml.nodes.len());
+    println!("{:<35}: {}\n", "Node Count", cluster_yaml.nodes.len());
 
     println!("Node Details:");
     for (i, node) in cluster_yaml.nodes.iter().enumerate() {
@@ -444,6 +445,7 @@ pub async fn create(
         use_elastic_fabric_adapters: cluster_yaml.use_elastic_fabric_adapters,
         use_elastic_file_system: cluster_yaml.use_elastic_file_system,
         created_at: Utc::now().naive_utc(),
+        state: ClusterState::Pending,
     };
     cluster
         .insert(pool, nodes_to_insert, commands_to_insert)

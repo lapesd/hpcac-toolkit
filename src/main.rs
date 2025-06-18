@@ -1,8 +1,9 @@
-use anyhow::bail;
+use anyhow::{Result, bail};
+use chrono::Utc;
 use clap::{Parser, Subcommand};
 use sqlx::sqlite::SqlitePool;
 use std::fs::OpenOptions;
-use tracing::error;
+use tracing::{error, info};
 
 mod commands;
 mod constants;
@@ -52,9 +53,16 @@ enum ClusterCommands {
         yes: bool,
     },
 
-    /// Destroy a new Cluster
-    Destroy {
-        /// Name of the Cluster to destroy
+    /// Delete a Cluster
+    Delete {
+        /// Identifier of the Cluster to delete
+        #[arg(long)]
+        cluster_id: String,
+    },
+
+    /// Terminates a new Cluster
+    Terminate {
+        /// Identifier of the Cluster to terminate
         #[arg(long)]
         cluster_id: String,
 
@@ -68,7 +76,7 @@ enum ClusterCommands {
 
     /// Spawn a new Cluster
     Spawn {
-        /// Name of the Cluster to spawn
+        /// Identifier of the Cluster to spawn
         #[arg(long)]
         cluster_id: String,
 
@@ -168,15 +176,27 @@ enum ProviderConfigCommands {
 }
 
 #[tokio::main(flavor = "current_thread")]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<()> {
     // Read environment variables
     dotenvy::dotenv().ok();
 
-    // Setup logging
+    // Setup logger, file directory and tracing subscriber
+    let logs_directory = match std::env::var("LOGS_DIRECTORY") {
+        Ok(result) => result,
+        Err(_) => {
+            println!("LOGS_DIRECTORY environment variable not set, using default.");
+            "./logs".to_string()
+        }
+    };
+
     let log_file = OpenOptions::new()
         .create(true)
         .append(true)
-        .open("hpcac-toolkit.log")
+        .open(format!(
+            "{}/{}.log",
+            logs_directory,
+            Utc::now().format("%Y-%m-%d")
+        ))
         .expect("Failed to open log file");
 
     tracing_subscriber::fmt()
@@ -192,7 +212,7 @@ async fn main() -> anyhow::Result<()> {
         Ok(result) => result,
         Err(_) => {
             println!("DATABASE_URL environment variable not set, using default.");
-            String::from("sqlite://db.sqlite")
+            "sqlite://db.sqlite".to_string()
         }
     };
 
@@ -206,6 +226,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     // Match clap commands and pass the SQLite pool to the command handlers
+    info!("Invoked command: {:?}", cli.command);
     match &cli.command {
         Commands::Cluster { command } => match command {
             ClusterCommands::Create {
@@ -214,8 +235,11 @@ async fn main() -> anyhow::Result<()> {
             } => {
                 commands::cluster::create(&sqlite_pool, yaml_file_path, *yes).await?;
             }
-            ClusterCommands::Destroy { cluster_id, yes } => {
-                commands::cluster::destroy(&sqlite_pool, cluster_id, *yes).await?;
+            ClusterCommands::Delete { cluster_id } => {
+                commands::cluster::delete(&sqlite_pool, cluster_id).await?;
+            }
+            ClusterCommands::Terminate { cluster_id, yes } => {
+                commands::cluster::terminate(&sqlite_pool, cluster_id, *yes).await?;
             }
             ClusterCommands::List {} => {
                 commands::cluster::list(&sqlite_pool).await?;
