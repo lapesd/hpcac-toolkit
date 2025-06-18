@@ -1,9 +1,11 @@
 mod create;
-mod destroy;
+mod delete;
 mod list;
 mod spawn;
+mod terminate;
 
 pub use create::*;
-pub use destroy::*;
+pub use delete::*;
 pub use list::*;
 pub use spawn::*;
+pub use terminate::*;

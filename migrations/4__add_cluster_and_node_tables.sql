@@ -12,6 +12,7 @@ CREATE TABLE clusters (
     use_elastic_fabric_adapters BOOLEAN NOT NULL,
     use_elastic_file_system BOOLEAN NOT NULL,
     created_at DATETIME NOT NULL,
+    state TEXT NOT NULL,
     FOREIGN KEY (provider_config_id) REFERENCES provider_configs(id),
     FOREIGN KEY (provider_id) REFERENCES providers(id)
 );

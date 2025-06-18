@@ -378,7 +378,7 @@ impl AwsInterface {
     ) -> Result<()> {
         info!("Ensuring all cluster EC2 instances are terminated...");
 
-        let max_wait_time = Duration::from_secs(300);
+        let max_wait_time = Duration::from_secs(900);
         let poll_interval = Duration::from_secs(10);
         let start_time = std::time::Instant::now();
 
