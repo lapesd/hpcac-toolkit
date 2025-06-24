@@ -16,19 +16,12 @@ pub async fn terminate(pool: &SqlitePool, cluster_id: &str, skip_confirmation: b
     };
 
     match cluster.state {
-        ClusterState::Running | ClusterState::Terminating | ClusterState::Failed => {
-            info!("Terminating Cluster '{}'...", cluster.display_name)
-        }
-        ClusterState::Pending | ClusterState::Spawning => {
-            bail!(
-                "Cluster '{}' in state '{}' can't be terminated.",
-                cluster.display_name,
-                cluster.state
-            );
-        }
         ClusterState::Terminated => {
             println!("Cluster '{}' is already terminated.", cluster.display_name);
             return Ok(());
+        }
+        _ => {
+            info!("Terminating Cluster '{}'...", cluster.display_name)
         }
     }
 

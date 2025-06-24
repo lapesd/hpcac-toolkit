@@ -195,7 +195,7 @@ async fn main() -> Result<()> {
         .open(format!(
             "{}/{}.log",
             logs_directory,
-            Utc::now().format("%Y-%m-%d")
+            Utc::now().format("%Y-%m-%d_%H-%M-%S")
         ))
         .expect("Failed to open log file");
 

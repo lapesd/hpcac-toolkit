@@ -18,7 +18,7 @@ pub struct ShellCommand {
 }
 
 impl ShellCommand {
-    pub async fn _fetch_all_by_node_id(
+    pub async fn fetch_all_by_node_id(
         pool: &SqlitePool,
         node_id: String,
     ) -> Result<Vec<ShellCommand>> {

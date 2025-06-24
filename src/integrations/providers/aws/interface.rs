@@ -35,6 +35,7 @@ pub struct AwsClusterContext {
     pub ssh_key_name: String,
     pub efs_device_name: String,
     pub iam_role_name: String,
+    pub iam_profile_name: String,
 
     // Resource identifiers (populated during creation/discovery)
     pub vpc_id: Option<String>,
@@ -46,7 +47,8 @@ pub struct AwsClusterContext {
     pub ssh_key_id: Option<String>,
     pub elastic_network_interface_ids: HashMap<usize, String>,
     pub elastic_ip_ids: HashMap<usize, String>,
-    pub ec2_instance_ids: Vec<String>,
+    pub elastic_ips: HashMap<usize, String>,
+    pub ec2_instance_ids: HashMap<usize, String>,
     pub efs_device_id: Option<String>,
     pub efs_mount_target_id: Option<String>,
 
@@ -97,6 +99,7 @@ impl AwsClusterContext {
             ssh_key_name: format!("{}-KEY", cluster_id),
             efs_device_name: format!("{}-EFS", cluster_id),
             iam_role_name: format!("{}-IAM-ROLE", cluster_id),
+            iam_profile_name: format!("{}-IAM-PROFILE", cluster_id),
 
             // Initialize resource IDs as None/empty
             vpc_id: None,
@@ -108,7 +111,8 @@ impl AwsClusterContext {
             ssh_key_id: None,
             elastic_network_interface_ids: HashMap::new(),
             elastic_ip_ids: HashMap::new(),
-            ec2_instance_ids: Vec::new(),
+            elastic_ips: HashMap::new(),
+            ec2_instance_ids: HashMap::new(),
             efs_device_id: None,
             efs_mount_target_id: None,
 

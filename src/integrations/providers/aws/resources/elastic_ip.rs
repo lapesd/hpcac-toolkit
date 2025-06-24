@@ -201,7 +201,7 @@ impl AwsInterface {
         context: &AwsClusterContext,
         eip_id: &str,
         eni_id: &str,
-    ) -> Result<()> {
+    ) -> Result<String> {
         let describe_eip_response = match context
             .ec2_client
             .describe_addresses()
@@ -216,21 +216,31 @@ impl AwsInterface {
             }
         };
 
+        let mut public_ip = None;
         for address in describe_eip_response.addresses() {
+            if let Some(ip) = address.public_ip() {
+                public_ip = Some(ip.to_string());
+            }
+
             if let Some(associated_eni_id) = address.network_interface_id() {
                 if associated_eni_id == eni_id {
+                    let ip_addr = public_ip.as_deref().unwrap();
                     info!(
-                        "Elastic IP '{}' is already associated with Elastic Network Interface '{}'",
-                        eip_id, eni_id
+                        "Elastic IP '{}' ({}) is already associated with Elastic Network Interface '{}'",
+                        eip_id, ip_addr, eni_id
                     );
-                    return Ok(());
+                    return Ok(public_ip.unwrap());
                 }
             }
         }
 
+        let public_ip = public_ip.ok_or_else(|| {
+            anyhow::anyhow!("Could not find public IP for Elastic IP '{}'", eip_id)
+        })?;
+
         info!(
-            "Associating Elastic IP '{}' with Network Interface '{}'...",
-            eip_id, eni_id
+            "Associating Elastic IP '{}' ({}) with Network Interface '{}'...",
+            eip_id, public_ip, eni_id
         );
 
         let associate_eip_with_eni_response = match context
@@ -246,8 +256,9 @@ impl AwsInterface {
             Err(e) => {
                 error!("{:?}", e);
                 bail!(
-                    "Failed to associate Elastic IP '{}' with Elastic Network Interface '{}'",
+                    "Failed to associate Elastic IP '{}' ({}) with Elastic Network Interface '{}'",
                     eip_id,
+                    public_ip,
                     eni_id
                 );
             }
@@ -255,10 +266,10 @@ impl AwsInterface {
 
         if let Some(association_id) = associate_eip_with_eni_response.association_id() {
             info!(
-                "Successfully associated Elastic IP '{}' with Network Interface '{}' (association ID: '{}')",
-                eip_id, eni_id, association_id
+                "Successfully associated Elastic IP '{}' ({}) with Network Interface '{}' (association ID: '{}')",
+                eip_id, public_ip, eni_id, association_id
             );
-            return Ok(());
+            return Ok(public_ip);
         }
 
         bail!(

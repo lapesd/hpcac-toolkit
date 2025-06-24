@@ -35,7 +35,12 @@ pub trait CloudInfoProvider {
 }
 
 pub trait CloudResourceManager {
-    async fn spawn_cluster(&self, cluster: Cluster, nodes: Vec<Node>) -> Result<(), Error>;
+    async fn spawn_cluster(
+        &self,
+        cluster: Cluster,
+        nodes: Vec<Node>,
+        init_commands: HashMap<usize, Vec<String>>,
+    ) -> Result<(), Error>;
     async fn destroy_cluster(&self, cluster: Cluster, nodes: Vec<Node>) -> Result<(), Error>;
 }
 
@@ -101,10 +106,15 @@ impl CloudInfoProvider for CloudProvider {
 }
 
 impl CloudResourceManager for CloudProvider {
-    async fn spawn_cluster(&self, cluster: Cluster, nodes: Vec<Node>) -> Result<(), Error> {
+    async fn spawn_cluster(
+        &self,
+        cluster: Cluster,
+        nodes: Vec<Node>,
+        init_commands: HashMap<usize, Vec<String>>,
+    ) -> Result<(), Error> {
         match self {
-            CloudProvider::Aws(aws) => aws.spawn_cluster(cluster, nodes).await,
-            CloudProvider::Vultr(vultr) => vultr.spawn_cluster(cluster, nodes).await,
+            CloudProvider::Aws(aws) => aws.spawn_cluster(cluster, nodes, init_commands).await,
+            CloudProvider::Vultr(vultr) => vultr.spawn_cluster(cluster, nodes, init_commands).await,
         }
     }
 

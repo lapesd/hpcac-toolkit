@@ -12,6 +12,7 @@ nodes:
     allocation_mode: on-demand
     burstable_mode: Standard
     image_id: ami-0845a3d4093ba6e49
+
   - instance_type: t3.2xlarge
     allocation_mode: on-demand
     burstable_mode: Unlimited
@@ -19,6 +20,7 @@ nodes:
     init_commands:
       - ls
       - ls -a
+
   - instance_type: m5.2xlarge
     allocation_mode: on-demand
     image_id: ami-0845a3d4093ba6e49

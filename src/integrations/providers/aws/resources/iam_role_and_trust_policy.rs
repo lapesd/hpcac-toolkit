@@ -38,12 +38,12 @@ impl AwsInterface {
                 }
                 _ => {
                     error!("{:?}", service_err);
-                    bail!("Failure describing IAM Role '{}'", role_name);
+                    bail!("Failure describing IAM Role (name='{}')", role_name);
                 }
             },
             Err(e) => {
                 error!("{:?}", e);
-                bail!("Failure describing IAM Role '{}'", role_name);
+                bail!("Failure describing IAM Role (name='{}')", role_name);
             }
         };
 
@@ -53,7 +53,10 @@ impl AwsInterface {
                 {
                     "Effect": "Allow",
                     "Principal": {
-                        "Service": "ec2.amazonaws.com"
+                        "Service": [
+                            "ec2.amazonaws.com",
+                            "ssm.amazonaws.com"
+                        ]
                     },
                     "Action": "sts:AssumeRole"
                 }

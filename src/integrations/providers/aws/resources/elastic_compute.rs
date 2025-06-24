@@ -112,15 +112,19 @@ impl AwsInterface {
                     .device_index(0)
                     .network_interface_id(eni_id)
                     .build(),
+            )
+            .iam_instance_profile(
+                aws_sdk_ec2::types::IamInstanceProfileSpecification::builder()
+                    .name(context.iam_profile_name.clone())
+                    .build(),
             );
-
 
         if let Some(burstable_mode) = &node.burstable_mode {
             let credit_spec = aws_sdk_ec2::types::CreditSpecificationRequest::builder()
                 .cpu_credits(burstable_mode.to_lowercase())
                 .build();
             run_instances_request = run_instances_request.credit_specification(credit_spec);
-        } 
+        }
 
         if context.use_node_affinity {
             if let Some(placement_group_name) = &context.placement_group_name_actual {
@@ -171,7 +175,8 @@ impl AwsInterface {
         &self,
         context: &AwsClusterContext,
     ) -> Result<()> {
-        if context.ec2_instance_ids.is_empty() {
+        let instance_ids: Vec<String> = context.ec2_instance_ids.values().cloned().collect();
+        if instance_ids.is_empty() {
             info!("No EC2 instances to wait for");
             return Ok(());
         }
@@ -192,7 +197,7 @@ impl AwsInterface {
             }
 
             let mut describe_request = context.ec2_client.describe_instances();
-            for instance_id in &context.ec2_instance_ids {
+            for instance_id in &instance_ids {
                 describe_request = describe_request.instance_ids(instance_id);
             }
 
@@ -207,7 +212,7 @@ impl AwsInterface {
             let mut all_running = true;
             let mut pending_instances = Vec::new();
 
-            for instance_id in &context.ec2_instance_ids {
+            for instance_id in &instance_ids {
                 let mut found_instance = false;
                 let mut instance_running = false;
 
