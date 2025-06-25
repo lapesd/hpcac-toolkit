@@ -13,17 +13,27 @@ impl AwsInterface {
         &self,
         context: &AwsClusterContext,
         ec2_instance_id: &str,
-        commands: Vec<String>,
+        command: String,
     ) -> Result<String> {
         info!(
             "Sending SSM Command to EC2 instance (id='{}')...",
             ec2_instance_id,
         );
-        let script = commands.join(" && ");
-        info!("SSM Command: `{}`", script);
+
+        // Wrap command in shell script and run as ec2-user
+        let wrapped_command = format!(
+            r#"#!/bin/bash
+set -e
+sudo -u ec2-user -i bash << 'EOF'
+{}
+EOF"#,
+            command
+        );
+
+        info!("SSM Command: `{}`", wrapped_command);
 
         let mut parameters = HashMap::new();
-        parameters.insert("commands".to_string(), vec![script.clone()]);
+        parameters.insert("commands".to_string(), vec![wrapped_command]);
 
         let max_retries = 5;
         let base_delay = Duration::from_secs(30);
@@ -116,7 +126,7 @@ impl AwsInterface {
         &self,
         context: &AwsClusterContext,
         ec2_instance_id: &str,
-        commands: Vec<String>,
+        command: String,
     ) -> Result<String> {
         let max_retries = 5;
         let base_delay = Duration::from_secs(30);
@@ -127,9 +137,8 @@ impl AwsInterface {
                 attempt, max_retries, ec2_instance_id
             );
 
-            // Send the command
             let command_id = match self
-                .send_ssm_command_to_ec2_instance(context, ec2_instance_id, commands.clone())
+                .send_ssm_command_to_ec2_instance(context, ec2_instance_id, command.clone())
                 .await
             {
                 Ok(id) => id,
@@ -191,7 +200,7 @@ impl AwsInterface {
         command_id: &str,
         instance_id: &str,
     ) -> Result<String> {
-        let timeout_seconds = 300; // Increased timeout for NFS operations
+        let timeout_seconds = 1800; // Increased timeout from 300 to 1800 seconds (30 minutes)
         let timeout = Duration::from_secs(timeout_seconds);
         let start_time = std::time::Instant::now();
 

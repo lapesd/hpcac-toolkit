@@ -23,6 +23,9 @@ impl CloudResourceManager for AwsInterface {
         if cluster.use_elastic_file_system {
             steps += 4 + nodes.len();
         }
+        let total_init_commands: usize =
+            init_commands.values().map(|commands| commands.len()).sum();
+        steps += total_init_commands;
 
         let spawning_message = format!("Spawning Cluster '{}'...", cluster.display_name);
         info!(spawning_message);
@@ -214,31 +217,25 @@ impl CloudResourceManager for AwsInterface {
                     nodes.len()
                 );
                 operation_spinner.update_message(&op_msg);
-
                 let node_instance_id = &context.ec2_instance_ids[&node_index];
                 let efs_dns_name = format!(
                     "{}.efs.{}.amazonaws.com",
                     context.efs_device_id.clone().unwrap(),
                     cluster.region,
                 );
-                let efs_attach_script_commands = vec![
+
+                // Script to attach instances to EFS
+                let efs_attach_script = [
                     "sudo dnf install -y nfs-utils".to_string(),
                     "sudo mkdir -p /shared".to_string(),
                     format!("sudo mount -t nfs4 {}:/ /shared", efs_dns_name),
                     "sudo chmod ugo+rwx /shared".to_string(),
-                    format!(
-                        "echo \"{}:/ /shared nfs4 defaults,_netdev 0 0\" | sudo tee -a /etc/fstab",
-                        efs_dns_name
-                    ),
                 ];
 
-                self.send_and_wait_for_ssm_command(
-                    &context,
-                    node_instance_id,
-                    efs_attach_script_commands,
-                )
-                .await?;
-
+                for command in efs_attach_script {
+                    self.send_and_wait_for_ssm_command(&context, node_instance_id, command)
+                        .await?;
+                }
                 main_progress.inc(1);
             }
         }
@@ -247,7 +244,6 @@ impl CloudResourceManager for AwsInterface {
         for (node_index, _) in nodes.iter().enumerate() {
             let node_instance_id = &context.ec2_instance_ids[&node_index];
             let node_init_commands = &init_commands[&node_index];
-
             let op_msg = format!(
                 "Dispatching {} initialization commands to Instance {} (Node {} of {})...",
                 node_init_commands.len(),
@@ -257,12 +253,35 @@ impl CloudResourceManager for AwsInterface {
             );
             operation_spinner.update_message(&op_msg);
 
-            self.send_and_wait_for_ssm_command(
-                &context,
+            for (cmd_index, command) in node_init_commands.iter().enumerate() {
+                let cmd_msg = format!(
+                    "Executing command {} of {} on Instance {} (Node {})...",
+                    cmd_index + 1,
+                    node_init_commands.len(),
+                    node_instance_id,
+                    node_index + 1
+                );
+                operation_spinner.update_message(&cmd_msg);
+
+                info!(
+                    "Executing command {}/{} on node {}: {}",
+                    cmd_index + 1,
+                    node_init_commands.len(),
+                    node_index + 1,
+                    command
+                );
+
+                self.send_and_wait_for_ssm_command(&context, node_instance_id, command.clone())
+                    .await?;
+                main_progress.inc(1);
+            }
+
+            info!(
+                "Successfully completed all {} initialization commands for Instance {} (Node {})",
+                node_init_commands.len(),
                 node_instance_id,
-                node_init_commands.to_vec(),
-            )
-            .await?;
+                node_index + 1
+            );
         }
 
         operation_spinner.finish_with_message("All Cloud operations completed");

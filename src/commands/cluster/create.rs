@@ -15,6 +15,7 @@ use tracing::{error, info};
 
 #[derive(Debug, Deserialize, Serialize)]
 struct ClusterYaml {
+    id: Option<String>,
     display_name: String,
     provider_id: Option<String>,
     provider_config_id: Option<i64>,
@@ -209,7 +210,10 @@ pub async fn create(
     }
 
     // Validate node data
-    let new_cluster_id = utils::generate_id();
+    let new_cluster_id = match cluster_yaml.id {
+        Some(id) => id,
+        None => utils::generate_id(),
+    };
     let mut nodes_to_insert: Vec<Node> = vec![];
     let mut commands_to_insert: Vec<ShellCommand> = vec![];
     let node_count = cluster_yaml.nodes.len() as u64;
@@ -295,7 +299,11 @@ pub async fn create(
                         bail!(
                             "Invalid burstable mode '{}' specified for node '{}'.\
                             The instance type '{}' in region '{}' only supports the following burstale modes: {}",
-                            burstable_mode, i+1, &instance_type_name, &region, valid_modes.join(", ")
+                            burstable_mode,
+                            i + 1,
+                            &instance_type_name,
+                            &region,
+                            valid_modes.join(", ")
                         )
                     }
                     Some(burstable_mode)
