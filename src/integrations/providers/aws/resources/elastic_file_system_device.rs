@@ -91,6 +91,7 @@ impl AwsInterface {
             "Disabling automatic backups for EFS device (id='{}')...",
             new_efs_device_id
         );
+        sleep(Duration::from_secs(10)).await;
         match context
             .efs_client
             .put_backup_policy()

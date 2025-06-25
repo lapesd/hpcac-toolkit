@@ -183,7 +183,7 @@ impl AwsInterface {
         {
             Ok(response) => {
                 info!(
-                    "Detached SSM trust policy from IAM Role (name='{}')",
+                    "Detached SSM Trust Policy from IAM Role (name='{}')",
                     role_name
                 );
                 response
@@ -210,7 +210,7 @@ impl AwsInterface {
             }
             Err(e) => {
                 error!("{:?}", e);
-                bail!("Failed to delete IAM role (name='{}')", role_name);
+                bail!("Failed to delete IAM Role (name='{}')", role_name);
             }
         };
 
