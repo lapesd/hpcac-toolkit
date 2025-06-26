@@ -55,7 +55,7 @@ impl std::str::FromStr for ClusterState {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Cluster {
     pub id: String,
     pub display_name: String,

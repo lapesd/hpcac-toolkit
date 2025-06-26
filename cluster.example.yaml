@@ -14,15 +14,14 @@ nodes:
     image_id: ami-0845a3d4093ba6e49
 
   - instance_type: t3.2xlarge
-    allocation_mode: on-demand
+    allocation_mode: spot
     burstable_mode: Unlimited
     image_id: ami-0845a3d4093ba6e49
     init_commands:
       - ls
-      - ls -a
 
   - instance_type: m5.2xlarge
-    allocation_mode: on-demand
+    allocation_mode: spot
     image_id: ami-0845a3d4093ba6e49
     init_commands:
       - ls
