@@ -3,7 +3,7 @@ public_ssh_key_path: ~/.ssh/id_ed25519.pub
 private_ssh_key_path: ~/.ssh/id_ed25519
 provider_id: aws
 region: us-east-1
-availability_zone: us-east-1a
+availability_zone: us-east-1c
 use_node_affinity: false
 use_elastic_fabric_adapters: false
 use_elastic_file_system: true

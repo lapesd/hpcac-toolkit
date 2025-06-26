@@ -7,6 +7,7 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use tracing::info;
+use tracing::error;
 
 impl CloudResourceManager for AwsInterface {
     async fn spawn_cluster(
@@ -180,7 +181,7 @@ impl CloudResourceManager for AwsInterface {
         }
 
         // 14. Request EC2 Instances
-        // TODO: Add Spot support
+        // Current approach: if any instance fails to launch, terminate the whole cluster, clean up all resources, and return the error
         for (node_index, node) in nodes.iter().enumerate() {
             // 14.1. Request EC2 instance creation...
             operation_spinner.update_message(&format!(
@@ -189,9 +190,27 @@ impl CloudResourceManager for AwsInterface {
                 nodes.len(),
                 node.instance_type
             ));
-            let instance_id = self
+            let instance_id = match self
                 .request_elastic_compute_instance_creation(&context, node, node_index)
-                .await?;
+                .await {
+                    Ok(id) => id,
+                    Err(e) => {
+                        // Stop the progress bars before printing errors
+                        operation_spinner.finish_with_message("Error occurred, cleaning up...");
+                        main_progress.finish_with_message("Cluster creation failed.");
+                        
+                        // Print the error
+                        eprintln!("Failed to create instance for node {}: {:#}", node_index, e);
+
+                        // Attempt to terminate/cleanup the cluster
+                        let cleanup_result = self.destroy_cluster(cluster.clone(), nodes.clone()).await;
+                        if let Err(cleanup_err) = cleanup_result {
+                            error!("Failed to cleanup cluster after instance creation failure: {:?}", cleanup_err);
+                        }
+
+                        return Err(e);
+                    }
+                };
             context.ec2_instance_ids.insert(node_index, instance_id);
             main_progress.inc(1);
         }
