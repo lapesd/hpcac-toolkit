@@ -1,5 +1,5 @@
 use crate::database::models::{
-    Cluster, ClusterState, InstanceType, Node, Provider, ProviderConfig, ShellCommand,
+    Cluster, ClusterState, InstanceType, Node, Provider, ProviderConfig, ShellCommand, InstanceCreationFailurePolicy
 };
 use crate::integrations::{cloud_interface::CloudInfoProvider, providers::aws::AwsInterface};
 use crate::utils;
@@ -454,6 +454,7 @@ pub async fn create(
         use_elastic_file_system: cluster_yaml.use_elastic_file_system,
         created_at: Utc::now().naive_utc(),
         state: ClusterState::Pending,
+        on_instance_creation_failure: Some(InstanceCreationFailurePolicy::Cancel), // 'cancel' as default
     };
     cluster
         .insert(pool, nodes_to_insert, commands_to_insert)

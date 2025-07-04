@@ -1,4 +1,5 @@
-use crate::database::models::{InstanceType, Node, ProviderConfig, ShellCommand};
+use crate::database::models::{InstanceType, Node, ProviderConfig, ShellCommand, InstanceCreationFailurePolicy};
+
 
 use anyhow::{Result, bail};
 use chrono::NaiveDateTime;
@@ -70,6 +71,7 @@ pub struct Cluster {
     pub use_elastic_file_system: bool,
     pub created_at: NaiveDateTime,
     pub state: ClusterState,
+    pub on_instance_creation_failure: Option<InstanceCreationFailurePolicy>,
 }
 
 impl Cluster {
@@ -177,7 +179,8 @@ impl Cluster {
                     use_elastic_fabric_adapters,
                     use_elastic_file_system,
                     created_at,
-                    state as "state: ClusterState"
+                    state as "state: ClusterState",
+                    on_instance_creation_failure as "on_instance_creation_failure: InstanceCreationFailurePolicy"
                 FROM clusters
                 WHERE id = ?
             "#,
@@ -213,7 +216,8 @@ impl Cluster {
                     use_elastic_fabric_adapters,
                     use_elastic_file_system,
                     created_at,
-                    state as "state: ClusterState"
+                    state as "state: ClusterState",
+                    on_instance_creation_failure as "on_instance_creation_failure: InstanceCreationFailurePolicy"
                 FROM clusters
             "#,
         )
