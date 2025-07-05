@@ -5,6 +5,7 @@ use crate::utils;
 use anyhow::{Result, bail};
 use sqlx::sqlite::SqlitePool;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 pub async fn spawn(pool: &SqlitePool, cluster_id: &str, skip_confirmation: bool) -> Result<()> {
     let cluster = match Cluster::fetch_by_id(pool, cluster_id).await? {
@@ -28,7 +29,7 @@ pub async fn spawn(pool: &SqlitePool, cluster_id: &str, skip_confirmation: bool)
     let config_vars = provider_config.get_config_vars(pool).await?;
     let provider_id = provider_config.provider_id.clone();
     let cloud_interface = match provider_id.as_str() {
-        "aws" => AwsInterface { config_vars },
+        "aws" => AwsInterface { config_vars, db_pool: Arc::new(pool.clone()) },
         _ => {
             bail!(
                 "Provider (id='{}') is currently not supported.",

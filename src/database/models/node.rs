@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::{Transaction, sqlite::SqlitePool};
 use tracing::error;
 
-#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Node {
     pub id: String,
     pub cluster_id: String,

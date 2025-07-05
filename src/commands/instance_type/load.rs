@@ -8,6 +8,7 @@ use crate::utils;
 use inquire::Select;
 use sqlx::sqlite::SqlitePool;
 use tracing::error;
+use std::sync::Arc;
 
 pub async fn load(
     pool: &SqlitePool,
@@ -112,7 +113,7 @@ pub async fn load(
     let config_vars = provider_config.get_config_vars(pool).await?;
     let provider_id = provider_config.provider_id.clone();
     let cloud_interface = match provider_id.as_str() {
-        "aws" => CloudProvider::Aws(AwsInterface { config_vars }),
+        "aws" => CloudProvider::Aws(AwsInterface { config_vars, db_pool: Arc::new(pool.clone()) }),
         "vultr" => CloudProvider::Vultr(VultrInterface { config_vars }),
         _ => {
             anyhow::bail!("Provider '{}' is currently not supported.", &provider_id)
