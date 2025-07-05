@@ -7,7 +7,7 @@ availability_zone: us-east-1f
 use_node_affinity: false
 use_elastic_fabric_adapters: false
 use_elastic_file_system: true
-on_instance_creation_failure: migrate # or "cancel"
+on_instance_creation_failure: cancel # or "cancel"
 nodes:
   - instance_type: p3.16xlarge
     allocation_mode: spot
@@ -28,7 +28,7 @@ nodes:
     init_commands:
       - ls
 
-  - instance_type: p3.16xlarge
+  - instance_type: t3.2xlarge 
     allocation_mode: on-demand
     burstable_mode: Unlimited
     image_id: ami-0845a3d4093ba6e49
