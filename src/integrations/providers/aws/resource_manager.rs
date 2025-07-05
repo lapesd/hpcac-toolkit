@@ -1,5 +1,5 @@
 use super::interface::AwsInterface;
-use crate::database::models::{Cluster, Node};
+use crate::database::models::{Cluster, Node, InstanceCreationFailurePolicy};
 use crate::integrations::CloudResourceManager;
 use crate::utils;
 
@@ -8,6 +8,9 @@ use std::collections::HashMap;
 use anyhow::Result;
 use tracing::info;
 use tracing::error;
+use anyhow::bail;
+
+const MAX_MIGRATION_ATTEMPTS: usize = 3;
 
 impl CloudResourceManager for AwsInterface {
     async fn spawn_cluster(
@@ -16,6 +19,12 @@ impl CloudResourceManager for AwsInterface {
         nodes: Vec<Node>,
         init_commands: HashMap<usize, Vec<String>>,
     ) -> Result<()> {
+
+        let attempts: usize = cluster.migration_attempts as usize;
+        if attempts >= MAX_MIGRATION_ATTEMPTS {
+            bail!("Maximum migration attempts reached for cluster '{}'.", cluster.display_name);
+        }
+
         let mut context = self.create_cluster_context(&cluster)?;
         let mut steps = 8 + (4 * nodes.len()) + nodes.len();
         if cluster.use_node_affinity {
@@ -181,7 +190,6 @@ impl CloudResourceManager for AwsInterface {
         }
 
         // 14. Request EC2 Instances
-        // Current approach: if any instance fails to launch, terminate the whole cluster, clean up all resources, and return the error
         for (node_index, node) in nodes.iter().enumerate() {
             // 14.1. Request EC2 instance creation...
             operation_spinner.update_message(&format!(
@@ -195,19 +203,92 @@ impl CloudResourceManager for AwsInterface {
                 .await {
                     Ok(id) => id,
                     Err(e) => {
-                        // Stop the progress bars before printing errors
-                        operation_spinner.finish_with_message("Error occurred, cleaning up...");
-                        main_progress.finish_with_message("Cluster creation failed.");
-                        
-                        // Print the error
-                        eprintln!("Failed to create instance for node {}: {:#}", node_index, e);
 
-                        // Attempt to terminate/cleanup the cluster
-                        let cleanup_result = self.destroy_cluster(cluster.clone(), nodes.clone()).await;
-                        if let Err(cleanup_err) = cleanup_result {
-                            error!("Failed to cleanup cluster after instance creation failure: {:?}", cleanup_err);
+                        if self.is_capacity_error(&e) {
+                            match cluster.on_instance_creation_failure.as_ref().unwrap_or(&InstanceCreationFailurePolicy::Cancel) {
+                                InstanceCreationFailurePolicy::Cancel => {
+                                    // Stop the progress bars before printing errors
+                                    operation_spinner.finish_with_message("Error occurred, cleaning up...");
+                                    main_progress.finish_with_message("Cluster creation failed.");
+                                    
+                                    // Print the error
+                                    eprintln!("Failed to create instance for node {} due to capacity issues: {:#}", node_index, e);
+
+                                    // Attempt to terminate/cleanup the cluster
+                                    let cleanup_result = self.destroy_cluster(cluster.clone(), nodes.clone()).await;
+                                    if let Err(cleanup_err) = cleanup_result {
+                                        error!("Failed to cleanup cluster after instance creation failure: {:?}", cleanup_err);
+                                    }
+                                },
+                                InstanceCreationFailurePolicy::Migrate => {
+                                    // Stop the progress bars before printing errors
+                                    operation_spinner.finish_with_message("Error occurred, cleaning up...");
+                                    main_progress.finish_with_message("Cluster creation failed.");
+                                    
+                                    // Print the error
+                                    eprintln!("Failed to create instance for node {} due to capacity issues: {:#}", node_index, e);
+
+                                    // Attempt to terminate/cleanup the cluster
+                                    let cleanup_result = self.destroy_cluster(cluster.clone(), nodes.clone()).await;
+                                    if let Err(cleanup_err) = cleanup_result {
+                                        bail!("Failed to cleanup cluster after instance creation failure: {:?}", cleanup_err);
+                                    }
+
+                                    // Get all available zones in the region
+                                    let all_zones = self.get_all_availability_zones(&context.ec2_client, &cluster.region).await?;
+
+                                    // Filter out the current zone that failed
+                                    let alternative_zones: Vec<_> = all_zones.into_iter()
+                                        .filter(|z| z != &cluster.availability_zone)
+                                        .collect();
+                                    if alternative_zones.is_empty() {
+                                        bail!("No alternative availability zones available in region {}", cluster.region);
+                                    }
+
+                                    // Try next alternative zone
+                                    if let Some(zone) = alternative_zones.first() {
+                                        info!("Attempting to create cluster in zone {}", zone);
+
+                                        // Update the cluster with the new zone
+                                        let mut new_cluster = cluster.clone();
+                                        new_cluster.availability_zone = zone.clone();
+                                        new_cluster.migration_attempts += 1;
+
+                                        // Update the database
+                                        sqlx::query! (
+                                            "UPDATE clusters SET availability_zone = $1 WHERE id = $2",
+                                            zone,
+                                            new_cluster.id
+                                        )
+                                        .execute(&*self.db_pool)
+                                        .await?;
+
+                                        // Try creating the cluster in the new zone
+                                        return Box::pin(self.spawn_cluster(
+                                            new_cluster,
+                                            nodes.clone(),
+                                            init_commands.clone(),
+                                        )).await;
+                                    }
+
+                                    // If get here, all zones failed
+                                    bail!("Failed to find an availability zone with sufficient capacity");
+                                }
+                            }
+                        } else {
+                            // Stop the progress bars before printing errors
+                            operation_spinner.finish_with_message("Error occurred, cleaning up...");
+                            main_progress.finish_with_message("Cluster creation failed.");
+                            
+                            // Print the error
+                            eprintln!("Failed to create instance for node {} due to capacity issues: {:#}", node_index, e);
+
+                            // Attempt to terminate/cleanup the cluster
+                            let cleanup_result = self.destroy_cluster(cluster.clone(), nodes.clone()).await;
+                            if let Err(cleanup_err) = cleanup_result {
+                                error!("Failed to cleanup cluster after instance creation failure: {:?}", cleanup_err);
+                            }
                         }
-
                         return Err(e);
                     }
                 };

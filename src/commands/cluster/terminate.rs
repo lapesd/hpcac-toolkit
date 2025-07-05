@@ -5,6 +5,7 @@ use crate::utils;
 use anyhow::{Result, bail};
 use sqlx::sqlite::SqlitePool;
 use tracing::{error, info};
+use std::sync::Arc;
 
 pub async fn terminate(pool: &SqlitePool, cluster_id: &str, skip_confirmation: bool) -> Result<()> {
     let cluster = match Cluster::fetch_by_id(pool, cluster_id).await? {
@@ -38,7 +39,7 @@ pub async fn terminate(pool: &SqlitePool, cluster_id: &str, skip_confirmation: b
     let config_vars = provider_config.get_config_vars(pool).await?;
     let provider_id = provider_config.provider_id.clone();
     let cloud_interface = match provider_id.as_str() {
-        "aws" => AwsInterface { config_vars },
+        "aws" => AwsInterface { config_vars, db_pool: Arc::new(pool.clone()) },
         _ => {
             bail!("Provider '{}' is currently not supported.", &provider_id)
         }
