@@ -27,6 +27,7 @@ struct ClusterYaml {
     use_node_affinity: bool,
     use_elastic_fabric_adapters: bool,
     use_elastic_file_system: bool,
+    on_instance_creation_failure: String,
     nodes: Vec<NodeYaml>,
 }
 
@@ -210,6 +211,13 @@ pub async fn create(
         )
     }
 
+    // get the on_instance_creation_failure 
+    let failure_policy = match cluster_yaml.on_instance_creation_failure.to_lowercase().as_str() {
+        "migrate" => InstanceCreationFailurePolicy::Migrate,
+        "cancel"  => InstanceCreationFailurePolicy::Cancel, // Default to Cancel for any other value
+        other     => bail!("Invalid value for on_instance_creation_failure: '{}'. Expected 'migrate' or 'cancel'", other),
+    };
+
     // Validate node data
     let new_cluster_id = match cluster_yaml.id {
         Some(id) => id,
@@ -382,6 +390,10 @@ pub async fn create(
     );
     println!(
         "{:<35}: {}",
+        "On Instance Creation Failure", cluster_yaml.on_instance_creation_failure
+    );
+    println!(
+        "{:<35}: {}",
         "Provider Config", provider_config.display_name
     );
     println!("{:<35}: {}\n", "Node Count", cluster_yaml.nodes.len());
@@ -455,8 +467,9 @@ pub async fn create(
         use_elastic_file_system: cluster_yaml.use_elastic_file_system,
         created_at: Utc::now().naive_utc(),
         state: ClusterState::Pending,
-        on_instance_creation_failure: Some(InstanceCreationFailurePolicy::Cancel), // 'cancel' as default
+        on_instance_creation_failure: Some(failure_policy.clone()), // 'cancel' as default
         migration_attempts: 0,
+        tried_zones: Some("".to_string()),
     };
     cluster
         .insert(pool, nodes_to_insert, commands_to_insert)

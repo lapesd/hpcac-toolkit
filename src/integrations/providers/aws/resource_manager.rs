@@ -22,8 +22,10 @@ impl CloudResourceManager for AwsInterface {
 
         let attempts: usize = cluster.migration_attempts as usize;
         if attempts >= MAX_MIGRATION_ATTEMPTS {
-            bail!("Maximum migration attempts reached for cluster '{}'.", cluster.display_name);
+            bail!("\nMaximum migration of {} attempts reached for cluster '{}'.", attempts, cluster.display_name);
         }
+
+        eprintln!("\n ATTEMPT: {}", attempts+1);
 
         let mut context = self.create_cluster_context(&cluster)?;
         let mut steps = 8 + (4 * nodes.len()) + nodes.len();
@@ -203,90 +205,86 @@ impl CloudResourceManager for AwsInterface {
                 .await {
                     Ok(id) => id,
                     Err(e) => {
+                        match cluster.on_instance_creation_failure.as_ref().unwrap_or(&InstanceCreationFailurePolicy::Cancel) {
+                            InstanceCreationFailurePolicy::Cancel => {
+                                // Stop the progress bars before printing errors
+                                operation_spinner.finish_with_message("Error occurred, cleaning up...");
+                                main_progress.finish_with_message("Cluster creation failed.");
+                                
+                                // Print the error
+                                eprintln!("Failed to create instance for node {}: {:#}", node_index+1, e);
+                                eprintln!("\nDestroying and canceling the cluster");
 
-                        if self.is_capacity_error(&e) {
-                            match cluster.on_instance_creation_failure.as_ref().unwrap_or(&InstanceCreationFailurePolicy::Cancel) {
-                                InstanceCreationFailurePolicy::Cancel => {
-                                    // Stop the progress bars before printing errors
-                                    operation_spinner.finish_with_message("Error occurred, cleaning up...");
-                                    main_progress.finish_with_message("Cluster creation failed.");
-                                    
-                                    // Print the error
-                                    eprintln!("Failed to create instance for node {} due to capacity issues: {:#}", node_index, e);
-
-                                    // Attempt to terminate/cleanup the cluster
-                                    let cleanup_result = self.destroy_cluster(cluster.clone(), nodes.clone()).await;
-                                    if let Err(cleanup_err) = cleanup_result {
-                                        error!("Failed to cleanup cluster after instance creation failure: {:?}", cleanup_err);
-                                    }
-                                },
-                                InstanceCreationFailurePolicy::Migrate => {
-                                    // Stop the progress bars before printing errors
-                                    operation_spinner.finish_with_message("Error occurred, cleaning up...");
-                                    main_progress.finish_with_message("Cluster creation failed.");
-                                    
-                                    // Print the error
-                                    eprintln!("Failed to create instance for node {} due to capacity issues: {:#}", node_index, e);
-
-                                    // Attempt to terminate/cleanup the cluster
-                                    let cleanup_result = self.destroy_cluster(cluster.clone(), nodes.clone()).await;
-                                    if let Err(cleanup_err) = cleanup_result {
-                                        bail!("Failed to cleanup cluster after instance creation failure: {:?}", cleanup_err);
-                                    }
-
-                                    // Get all available zones in the region
-                                    let all_zones = self.get_all_availability_zones(&context.ec2_client, &cluster.region).await?;
-
-                                    // Filter out the current zone that failed
-                                    let alternative_zones: Vec<_> = all_zones.into_iter()
-                                        .filter(|z| z != &cluster.availability_zone)
-                                        .collect();
-                                    if alternative_zones.is_empty() {
-                                        bail!("No alternative availability zones available in region {}", cluster.region);
-                                    }
-
-                                    // Try next alternative zone
-                                    if let Some(zone) = alternative_zones.first() {
-                                        info!("Attempting to create cluster in zone {}", zone);
-
-                                        // Update the cluster with the new zone
-                                        let mut new_cluster = cluster.clone();
-                                        new_cluster.availability_zone = zone.clone();
-                                        new_cluster.migration_attempts += 1;
-
-                                        // Update the database
-                                        sqlx::query! (
-                                            "UPDATE clusters SET availability_zone = $1 WHERE id = $2",
-                                            zone,
-                                            new_cluster.id
-                                        )
-                                        .execute(&*self.db_pool)
-                                        .await?;
-
-                                        // Try creating the cluster in the new zone
-                                        return Box::pin(self.spawn_cluster(
-                                            new_cluster,
-                                            nodes.clone(),
-                                            init_commands.clone(),
-                                        )).await;
-                                    }
-
-                                    // If get here, all zones failed
-                                    bail!("Failed to find an availability zone with sufficient capacity");
+                                // Attempt to terminate/cleanup the cluster
+                                let cleanup_result = self.destroy_cluster(cluster.clone(), nodes.clone()).await;
+                                if let Err(cleanup_err) = cleanup_result {
+                                    error!("Failed to cleanup cluster after instance creation failure: {:?}", cleanup_err);
                                 }
-                            }
-                        } else {
-                            // Stop the progress bars before printing errors
-                            operation_spinner.finish_with_message("Error occurred, cleaning up...");
-                            main_progress.finish_with_message("Cluster creation failed.");
-                            
-                            // Print the error
-                            eprintln!("Failed to create instance for node {} due to capacity issues: {:#}", node_index, e);
+                            },
+                            InstanceCreationFailurePolicy::Migrate => {
+                                // Stop the progress bars before printing errors
+                                operation_spinner.finish_with_message("Error occurred, cleaning up...");
+                                main_progress.finish_with_message("Cluster creation failed.");
+                                
+                                // Print the error
+                                eprintln!("Failed to create instance for node {} in availability zone {}: {:#}", node_index+1, cluster.availability_zone, e);
+                                eprintln!("\nDestroying cluster and retrying in a different availability zone.");
 
-                            // Attempt to terminate/cleanup the cluster
-                            let cleanup_result = self.destroy_cluster(cluster.clone(), nodes.clone()).await;
-                            if let Err(cleanup_err) = cleanup_result {
-                                error!("Failed to cleanup cluster after instance creation failure: {:?}", cleanup_err);
+                                // Attempt to terminate/cleanup the cluster
+                                let cleanup_result = self.destroy_cluster(cluster.clone(), nodes.clone()).await;
+                                if let Err(cleanup_err) = cleanup_result {
+                                    bail!("Failed to cleanup cluster after instance creation failure: {:?}", cleanup_err);
+                                }
+
+                                // Split the tried_zones string into a Vec<&str>, removing empty entries
+                                let mut tried_zones: Vec<_> = cluster.tried_zones
+                                    .as_deref()
+                                    .unwrap_or("")
+                                    .split(',')
+                                    .filter(|s| !s.is_empty())
+                                    .collect();
+                                tried_zones.push(cluster.availability_zone.as_str());
+
+                                // Get all available zones in the region
+                                let all_zones = self.get_all_availability_zones(&context.ec2_client, &cluster.region).await?;
+
+                                // Filter out the current zone that failed
+                                let alternative_zones: Vec<_> = all_zones.into_iter()
+                                    .filter(|z| !tried_zones.contains(&z.as_str()))
+                                    .collect();
+                                if alternative_zones.is_empty() {
+                                    bail!("No alternative availability zones available in region {}", cluster.region);
+                                }
+
+                                // Try next alternative zone
+                                if let Some(zone) = alternative_zones.first() {
+                                    eprintln!("Attempting to create cluster in zone {}", zone);
+
+                                    // Update the cluster with the new zone
+                                    let mut new_cluster = cluster.clone();
+                                    new_cluster.tried_zones = Some(tried_zones.join(","));
+                                    new_cluster.availability_zone = zone.clone();
+                                    new_cluster.migration_attempts += 1;
+
+                                    // Update the database
+                                    sqlx::query! (
+                                        "UPDATE clusters SET availability_zone = $1 WHERE id = $2",
+                                        zone,
+                                        new_cluster.id
+                                    )
+                                    .execute(&*self.db_pool)
+                                    .await?;
+
+                                    // Try creating the cluster in the new zone
+                                    return Box::pin(self.spawn_cluster(
+                                        new_cluster,
+                                        nodes.clone(),
+                                        init_commands.clone(),
+                                    )).await;
+                                }
+
+                                // If get here, all zones failed
+                                bail!("Failed to find an availability zone with sufficient capacity");
                             }
                         }
                         return Err(e);

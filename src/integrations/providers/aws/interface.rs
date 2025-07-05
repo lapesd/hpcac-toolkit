@@ -256,21 +256,4 @@ impl AwsInterface {
             }
         }
     }
-
-    /// Determine if an error is related to capacity/availability issues
-    pub fn is_capacity_error(&self, error: &anyhow::Error) -> bool {
-        let error_msg = error.to_string().to_lowercase();
-        
-        error_msg.contains("insufficient capacity") || 
-        error_msg.contains("capacity not available") || 
-        error_msg.contains("insufficientinstancecapacity") ||
-        error_msg.contains("no capacity") ||
-        error_msg.contains("insufficient instance capacity") ||
-        error_msg.contains("not enough capacity") ||
-        error_msg.contains("capacity-oversubscribed") ||
-        error_msg.contains("capacity constraint") ||
-        error_msg.contains("not supported in the requested availability zone") ||
-        error_msg.contains("no capacity available for the requested spot instance") ||
-        error_msg.contains("spotinstancecapacity")
-    }
 }

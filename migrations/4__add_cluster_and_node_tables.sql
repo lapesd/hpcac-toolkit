@@ -15,6 +15,7 @@ CREATE TABLE clusters (
     state TEXT NOT NULL,
     on_instance_creation_failure TEXT,
     migration_attempts INTEGER,
+    tried_zones TEXT,
     FOREIGN KEY (provider_config_id) REFERENCES provider_configs(id),
     FOREIGN KEY (provider_id) REFERENCES providers(id)
 );
