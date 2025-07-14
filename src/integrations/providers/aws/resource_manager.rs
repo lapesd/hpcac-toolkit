@@ -205,7 +205,7 @@ impl CloudResourceManager for AwsInterface {
                 .await {
                     Ok(id) => id,
                     Err(e) => {
-                        match cluster.on_instance_creation_failure.as_ref().unwrap_or(&InstanceCreationFailurePolicy::Cancel) {
+                        match cluster.on_instance_creation_failure.as_ref().unwrap() {
                             InstanceCreationFailurePolicy::Cancel => {
                                 // Stop the progress bars before printing errors
                                 operation_spinner.finish_with_message("Error occurred, cleaning up...");
@@ -220,6 +220,34 @@ impl CloudResourceManager for AwsInterface {
                                 if let Err(cleanup_err) = cleanup_result {
                                     error!("Failed to cleanup cluster after instance creation failure: {:?}", cleanup_err);
                                 }
+                            },
+                            InstanceCreationFailurePolicy::OnDemand => {
+                                // Stop the progress bars before printing errors
+                                operation_spinner.finish_with_message("Error occurred, cleaning up...");
+                                main_progress.finish_with_message("Cluster creation failed.");
+                                
+                                // Print the error
+                                eprintln!("Failed to create instance for node {} with '{}' allocation: {:#}", node_index+1, nodes[node_index].allocation_mode, e);
+                                eprintln!("\nDestroying cluster and changing the allocation mode of node {} to 'on-demand'.", node_index+1);
+
+                                // Attempt to terminate/cleanup the cluster
+                                let cleanup_result = self.destroy_cluster(cluster.clone(), nodes.clone()).await;
+                                if let Err(cleanup_err) = cleanup_result {
+                                    bail!("Failed to cleanup cluster after instance creation failure: {:?}", cleanup_err);
+                                }
+
+                                // Update the cluster and the node
+                                let mut new_cluster = cluster.clone();
+                                new_cluster.migration_attempts += 1;
+                                let mut new_nodes = nodes.clone();
+                                new_nodes[node_index].allocation_mode = "on-demand".to_string();
+
+                                // Try creating the cluster in the new zone
+                                return Box::pin(self.spawn_cluster(
+                                    new_cluster,
+                                    new_nodes,
+                                    init_commands.clone(),
+                                )).await;
                             },
                             InstanceCreationFailurePolicy::Migrate => {
                                 // Stop the progress bars before printing errors
@@ -265,15 +293,6 @@ impl CloudResourceManager for AwsInterface {
                                     new_cluster.tried_zones = Some(tried_zones.join(","));
                                     new_cluster.availability_zone = zone.clone();
                                     new_cluster.migration_attempts += 1;
-
-                                    // Update the database
-                                    sqlx::query! (
-                                        "UPDATE clusters SET availability_zone = $1 WHERE id = $2",
-                                        zone,
-                                        new_cluster.id
-                                    )
-                                    .execute(&*self.db_pool)
-                                    .await?;
 
                                     // Try creating the cluster in the new zone
                                     return Box::pin(self.spawn_cluster(

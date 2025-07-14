@@ -104,7 +104,7 @@ impl Cluster {
         );
         println!(
             "{:<35}: {}",
-            "On Instance Creation Failure", self.on_instance_creation_failure.clone().unwrap_or(InstanceCreationFailurePolicy::Cancel).to_string()
+            "On Instance Creation Failure", self.on_instance_creation_failure.clone().unwrap().to_string()
         );
         println!(
             "{:<35}: {}",

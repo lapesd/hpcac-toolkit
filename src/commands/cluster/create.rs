@@ -12,7 +12,6 @@ use sqlx::sqlite::SqlitePool;
 use std::fs;
 use std::path::Path;
 use tracing::{error, info};
-use std::sync::Arc;
 
 #[derive(Debug, Deserialize, Serialize)]
 struct ClusterYaml {
@@ -169,7 +168,7 @@ pub async fn create(
     let config_vars = provider_config.get_config_vars(pool).await?;
     let provider_id = provider_config.provider_id.clone();
     let cloud_interface = match provider_id.as_str() {
-        "aws" => AwsInterface { config_vars, db_pool: Arc::new(pool.clone())},
+        "aws" => AwsInterface { config_vars },
         _ => {
             bail!("Provider '{}' is currently not supported.", &provider_id)
         }
@@ -213,9 +212,10 @@ pub async fn create(
 
     // get the on_instance_creation_failure 
     let failure_policy = match cluster_yaml.on_instance_creation_failure.to_lowercase().as_str() {
-        "migrate" => InstanceCreationFailurePolicy::Migrate,
-        "cancel"  => InstanceCreationFailurePolicy::Cancel, // Default to Cancel for any other value
-        other     => bail!("Invalid value for on_instance_creation_failure: '{}'. Expected 'migrate' or 'cancel'", other),
+        "migrate"   => InstanceCreationFailurePolicy::Migrate,
+        "cancel"    => InstanceCreationFailurePolicy::Cancel,
+        "on-demand" => InstanceCreationFailurePolicy::OnDemand,
+        other       => bail!("Invalid value for on_instance_creation_failure: '{}'. Expected 'cancel', 'migrate' or 'on-demand'", other),
     };
 
     // Validate node data
@@ -467,7 +467,7 @@ pub async fn create(
         use_elastic_file_system: cluster_yaml.use_elastic_file_system,
         created_at: Utc::now().naive_utc(),
         state: ClusterState::Pending,
-        on_instance_creation_failure: Some(failure_policy.clone()), // 'cancel' as default
+        on_instance_creation_failure: Some(failure_policy.clone()),
         migration_attempts: 0,
         tried_zones: Some("".to_string()),
     };

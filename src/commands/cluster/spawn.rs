@@ -5,7 +5,6 @@ use crate::utils;
 use anyhow::{Result, bail};
 use sqlx::sqlite::SqlitePool;
 use std::collections::HashMap;
-use std::sync::Arc;
 
 pub async fn spawn(pool: &SqlitePool, cluster_id: &str, skip_confirmation: bool) -> Result<()> {
     let cluster = match Cluster::fetch_by_id(pool, cluster_id).await? {
@@ -29,7 +28,7 @@ pub async fn spawn(pool: &SqlitePool, cluster_id: &str, skip_confirmation: bool)
     let config_vars = provider_config.get_config_vars(pool).await?;
     let provider_id = provider_config.provider_id.clone();
     let cloud_interface = match provider_id.as_str() {
-        "aws" => AwsInterface { config_vars, db_pool: Arc::new(pool.clone()) },
+        "aws" => AwsInterface { config_vars },
         _ => {
             bail!(
                 "Provider (id='{}') is currently not supported.",
@@ -55,9 +54,15 @@ pub async fn spawn(pool: &SqlitePool, cluster_id: &str, skip_confirmation: bool)
     }
 
     Cluster::update_cluster_state(pool, cluster_id, ClusterState::Spawning).await?;
-    cloud_interface
+    match cloud_interface
         .spawn_cluster(cluster, nodes, init_commands_map)
-        .await?;
-    Cluster::update_cluster_state(pool, cluster_id, ClusterState::Running).await?;
+        .await {
+            Ok(())   => Cluster::update_cluster_state(pool, cluster_id, ClusterState::Running).await?,
+            Err(e)   => {
+                Cluster::update_cluster_state(pool, cluster_id, ClusterState::Pending).await?;
+                return Err(e);
+            },
+    }
+    
     Ok(())
 }

@@ -9,6 +9,7 @@ use std::str::FromStr;
 pub enum InstanceCreationFailurePolicy {
     Cancel,
     Migrate,
+    OnDemand,
 }
 
 impl fmt::Display for InstanceCreationFailurePolicy {
@@ -16,6 +17,7 @@ impl fmt::Display for InstanceCreationFailurePolicy {
         let s = match self {
             InstanceCreationFailurePolicy::Cancel => "cancel",
             InstanceCreationFailurePolicy::Migrate => "migrate",
+            InstanceCreationFailurePolicy::OnDemand => "on-demand",
         };
         write!(f, "{}", s)
     }
@@ -27,6 +29,7 @@ impl FromStr for InstanceCreationFailurePolicy {
         match s {
             "cancel" => Ok(InstanceCreationFailurePolicy::Cancel),
             "migrate" => Ok(InstanceCreationFailurePolicy::Migrate),
+            "on-demand" => Ok(InstanceCreationFailurePolicy::OnDemand),
             _ => Err(()),
         }
     }

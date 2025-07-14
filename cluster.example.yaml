@@ -7,16 +7,16 @@ availability_zone: us-east-1f
 use_node_affinity: false
 use_elastic_fabric_adapters: false
 use_elastic_file_system: true
-on_instance_creation_failure: migrate # or "cancel"
+on_instance_creation_failure: on-demand # options: cancel, migrate or on-demand
 nodes:
-  - instance_type: p3.16xlarge
+  - instance_type: m5.16xlarge
     allocation_mode: spot
     image_id: ami-0845a3d4093ba6e49
     init_commands:
       - ls
 
   - instance_type: m5.2xlarge
-    allocation_mode: spot
+    allocation_mode: on-demand 
     image_id: ami-0845a3d4093ba6e49
     init_commands:
       - ls

@@ -11,8 +11,6 @@ use aws_sdk_servicequotas::Client as ServiceQuotasClient;
 use aws_sdk_ssm::Client as SsmClient;
 use std::collections::HashMap;
 use tracing::error;
-use std::sync::Arc;
-use sqlx::SqlitePool;
 
 /// Context struct containing all cluster-related information and resource identifiers
 /// used throughout the cluster lifecycle operations
@@ -153,7 +151,6 @@ impl AwsClusterContext {
 
 pub struct AwsInterface {
     pub config_vars: Vec<ConfigVar>,
-    pub db_pool: Arc<SqlitePool>,
 }
 
 impl AwsInterface {
