@@ -54,9 +54,15 @@ pub async fn spawn(pool: &SqlitePool, cluster_id: &str, skip_confirmation: bool)
     }
 
     Cluster::update_cluster_state(pool, cluster_id, ClusterState::Spawning).await?;
-    cloud_interface
+    match cloud_interface
         .spawn_cluster(cluster, nodes, init_commands_map)
-        .await?;
-    Cluster::update_cluster_state(pool, cluster_id, ClusterState::Running).await?;
+        .await {
+            Ok(())   => Cluster::update_cluster_state(pool, cluster_id, ClusterState::Running).await?,
+            Err(e)   => {
+                Cluster::update_cluster_state(pool, cluster_id, ClusterState::Pending).await?;
+                return Err(e);
+            },
+    }
+    
     Ok(())
 }

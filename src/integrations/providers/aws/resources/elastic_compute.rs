@@ -122,6 +122,15 @@ impl AwsInterface {
                     .build(),
             );
 
+        if node.allocation_mode.to_lowercase() == "spot" {
+            run_instances_request = run_instances_request
+                .instance_market_options(
+                    aws_sdk_ec2::types::InstanceMarketOptionsRequest::builder()
+                        .market_type(aws_sdk_ec2::types::MarketType::Spot)
+                        .build()
+                );
+        }
+
         if let Some(burstable_mode) = &node.burstable_mode {
             let credit_spec = aws_sdk_ec2::types::CreditSpecificationRequest::builder()
                 .cpu_credits(burstable_mode.to_lowercase())

@@ -3,26 +3,34 @@ public_ssh_key_path: ~/.ssh/id_ed25519.pub
 private_ssh_key_path: ~/.ssh/id_ed25519
 provider_id: aws
 region: us-east-1
-availability_zone: us-east-1c
+availability_zone: us-east-1f
 use_node_affinity: false
 use_elastic_fabric_adapters: false
 use_elastic_file_system: true
+on_instance_creation_failure: on-demand # options: cancel, migrate or on-demand
 nodes:
+  - instance_type: m5.16xlarge
+    allocation_mode: spot
+    image_id: ami-0845a3d4093ba6e49
+    init_commands:
+      - ls
+
+  - instance_type: m5.2xlarge
+    allocation_mode: on-demand 
+    image_id: ami-0845a3d4093ba6e49
+    init_commands:
+      - ls
+
   - instance_type: t3.2xlarge
     allocation_mode: on-demand
     burstable_mode: Standard
     image_id: ami-0845a3d4093ba6e49
-
-  - instance_type: t3.2xlarge
-    allocation_mode: on-demand
-    burstable_mode: Unlimited
-    image_id: ami-0845a3d4093ba6e49
     init_commands:
       - ls
-      - ls -a
 
-  - instance_type: m5.2xlarge
+  - instance_type: t3.2xlarge 
     allocation_mode: on-demand
+    burstable_mode: Unlimited
     image_id: ami-0845a3d4093ba6e49
     init_commands:
       - ls

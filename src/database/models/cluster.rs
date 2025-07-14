@@ -1,4 +1,5 @@
-use crate::database::models::{InstanceType, Node, ProviderConfig, ShellCommand};
+use crate::database::models::{InstanceType, Node, ProviderConfig, ShellCommand, InstanceCreationFailurePolicy};
+
 
 use anyhow::{Result, bail};
 use chrono::NaiveDateTime;
@@ -55,7 +56,7 @@ impl std::str::FromStr for ClusterState {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Cluster {
     pub id: String,
     pub display_name: String,
@@ -70,6 +71,9 @@ pub struct Cluster {
     pub use_elastic_file_system: bool,
     pub created_at: NaiveDateTime,
     pub state: ClusterState,
+    pub on_instance_creation_failure: Option<InstanceCreationFailurePolicy>,
+    pub migration_attempts: i64,
+    pub tried_zones: Option<String>,
 }
 
 impl Cluster {
@@ -97,6 +101,10 @@ impl Cluster {
         println!(
             "{:<35}: {}",
             "Use Elastic File System (EFS)", self.use_elastic_file_system
+        );
+        println!(
+            "{:<35}: {}",
+            "On Instance Creation Failure", self.on_instance_creation_failure.clone().unwrap().to_string()
         );
         println!(
             "{:<35}: {}",
@@ -177,7 +185,10 @@ impl Cluster {
                     use_elastic_fabric_adapters,
                     use_elastic_file_system,
                     created_at,
-                    state as "state: ClusterState"
+                    state as "state: ClusterState",
+                    on_instance_creation_failure as "on_instance_creation_failure: InstanceCreationFailurePolicy",
+                    migration_attempts as "migration_attempts!",
+                    tried_zones 
                 FROM clusters
                 WHERE id = ?
             "#,
@@ -213,7 +224,10 @@ impl Cluster {
                     use_elastic_fabric_adapters,
                     use_elastic_file_system,
                     created_at,
-                    state as "state: ClusterState"
+                    state as "state: ClusterState",
+                    on_instance_creation_failure as "on_instance_creation_failure: InstanceCreationFailurePolicy",
+                    migration_attempts as "migration_attempts!",
+                    tried_zones
                 FROM clusters
             "#,
         )
@@ -265,9 +279,10 @@ impl Cluster {
                     use_elastic_fabric_adapters,
                     use_elastic_file_system,
                     created_at,
-                    state
+                    state,
+                    on_instance_creation_failure
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
             self.id,
             self.display_name,
@@ -282,6 +297,7 @@ impl Cluster {
             self.use_elastic_file_system,
             self.created_at,
             self.state,
+            self.on_instance_creation_failure,
         )
         .execute(&mut *tx)
         .await
