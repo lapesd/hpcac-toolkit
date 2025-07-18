@@ -13,33 +13,33 @@ jobs:
   build:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
-  strategy:
-    matrix:
-      include:
-        # macOS Intel (x86_64)
-        - target: x86_64-apple-darwin
-          os: macos-13
-          name: macos-intel
-          asset_name: hpcac-toolkit-macos-intel
-          
-        # macOS Apple Silicon (ARM64)
-        - target: aarch64-apple-darwin
-          os: macos-14
-          name: macos-arm64
-          asset_name: hpcac-toolkit-macos-arm64
-          
-        # Linux x86_64
-        - target: x86_64-unknown-linux-gnu
-          os: ubuntu-latest
-          name: linux-amd64
-          asset_name: hpcac-toolkit-linux-amd64
-          
-        # Linux ARM64
-        - target: aarch64-unknown-linux-gnu
-          os: ubuntu-latest
-          name: linux-arm64
-          asset_name: hpcac-toolkit-linux-arm64
-          use_cross: true
+    strategy:
+      matrix:
+        include:
+          # macOS Intel (x86_64)
+          - target: x86_64-apple-darwin
+            os: macos-13
+            name: macos-intel
+            asset_name: hpcac-toolkit-macos-intel
+            
+          # macOS Apple Silicon (ARM64)
+          - target: aarch64-apple-darwin
+            os: macos-14
+            name: macos-arm64
+            asset_name: hpcac-toolkit-macos-arm64
+            
+          # Linux x86_64
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: linux-amd64
+            asset_name: hpcac-toolkit-linux-amd64
+            
+          # Linux ARM64
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: linux-arm64
+            asset_name: hpcac-toolkit-linux-arm64
+            use_cross: true
 
     steps:
       - name: Checkout code
@@ -74,7 +74,7 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           mkdir -p artifacts
-          cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} artifacts/${{ matrix.asset_name }}
+          cp target/${{ matrix.target }}/release/hpcac-toolkit artifacts/${{ matrix.asset_name }}
           chmod +x artifacts/${{ matrix.asset_name }}
 
       # Create compressed archives
@@ -177,4 +177,3 @@ jobs:
           asset_path: artifacts/hpcac-toolkit-linux-arm64/hpcac-toolkit-linux-arm64.tar.gz
           asset_name: hpcac-toolkit-linux-arm64.tar.gz
           asset_content_type: application/gzip
-
