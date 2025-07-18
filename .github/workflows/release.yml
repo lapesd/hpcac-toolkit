@@ -113,7 +113,7 @@ jobs:
         if: runner.os != 'Windows' && matrix.skip != true
         run: |
           mkdir -p artifacts
-          cp target/${{ matrix.target }}/release/hpcac-toolkit artifacts/${{ matrix.asset_name }}
+          cp target/${{ matrix.target }}/release/hpcac artifacts/${{ matrix.asset_name }}
           chmod +x artifacts/${{ matrix.asset_name }}
 
       # Create compressed archives
