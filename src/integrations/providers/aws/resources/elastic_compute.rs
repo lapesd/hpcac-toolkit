@@ -497,4 +497,111 @@ impl AwsInterface {
 
         Ok(())
     }
+
+    pub async fn find_elastic_compute_instance_by_private_ip(
+        &self,
+        context: &AwsClusterContext,
+        private_ip: &str,
+    ) -> Result<Option<String>> {
+        info!("Looking for instance with private IP: {}", private_ip);
+
+        let describe_instances_response = match context
+            .ec2_client
+            .describe_instances()
+            .filters(
+                aws_sdk_ec2::types::Filter::builder()
+                    .name("private-ip-address")
+                    .values(private_ip)
+                    .build(),
+            )
+            .filters(context.cluster_id_filter.clone())
+            .send()
+            .await
+        {
+            Ok(response) => response,
+            Err(e) => {
+                error!("{:?}", e);
+                bail!(
+                    "Failure describing EC2 instances by private IP '{}'",
+                    private_ip
+                );
+            }
+        };
+
+        for reservation in describe_instances_response.reservations() {
+            for instance in reservation.instances() {
+                if let Some(instance_id) = instance.instance_id() {
+                    if let Some(state) = instance.state() {
+                        if let Some(state_name) = state.name() {
+                            match state_name {
+                                aws_sdk_ec2::types::InstanceStateName::Running
+                                | aws_sdk_ec2::types::InstanceStateName::Pending => {
+                                    info!(
+                                        "Found running instance '{}' with private IP '{}'",
+                                        instance_id, private_ip
+                                    );
+                                    return Ok(Some(instance_id.to_string()));
+                                }
+                                aws_sdk_ec2::types::InstanceStateName::Terminated
+                                | aws_sdk_ec2::types::InstanceStateName::ShuttingDown => {
+                                    info!(
+                                        "Found instance '{}' with private IP '{}' but it's already terminated/terminating (state: {:?})",
+                                        instance_id, private_ip, state_name
+                                    );
+                                    return Ok(None);
+                                }
+                                _ => {
+                                    warn!(
+                                        "Found instance '{}' with private IP '{}' in unexpected state: {:?}",
+                                        instance_id, private_ip, state_name
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        info!("No instance found with private IP '{}'", private_ip);
+        Ok(None)
+    }
+
+    pub async fn terminate_elastic_compute_instance(
+        &self,
+        context: &AwsClusterContext,
+        instance_id: &str,
+    ) -> Result<()> {
+        info!("Requesting termination of instance '{}'", instance_id);
+
+        match context
+            .ec2_client
+            .terminate_instances()
+            .instance_ids(instance_id)
+            .send()
+            .await
+        {
+            Ok(response) => {
+                let terminating_instances = response.terminating_instances();
+                for terminating_instance in terminating_instances {
+                    if let Some(id) = terminating_instance.instance_id() {
+                        if let Some(current_state) = terminating_instance.current_state() {
+                            if let Some(state_name) = current_state.name() {
+                                info!(
+                                    "Instance '{}' termination initiated, current state: {:?}",
+                                    id, state_name
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                error!("{:?}", e);
+                bail!("Failure terminating instance '{}'", instance_id);
+            }
+        }
+
+        Ok(())
+    }
 }

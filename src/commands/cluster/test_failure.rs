@@ -6,7 +6,12 @@ use anyhow::{Result, bail};
 use sqlx::sqlite::SqlitePool;
 use tracing::{error, info};
 
-pub async fn terminate(pool: &SqlitePool, cluster_id: &str, skip_confirmation: bool) -> Result<()> {
+pub async fn test_failure(
+    pool: &SqlitePool,
+    cluster_id: &str,
+    node_private_ip: &str,
+    skip_confirmation: bool,
+) -> Result<()> {
     let cluster = match Cluster::fetch_by_id(pool, cluster_id).await? {
         Some(cluster) => cluster,
         None => {
@@ -21,11 +26,13 @@ pub async fn terminate(pool: &SqlitePool, cluster_id: &str, skip_confirmation: b
             return Ok(());
         }
         _ => {
-            info!("Terminating Cluster '{}'...", cluster.display_name)
+            info!(
+                "Simulating Spot failure in Cluster '{}'...",
+                cluster.display_name
+            )
         }
     }
 
-    let nodes = cluster.get_nodes(pool).await?;
     let provider_config =
         match ProviderConfig::fetch_by_id(pool, cluster.provider_config_id).await? {
             Some(config) => config,
@@ -46,13 +53,13 @@ pub async fn terminate(pool: &SqlitePool, cluster_id: &str, skip_confirmation: b
 
     if !(utils::user_confirmation(
         skip_confirmation,
-        "Do you confirm you want to terminate this cluster?",
+        "Do you confirm you want to simulate a failure in this cluster?",
     )?) {
         return Ok(());
     }
 
-    Cluster::update_cluster_state(pool, cluster_id, ClusterState::Terminating).await?;
-    cloud_interface.terminate_cluster(cluster, nodes).await?;
-    Cluster::update_cluster_state(pool, cluster_id, ClusterState::Terminated).await?;
+    cloud_interface
+        .simulate_cluster_failure(cluster, node_private_ip)
+        .await?;
     Ok(())
 }

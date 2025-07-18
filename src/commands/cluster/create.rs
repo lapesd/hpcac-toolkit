@@ -70,6 +70,31 @@ pub async fn create(
         }
     };
 
+    // Validate cluster.id
+    let new_cluster_id = match cluster_yaml.id {
+        Some(id) => {
+            let existing_cluster = Cluster::fetch_by_id(pool, &id).await?;
+            if existing_cluster.is_some() {
+                bail!(
+                    "Cluster with id: '{}' already exists. Please update the yaml file and try again",
+                    id
+                );
+            }
+            id
+        }
+        None => utils::generate_id(),
+    };
+
+    // Validate cluster.display_name
+    let cluster_name = cluster_yaml.display_name.clone();
+    let existing_cluster = Cluster::fetch_by_name(pool, &cluster_name).await?;
+    if existing_cluster.is_some() {
+        bail!(
+            "Cluster with display_name: '{}' already exists. Please update the yaml file and try again.",
+            cluster_name
+        );
+    }
+
     // Validate provided SSH key pair
     let public_key_path_string = utils::expand_tilde(&cluster_yaml.public_ssh_key_path);
     let public_key_path = Path::new(&public_key_path_string);
@@ -210,10 +235,6 @@ pub async fn create(
     }
 
     // Validate node data
-    let new_cluster_id = match cluster_yaml.id {
-        Some(id) => id,
-        None => utils::generate_id(),
-    };
     let mut nodes_to_insert: Vec<Node> = vec![];
     let mut commands_to_insert: Vec<ShellCommand> = vec![];
     let node_count = cluster_yaml.nodes.len() as u64;
@@ -439,7 +460,6 @@ pub async fn create(
         return Ok(());
     }
 
-    let cluster_name = cluster_yaml.display_name.clone();
     let cluster = Cluster {
         id: new_cluster_id.clone(),
         display_name: cluster_name.clone(),

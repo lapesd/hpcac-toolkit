@@ -210,7 +210,13 @@ impl CloudResourceManager for AwsInterface {
             main_progress.inc(1);
 
             // 17. Attach EC2 Instances to EFS mount target
+            let efs_dns_name = format!(
+                "{}.efs.{}.amazonaws.com",
+                context.efs_device_id.clone().unwrap(),
+                cluster.region,
+            );
             for (node_index, _) in nodes.iter().enumerate() {
+                // TODO: Optimize this by skipping if the node is already attached
                 let op_msg = format!(
                     "Attaching Node {} of {} to EFS Mount Target...",
                     node_index + 1,
@@ -218,13 +224,6 @@ impl CloudResourceManager for AwsInterface {
                 );
                 operation_spinner.update_message(&op_msg);
                 let node_instance_id = &context.ec2_instance_ids[&node_index];
-                let efs_dns_name = format!(
-                    "{}.efs.{}.amazonaws.com",
-                    context.efs_device_id.clone().unwrap(),
-                    cluster.region,
-                );
-
-                // Script to attach instances to EFS
                 let efs_attach_script = [
                     "sudo dnf install -y nfs-utils".to_string(),
                     "sudo mkdir -p /shared".to_string(),
@@ -232,7 +231,15 @@ impl CloudResourceManager for AwsInterface {
                     "sudo chmod ugo+rwx /shared".to_string(),
                 ];
 
-                for command in efs_attach_script {
+                for (cmd_index, command) in efs_attach_script.into_iter().enumerate() {
+                    let op_msg = format!(
+                        "Executing command ({}/4) on Node {} of {}: {}",
+                        cmd_index,
+                        node_index + 1,
+                        nodes.len(),
+                        command,
+                    );
+                    operation_spinner.update_message(&op_msg);
                     self.send_and_wait_for_ssm_command(&context, node_instance_id, command)
                         .await?;
                 }
@@ -252,7 +259,6 @@ impl CloudResourceManager for AwsInterface {
                 nodes.len()
             );
             operation_spinner.update_message(&op_msg);
-
             for (cmd_index, command) in node_init_commands.iter().enumerate() {
                 let cmd_msg = format!(
                     "Executing command {} of {} on Instance {} (Node {})...",
@@ -262,15 +268,13 @@ impl CloudResourceManager for AwsInterface {
                     node_index + 1
                 );
                 operation_spinner.update_message(&cmd_msg);
-
                 info!(
-                    "Executing command {}/{} on node {}: {}",
+                    "Executing command ({}/{}) on Node {}: {}",
                     cmd_index + 1,
                     node_init_commands.len(),
                     node_index + 1,
                     command
                 );
-
                 self.send_and_wait_for_ssm_command(&context, node_instance_id, command.clone())
                     .await?;
                 main_progress.inc(1);
@@ -300,7 +304,7 @@ impl CloudResourceManager for AwsInterface {
         Ok(())
     }
 
-    async fn destroy_cluster(&self, cluster: Cluster, nodes: Vec<Node>) -> Result<()> {
+    async fn terminate_cluster(&self, cluster: Cluster, nodes: Vec<Node>) -> Result<()> {
         let context = self.create_cluster_context(&cluster)?;
         let mut steps = 9 + (2 * nodes.len());
         if cluster.use_node_affinity {
@@ -310,11 +314,11 @@ impl CloudResourceManager for AwsInterface {
             steps += 4;
         }
 
-        let destroying_message = format!("Destroying Cluster '{}'...", cluster.display_name);
-        info!(destroying_message);
+        let terminating_message = format!("Terminating Cluster '{}'...", cluster.display_name);
+        info!(terminating_message);
         let multi = utils::ProgressTracker::create_multi();
         let main_progress =
-            utils::ProgressTracker::add_to_multi(&multi, steps as u64, Some(&destroying_message));
+            utils::ProgressTracker::add_to_multi(&multi, steps as u64, Some(&terminating_message));
         let operation_spinner =
             utils::ProgressTracker::new_indeterminate(&multi, "Initializing...");
 
@@ -463,10 +467,36 @@ impl CloudResourceManager for AwsInterface {
 
         operation_spinner.finish_with_message("All Cloud operations completed");
         main_progress.finish_with_message(&format!(
-            "Cluster '{}' destroyed successfully!",
+            "Cluster '{}' terminated successfully!",
             cluster.display_name
         ));
-        println!("Cluster destruction completed successfully!");
+        println!("Cluster termination completed successfully!");
+        Ok(())
+    }
+
+    async fn simulate_cluster_failure(
+        &self,
+        cluster: Cluster,
+        node_private_ip: &str,
+    ) -> Result<()> {
+        let context = self.create_cluster_context(&cluster)?;
+        match self
+            .find_elastic_compute_instance_by_private_ip(&context, node_private_ip)
+            .await?
+        {
+            Some(id) => {
+                println!("Terminating instance with IP: '{}'", node_private_ip);
+                self.terminate_elastic_compute_instance(&context, &id)
+                    .await?;
+            }
+            None => {
+                println!(
+                    "Private IP: '{}' not found in Cluster '{}'",
+                    node_private_ip, cluster.display_name
+                );
+            }
+        }
+
         Ok(())
     }
 }

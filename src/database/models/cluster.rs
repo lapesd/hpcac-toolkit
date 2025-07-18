@@ -196,6 +196,42 @@ impl Cluster {
         Ok(cluster)
     }
 
+    pub async fn fetch_by_name(pool: &SqlitePool, cluster_name: &str) -> Result<Option<Cluster>> {
+        let cluster = match sqlx::query_as!(
+            Cluster,
+            r#"
+                SELECT 
+                    id as "id!", 
+                    display_name,
+                    provider_id,
+                    provider_config_id as "provider_config_id!",
+                    public_ssh_key_path,
+                    private_ssh_key_path,
+                    region,
+                    availability_zone,
+                    use_node_affinity,
+                    use_elastic_fabric_adapters,
+                    use_elastic_file_system,
+                    created_at,
+                    state as "state: ClusterState"
+                FROM clusters
+                WHERE display_name = ?
+            "#,
+            cluster_name
+        )
+        .fetch_optional(pool)
+        .await
+        {
+            Ok(result) => result,
+            Err(e) => {
+                error!("SQLx Error: {:?}", e);
+                bail!("DB Operation Failure");
+            }
+        };
+
+        Ok(cluster)
+    }
+
     pub async fn fetch_all(pool: &SqlitePool) -> Result<Vec<Cluster>> {
         let clusters = match sqlx::query_as!(
             Cluster,

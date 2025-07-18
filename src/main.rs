@@ -60,9 +60,12 @@ enum ClusterCommands {
         cluster_id: String,
     },
 
-    /// Terminates a new Cluster
-    Terminate {
-        /// Identifier of the Cluster to terminate
+    /// List existing Clusters
+    List {},
+
+    /// Spawn a new Cluster
+    Spawn {
+        /// Cluster identifier
         #[arg(long)]
         cluster_id: String,
 
@@ -71,14 +74,26 @@ enum ClusterCommands {
         yes: bool,
     },
 
-    /// List existing Clusters
-    List {},
-
-    /// Spawn a new Cluster
-    Spawn {
-        /// Identifier of the Cluster to spawn
+    /// Terminates a new Cluster
+    Terminate {
+        /// Cluster identifier
         #[arg(long)]
         cluster_id: String,
+
+        /// Skip confirmation prompt
+        #[arg(short = 'y', long = "yes")]
+        yes: bool,
+    },
+
+    /// Test a Cluster failure
+    TestFailure {
+        /// Cluster identifier
+        #[arg(long)]
+        cluster_id: String,
+
+        /// Node private_ip to terminate
+        #[arg(long)]
+        node_private_ip: String,
 
         /// Skip confirmation prompt
         #[arg(short = 'y', long = "yes")]
@@ -238,14 +253,22 @@ async fn main() -> Result<()> {
             ClusterCommands::Delete { cluster_id } => {
                 commands::cluster::delete(&sqlite_pool, cluster_id).await?;
             }
-            ClusterCommands::Terminate { cluster_id, yes } => {
-                commands::cluster::terminate(&sqlite_pool, cluster_id, *yes).await?;
-            }
             ClusterCommands::List {} => {
                 commands::cluster::list(&sqlite_pool).await?;
             }
             ClusterCommands::Spawn { cluster_id, yes } => {
                 commands::cluster::spawn(&sqlite_pool, cluster_id, *yes).await?;
+            }
+            ClusterCommands::Terminate { cluster_id, yes } => {
+                commands::cluster::terminate(&sqlite_pool, cluster_id, *yes).await?;
+            }
+            ClusterCommands::TestFailure {
+                cluster_id,
+                node_private_ip,
+                yes,
+            } => {
+                commands::cluster::test_failure(&sqlite_pool, cluster_id, node_private_ip, *yes)
+                    .await?;
             }
         },
         Commands::InstanceType { command } => match command {

@@ -479,15 +479,26 @@ impl CloudInfoProvider for AwsInterface {
             }
         };
 
-        let images = response.images.unwrap_or_default();
-        let aws_image = &images[0]; // get the first (should be only one)
+        let images = response.images();
+
+        let aws_image = match images.first() {
+            Some(image) => image,
+            None => {
+                bail!(
+                    "Image '{}' not found in region '{}'. The image may not exist, may not be accessible, or may be in a different region.",
+                    image_id,
+                    region
+                );
+            }
+        };
+
         let now = chrono::Utc::now().naive_utc();
         let image = MachineImage {
             id: image_id.to_string(),
-            name: aws_image.name.clone().unwrap_or_default(),
-            description: aws_image.description.clone().unwrap_or_default(),
-            owner: aws_image.owner_id.clone().unwrap_or_default(),
-            creation_date: aws_image.creation_date.clone().unwrap_or_default(),
+            name: aws_image.name().unwrap_or_default().to_string(),
+            description: aws_image.description().unwrap_or_default().to_string(),
+            owner: aws_image.owner_id().unwrap_or_default().to_string(),
+            creation_date: aws_image.creation_date().unwrap_or_default().to_string(),
             provider: "aws".to_string(),
             region: region.to_string(),
             created_at: now,

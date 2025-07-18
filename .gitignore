@@ -28,3 +28,7 @@ db.sqlite-wal
 
 # .log files
 *.log
+
+# YAML files in root directory (except cluster.example.yaml)
+/*.yaml
+!cluster.example.yaml
