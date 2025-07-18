@@ -68,6 +68,19 @@ jobs:
           key: ${{ matrix.target }}
           cache-on-failure: true
 
+      # Create SQLite database for sqlx compile-time checks
+      - name: Setup SQLite database
+        if: matrix.skip != true
+        run: |
+          # Install sqlx-cli
+          cargo install sqlx-cli --no-default-features --features sqlite
+          # Create empty database and run migrations
+          touch db.sqlite
+          # If you have migrations, run them:
+          # sqlx migrate run --database-url sqlite://db.sqlite
+        env:
+          DATABASE_URL: sqlite://db.sqlite
+
       # Install cross for Linux ARM64 cross-compilation
       - name: Install cross
         if: matrix.target == 'aarch64-unknown-linux-gnu' && matrix.skip != true
@@ -85,6 +98,7 @@ jobs:
         env:
           CARGO_NET_RETRY: 10
           CARGO_NET_TIMEOUT: 60
+          DATABASE_URL: sqlite://db.sqlite
 
       - name: Build binary (native)
         if: matrix.target != 'aarch64-unknown-linux-gnu' && matrix.skip != true
@@ -93,6 +107,7 @@ jobs:
         env:
           CARGO_NET_RETRY: 10
           CARGO_NET_TIMEOUT: 60
+          DATABASE_URL: sqlite://db.sqlite
 
       # Create the final artifact with proper naming
       - name: Prepare artifact (Unix)
