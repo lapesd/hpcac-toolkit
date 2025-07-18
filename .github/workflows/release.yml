@@ -74,10 +74,9 @@ jobs:
         run: |
           # Install sqlx-cli
           cargo install sqlx-cli --no-default-features --features sqlite
-          # Create empty database and run migrations
-          touch db.sqlite
-          # If you have migrations, run them:
-          # sqlx migrate run --database-url sqlite://db.sqlite
+          # Create database and run migrations
+          sqlx database create --database-url sqlite://db.sqlite
+          sqlx migrate run --database-url sqlite://db.sqlite
         env:
           DATABASE_URL: sqlite://db.sqlite
 
