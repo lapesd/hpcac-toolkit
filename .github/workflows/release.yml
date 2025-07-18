@@ -13,6 +13,7 @@ jobs:
   build:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60 # Set explicit timeout
     strategy:
       matrix:
         include:
@@ -22,11 +23,12 @@ jobs:
             name: macos-intel
             asset_name: hpcac-toolkit-macos-intel
             
-          # macOS Apple Silicon (ARM64)
+          # macOS Apple Silicon (ARM64) - TEMPORARILY SKIPPED
           - target: aarch64-apple-darwin
             os: macos-14
             name: macos-arm64
             asset_name: hpcac-toolkit-macos-arm64
+            skip: true
             
           # Linux x86_64
           - target: x86_64-unknown-linux-gnu
@@ -34,44 +36,67 @@ jobs:
             name: linux-amd64
             asset_name: hpcac-toolkit-linux-amd64
             
-          # Linux ARM64
+          # Linux ARM64 - TEMPORARILY SKIPPED
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             name: linux-arm64
             asset_name: hpcac-toolkit-linux-arm64
             use_cross: true
+            skip: true
 
     steps:
+      - name: Skip ARM builds temporarily
+        if: matrix.skip == true
+        run: |
+          echo "Skipping ARM build for ${{ matrix.target }}"
+          exit 0
+          
       - name: Checkout code
+        if: matrix.skip != true
         uses: actions/checkout@v4
 
       - name: Setup Rust
+        if: matrix.skip != true
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
       - name: Setup Rust cache
+        if: matrix.skip != true
         uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
+          cache-on-failure: true
 
       # Install cross for Linux ARM64 cross-compilation
       - name: Install cross
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: cargo install cross --git https://github.com/cross-rs/cross
+        if: matrix.target == 'aarch64-unknown-linux-gnu' && matrix.skip != true
+        run: |
+          cargo install cross --git https://github.com/cross-rs/cross
+          # Verify installation
+          cross --version
 
       # Build using cross for Linux ARM64, native for others
       - name: Build binary (cross)
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: cross build --release --target ${{ matrix.target }}
+        if: matrix.target == 'aarch64-unknown-linux-gnu' && matrix.skip != true
+        run: |
+          # Use fewer parallel jobs to reduce memory usage
+          cross build --release --target ${{ matrix.target }} --jobs 2
+        env:
+          CARGO_NET_RETRY: 10
+          CARGO_NET_TIMEOUT: 60
 
       - name: Build binary (native)
-        if: matrix.target != 'aarch64-unknown-linux-gnu'
-        run: cargo build --release --target ${{ matrix.target }}
+        if: matrix.target != 'aarch64-unknown-linux-gnu' && matrix.skip != true
+        run: |
+          cargo build --release --target ${{ matrix.target }} --jobs 2
+        env:
+          CARGO_NET_RETRY: 10
+          CARGO_NET_TIMEOUT: 60
 
       # Create the final artifact with proper naming
       - name: Prepare artifact (Unix)
-        if: runner.os != 'Windows'
+        if: runner.os != 'Windows' && matrix.skip != true
         run: |
           mkdir -p artifacts
           cp target/${{ matrix.target }}/release/hpcac-toolkit artifacts/${{ matrix.asset_name }}
@@ -79,13 +104,14 @@ jobs:
 
       # Create compressed archives
       - name: Create tar.gz (Unix)
-        if: runner.os != 'Windows'
+        if: runner.os != 'Windows' && matrix.skip != true
         run: |
           cd artifacts
           tar -czf ${{ matrix.asset_name }}.tar.gz ${{ matrix.asset_name }}
           
       # Upload artifacts for the release job
       - name: Upload artifact
+        if: matrix.skip != true
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset_name }}
@@ -125,9 +151,9 @@ jobs:
             ## Downloads
             
             - **macOS Intel**: `hpcac-toolkit-macos-intel.tar.gz`
-            - **macOS Apple Silicon**: `hpcac-toolkit-macos-arm64.tar.gz`
             - **Linux x86_64**: `hpcac-toolkit-linux-amd64.tar.gz`
-            - **Linux ARM64**: `hpcac-toolkit-linux-arm64.tar.gz`
+            
+            *Note: ARM64 builds temporarily disabled*
             
             ## Installation
 
@@ -148,16 +174,6 @@ jobs:
           asset_name: hpcac-toolkit-macos-intel.tar.gz
           asset_content_type: application/gzip
 
-      - name: Upload macOS ARM64
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: artifacts/hpcac-toolkit-macos-arm64/hpcac-toolkit-macos-arm64.tar.gz
-          asset_name: hpcac-toolkit-macos-arm64.tar.gz
-          asset_content_type: application/gzip
-
       - name: Upload Linux x86_64
         uses: actions/upload-release-asset@v1
         env:
@@ -168,12 +184,23 @@ jobs:
           asset_name: hpcac-toolkit-linux-amd64.tar.gz
           asset_content_type: application/gzip
 
-      - name: Upload Linux ARM64
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: artifacts/hpcac-toolkit-linux-arm64/hpcac-toolkit-linux-arm64.tar.gz
-          asset_name: hpcac-toolkit-linux-arm64.tar.gz
-          asset_content_type: application/gzip
+      # ARM64 uploads commented out while builds are skipped
+      # - name: Upload macOS ARM64
+      #   uses: actions/upload-release-asset@v1
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #   with:
+      #     upload_url: ${{ steps.create_release.outputs.upload_url }}
+      #     asset_path: artifacts/hpcac-toolkit-macos-arm64/hpcac-toolkit-macos-arm64.tar.gz
+      #     asset_name: hpcac-toolkit-macos-arm64.tar.gz
+      #     asset_content_type: application/gzip
+
+      # - name: Upload Linux ARM64
+      #   uses: actions/upload-release-asset@v1
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #   with:
+      #     upload_url: ${{ steps.create_release.outputs.upload_url }}
+      #     asset_path: artifacts/hpcac-toolkit-linux-arm64/hpcac-toolkit-linux-arm64.tar.gz
+      #     asset_name: hpcac-toolkit-linux-arm64.tar.gz
+      #     asset_content_type: application/gzip
