@@ -32,7 +32,7 @@ jobs:
             
           # Linux x86_64
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-20.04
             name: linux-amd64
             asset_name: hpcac-toolkit-linux-amd64
             
@@ -102,6 +102,10 @@ jobs:
       - name: Build binary (native)
         if: matrix.target != 'aarch64-unknown-linux-gnu' && matrix.skip != true
         run: |
+          # For Linux, use static linking to avoid glibc version issues
+          if [[ "${{ matrix.target }}" == *"linux"* ]]; then
+            export RUSTFLAGS="-C target-feature=+crt-static"
+          fi
           cargo build --release --target ${{ matrix.target }} --jobs 2
         env:
           CARGO_NET_RETRY: 10
