@@ -1,0 +1,11 @@
+tasks:
+  - task_name: "Run hostname"
+    commands:
+      - hostname
+      - uptime
+
+  - task_name: "Run task2"
+    commands: 
+      - ls
+      - la
+      - ll
