@@ -28,3 +28,6 @@ db.sqlite-wal
 
 # .log files
 *.log
+
+# result reports
+results/

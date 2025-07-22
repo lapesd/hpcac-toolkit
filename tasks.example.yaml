@@ -1,11 +1,14 @@
 tasks:
-  - task_name: "Run hostname"
-    commands:
+  - task_tag: "task1"
+    setup_commands:
       - hostname
       - uptime
+    run_commands:
 
-  - task_name: "Run task2"
-    commands: 
+  - task_tag: "task2"
+    setup_commands:
+    run_commands:
       - ls
-      - la
-      - ll
+      - mkdir task3_dir
+      - ls
+
