@@ -1,4 +1,6 @@
 use crate::database::models::ProviderConfig;
+
+use anyhow::Result;
 use sqlx::sqlite::SqlitePool;
 use tabled::{Table, Tabled, settings::Style};
 
@@ -14,7 +16,7 @@ struct ProviderConfigDisplay {
     config_vars: String,
 }
 
-pub async fn list(pool: &SqlitePool) -> anyhow::Result<()> {
+pub async fn list(pool: &SqlitePool) -> Result<()> {
     let configs = ProviderConfig::fetch_all(pool).await?;
     let total = configs.len();
 

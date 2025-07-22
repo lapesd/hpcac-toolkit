@@ -51,8 +51,8 @@ pub async fn terminate(pool: &SqlitePool, cluster_id: &str, skip_confirmation: b
         return Ok(());
     }
 
-    Cluster::update_cluster_state(pool, cluster_id, ClusterState::Terminating).await?;
-    cloud_interface.terminate_cluster(cluster, nodes).await?;
-    Cluster::update_cluster_state(pool, cluster_id, ClusterState::Terminated).await?;
+    cloud_interface
+        .terminate_cluster(pool, cluster, nodes)
+        .await?;
     Ok(())
 }

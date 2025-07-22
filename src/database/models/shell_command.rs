@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, bail};
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use sqlx::Transaction;
@@ -45,7 +45,7 @@ impl ShellCommand {
             Ok(result) => result,
             Err(e) => {
                 error!("SQLx Error: {}", e.to_string());
-                anyhow::bail!("DB Operation Failure");
+                bail!("DB Operation Failure");
             }
         };
 
@@ -74,7 +74,7 @@ impl ShellCommand {
             Ok(_) => {}
             Err(e) => {
                 error!("SQLx Error: {}", e.to_string());
-                anyhow::bail!("DB Operation Failure");
+                bail!("DB Operation Failure");
             }
         };
 

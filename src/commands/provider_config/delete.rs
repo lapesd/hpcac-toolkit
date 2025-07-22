@@ -1,12 +1,14 @@
 use crate::database::models::ProviderConfig;
 use crate::utils;
+
+use anyhow::Result;
 use sqlx::sqlite::SqlitePool;
 
 pub async fn delete(
     pool: &SqlitePool,
     provider_config_id: &str,
     skip_confirmation: bool,
-) -> anyhow::Result<()> {
+) -> Result<()> {
     // Parse the string into an i64
     let id = provider_config_id
         .parse::<i64>()

@@ -17,6 +17,8 @@ pub enum ClusterState {
     Spawning,
     #[sqlx(rename = "running")]
     Running,
+    #[sqlx(rename = "restoring")]
+    Restoring,
     #[sqlx(rename = "terminating")]
     Terminating,
     #[sqlx(rename = "terminated")]
@@ -31,6 +33,7 @@ impl std::fmt::Display for ClusterState {
             ClusterState::Pending => "pending",
             ClusterState::Spawning => "spawning",
             ClusterState::Running => "running",
+            ClusterState::Restoring => "restoring",
             ClusterState::Terminating => "terminating",
             ClusterState::Terminated => "terminated",
             ClusterState::Failed => "failed",
@@ -47,6 +50,7 @@ impl std::str::FromStr for ClusterState {
             "pending" => Ok(ClusterState::Pending),
             "spawning" => Ok(ClusterState::Spawning),
             "running" => Ok(ClusterState::Running),
+            "restoring" => Ok(ClusterState::Restoring),
             "terminating" => Ok(ClusterState::Terminating),
             "terminated" => Ok(ClusterState::Terminated),
             "failed" => Ok(ClusterState::Failed),
@@ -502,13 +506,14 @@ impl Cluster {
                 SELECT
                     id as "id!", 
                     cluster_id, 
-                    status, 
                     instance_type, 
                     allocation_mode, 
                     burstable_mode, 
                     image_id, 
                     private_ip, 
-                    public_ip 
+                    public_ip,
+                    was_efs_configured,
+                    was_ssh_configured
                 FROM nodes 
                 WHERE cluster_id = ?
             "#,
@@ -527,14 +532,10 @@ impl Cluster {
         Ok(nodes)
     }
 
-    pub async fn update_cluster_state(
-        pool: &SqlitePool,
-        cluster_id: &str,
-        new_state: ClusterState,
-    ) -> Result<()> {
+    pub async fn update_state(&self, pool: &SqlitePool, new_state: ClusterState) -> Result<()> {
         info!(
             "Transitioning Cluster (id='{}') to state '{}'",
-            cluster_id, new_state
+            self.id, new_state
         );
 
         match sqlx::query!(
@@ -544,7 +545,7 @@ impl Cluster {
                 WHERE id = ?
             "#,
             new_state,
-            cluster_id
+            self.id
         )
         .execute(pool)
         .await
@@ -553,14 +554,14 @@ impl Cluster {
                 if result.rows_affected() == 0 {
                     error!(
                         "No cluster found with id '{}' for state transition",
-                        cluster_id
+                        self.id
                     );
                     bail!("DB Operation Failure");
                 }
 
                 info!(
                     "Successfully transitioned Cluster (id='{}') to '{}'",
-                    cluster_id, new_state
+                    self.id, new_state
                 );
             }
             Err(e) => {

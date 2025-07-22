@@ -1,34 +1,41 @@
 use super::interface::AwsInterface;
-use crate::database::models::{Cluster, Node};
+
+use crate::database::models::{Cluster, ClusterState, Node};
 use crate::integrations::CloudResourceManager;
 use crate::utils;
 
 use std::collections::HashMap;
 
 use anyhow::Result;
+use sqlx::sqlite::SqlitePool;
+use tokio::time::{Duration, sleep};
 use tracing::info;
 
 impl CloudResourceManager for AwsInterface {
     async fn spawn_cluster(
         &self,
+        pool: &SqlitePool,
         cluster: Cluster,
         nodes: Vec<Node>,
-        init_commands: HashMap<usize, Vec<String>>,
     ) -> Result<()> {
         let mut context = self.create_cluster_context(&cluster)?;
-        let mut steps = 8 + (4 * nodes.len()) + nodes.len();
+        let mut steps = 9 + (6 * nodes.len());
         if cluster.use_node_affinity {
             steps += 1;
         }
         if cluster.use_elastic_file_system {
-            steps += 4 + nodes.len();
+            steps += 4 + (2 * nodes.len());
         }
-        let total_init_commands: usize =
-            init_commands.values().map(|commands| commands.len()).sum();
-        steps += total_init_commands;
 
         let spawning_message = format!("Spawning Cluster '{}'...", cluster.display_name);
         info!(spawning_message);
+
+        let new_state = match cluster.state {
+            ClusterState::Running => ClusterState::Restoring,
+            _ => ClusterState::Spawning,
+        };
+        cluster.update_state(pool, new_state).await?;
+
         let multi = utils::ProgressTracker::create_multi();
         let main_progress =
             utils::ProgressTracker::add_to_multi(&multi, steps as u64, Some(&spawning_message));
@@ -59,9 +66,9 @@ impl CloudResourceManager for AwsInterface {
          *     14.1. Request EC2 instance creation
          * }
          * 15. Wait for all EC2 instances to be ready
-         * 16. Wait for EFS mount target to be ready
-         * 17. Attach EC2 Instances to EFS mount target
-         * 18. Dispatch EC2 Instances initialization commands
+         * 16. (conditional) Wait for EFS mount target to be ready
+         * 17. (conditional) Attach EC2 Instances to EFS mount target using SSM
+         * 18. (conditional) Dispatch EC2 Instances initialization commands
          */
 
         // 1. Request EFS device creation...
@@ -142,7 +149,7 @@ impl CloudResourceManager for AwsInterface {
         }
 
         // 13. Create ENI devices, Elastic IPs, and associate them
-        for (node_index, _node) in nodes.iter().enumerate() {
+        for (node_index, node) in nodes.iter().enumerate() {
             // 13.1. Create ENI device
             operation_spinner.update_message(&format!(
                 "Creating {} of {} Elastic Network Interface (ENI) devices",
@@ -175,14 +182,29 @@ impl CloudResourceManager for AwsInterface {
             let node_public_ip = self
                 .associate_elastic_ip_with_network_interface(&context, &eip_id, &eni_id)
                 .await?;
-            context.elastic_ips.insert(node_index, node_public_ip);
+            context
+                .elastic_ips
+                .insert(node_index, node_public_ip.clone());
+            let node_private_ip = context.network_interface_private_ip(node_index);
+            node.set_ips(pool, &node_private_ip, &node_public_ip)
+                .await?;
             main_progress.inc(1);
         }
 
         // 14. Request EC2 Instances
-        // TODO: Add Spot support
+        match cluster.state {
+            // Sleep for 20s to give time for the IAM Profile to be propagated the first time the
+            // Cluster is created
+            ClusterState::Pending | ClusterState::Spawning => {
+                operation_spinner
+                    .update_message("Giving time for the IAM Profile to be propagated...");
+                sleep(Duration::from_secs(20)).await;
+            }
+            _ => {}
+        }
         for (node_index, node) in nodes.iter().enumerate() {
             // 14.1. Request EC2 instance creation...
+            // TODO: Add Spot support
             operation_spinner.update_message(&format!(
                 "Requesting {} of {} EC2 Instances (type='{}')",
                 node_index + 1,
@@ -198,6 +220,7 @@ impl CloudResourceManager for AwsInterface {
 
         // 15. Wait for all EC2 Instances to be available
         operation_spinner.update_message("Waiting for all EC2 Instances to be available...");
+        sleep(Duration::from_secs(5)).await;
         self.wait_for_all_elastic_compute_instances_to_be_available(&context)
             .await?;
         main_progress.inc(1);
@@ -209,84 +232,125 @@ impl CloudResourceManager for AwsInterface {
                 .await?;
             main_progress.inc(1);
 
-            // 17. Attach EC2 Instances to EFS mount target
+            // 17. Attach EC2 Instances to EFS mount target using SSM
             let efs_dns_name = format!(
                 "{}.efs.{}.amazonaws.com",
                 context.efs_device_id.clone().unwrap(),
                 cluster.region,
             );
+            let mut ssm_command_ids: HashMap<usize, String> = HashMap::new();
             for (node_index, _) in nodes.iter().enumerate() {
-                // TODO: Optimize this by skipping if the node is already attached
                 let op_msg = format!(
-                    "Attaching Node {} of {} to EFS Mount Target...",
+                    "Requesting EFS Mount Target attachment for Node {} of {}...",
                     node_index + 1,
                     nodes.len()
                 );
                 operation_spinner.update_message(&op_msg);
-                let node_instance_id = &context.ec2_instance_ids[&node_index];
-                let efs_attach_script = [
-                    "sudo dnf install -y nfs-utils".to_string(),
-                    "sudo mkdir -p /shared".to_string(),
-                    format!("sudo mount -t nfs4 {}:/ /shared", efs_dns_name),
-                    "sudo chmod ugo+rwx /shared".to_string(),
-                ];
-
-                for (cmd_index, command) in efs_attach_script.into_iter().enumerate() {
-                    let op_msg = format!(
-                        "Executing command ({}/4) on Node {} of {}: {}",
-                        cmd_index,
-                        node_index + 1,
-                        nodes.len(),
-                        command,
-                    );
-                    operation_spinner.update_message(&op_msg);
-                    self.send_and_wait_for_ssm_command(&context, node_instance_id, command)
+                match nodes[node_index].was_efs_configured {
+                    true => {
+                        info!(
+                            "Skipping Node {} of {} (already configured for EFS)...",
+                            node_index + 1,
+                            nodes.len()
+                        );
+                    }
+                    false => {
+                        let node_instance_id = &context.ec2_instance_ids[&node_index];
+                        let efs_attach_script = format!(
+                            r#"
+sudo yum install -y nfs-utils
+sudo mkdir -p /shared
+i=1
+while true; do
+   echo "EFS mount attempt $i..."
+   if sudo mount -t nfs4 {}:/ /shared; then
+       echo "EFS mount successful!"
+       break
+   else
+       echo "EFS mount failed, waiting 10 seconds for DNS propagation..."
+       sleep 10
+       i=$((i + 1))
+   fi
+done
+sudo chown ec2-user:ec2-user /shared
+echo "EFS mount and setup complete!"
+"#,
+                            efs_dns_name
+                        );
+                        let ssm_command_id = self
+                            .create_ssm_command(&context, node_instance_id, efs_attach_script)
+                            .await?;
+                        ssm_command_ids.insert(node_index, ssm_command_id);
+                    }
+                }
+                main_progress.inc(1);
+            }
+            for (node_index, _) in nodes.iter().enumerate() {
+                let max_wait_time = Duration::from_secs(5 * 60);
+                let poll_interval = Duration::from_secs(15);
+                let op_msg = format!(
+                    "Waiting for Node {} of {} to attach to EFS Mount Target...",
+                    node_index + 1,
+                    nodes.len()
+                );
+                operation_spinner.update_message(&op_msg);
+                match nodes[node_index].was_efs_configured {
+                    true => {}
+                    false => {
+                        let node_instance_id = &context.ec2_instance_ids[&node_index];
+                        self.poll_ssm_command_until_completion(
+                            &context,
+                            &ssm_command_ids[&node_index],
+                            node_instance_id,
+                            max_wait_time,
+                            poll_interval,
+                        )
                         .await?;
+                        nodes[node_index]
+                            .set_efs_configuration_state(pool, true)
+                            .await?;
+                    }
                 }
                 main_progress.inc(1);
             }
         }
 
         // 18. Dispatch EC2 Instance initialization commands
-        for (node_index, _) in nodes.iter().enumerate() {
-            let node_instance_id = &context.ec2_instance_ids[&node_index];
-            let node_init_commands = &init_commands[&node_index];
+        let mut ssm_init_command_ids: HashMap<usize, String> = HashMap::new();
+        for (node_index, node) in nodes.iter().enumerate() {
+            let node_init_commands = node.get_init_commands(pool).await?;
             let op_msg = format!(
-                "Dispatching {} initialization commands to Instance {} (Node {} of {})...",
-                node_init_commands.len(),
-                node_instance_id,
+                "Dispatching init script for Node {} of {}...",
                 node_index + 1,
                 nodes.len()
             );
             operation_spinner.update_message(&op_msg);
-            for (cmd_index, command) in node_init_commands.iter().enumerate() {
-                let cmd_msg = format!(
-                    "Executing command {} of {} on Instance {} (Node {})...",
-                    cmd_index + 1,
-                    node_init_commands.len(),
-                    node_instance_id,
-                    node_index + 1
-                );
-                operation_spinner.update_message(&cmd_msg);
-                info!(
-                    "Executing command ({}/{}) on Node {}: {}",
-                    cmd_index + 1,
-                    node_init_commands.len(),
-                    node_index + 1,
-                    command
-                );
-                self.send_and_wait_for_ssm_command(&context, node_instance_id, command.clone())
-                    .await?;
-                main_progress.inc(1);
+            if node_init_commands.is_empty() {
+                continue;
             }
-
-            info!(
-                "Successfully completed all {} initialization commands for Instance {} (Node {})",
-                node_init_commands.len(),
-                node_instance_id,
-                node_index + 1
-            );
+            let node_instance_id = &context.ec2_instance_ids[&node_index];
+            let node_init_script = node_init_commands.join(" && ");
+            let ssm_command_id = self
+                .create_ssm_command(&context, node_instance_id, node_init_script)
+                .await?;
+            ssm_init_command_ids.insert(node_index, ssm_command_id);
+            main_progress.inc(1);
         }
+        for (node_index, ssm_init_command_id) in ssm_init_command_ids.iter() {
+            let node_instance_id = &context.ec2_instance_ids[node_index];
+            let max_wait_time = Duration::from_secs(15 * 60);
+            let poll_interval = Duration::from_secs(15);
+            self.poll_ssm_command_until_completion(
+                &context,
+                ssm_init_command_id,
+                node_instance_id,
+                max_wait_time,
+                poll_interval,
+            )
+            .await?;
+        }
+
+        cluster.update_state(pool, ClusterState::Running).await?;
 
         operation_spinner.finish_with_message("All Cloud operations completed");
         main_progress.finish_with_message(&format!(
@@ -304,9 +368,15 @@ impl CloudResourceManager for AwsInterface {
         Ok(())
     }
 
-    async fn terminate_cluster(&self, cluster: Cluster, nodes: Vec<Node>) -> Result<()> {
+    async fn terminate_cluster(
+        &self,
+        pool: &SqlitePool,
+        cluster: Cluster,
+        nodes: Vec<Node>,
+    ) -> Result<()> {
         let context = self.create_cluster_context(&cluster)?;
-        let mut steps = 9 + (2 * nodes.len());
+        let mut steps = 10;
+        steps += 2 * nodes.len();
         if cluster.use_node_affinity {
             steps += 1;
         }
@@ -316,6 +386,14 @@ impl CloudResourceManager for AwsInterface {
 
         let terminating_message = format!("Terminating Cluster '{}'...", cluster.display_name);
         info!(terminating_message);
+
+        cluster
+            .update_state(pool, ClusterState::Terminating)
+            .await?;
+        for node in nodes.iter() {
+            node.set_efs_configuration_state(pool, false).await?;
+        }
+
         let multi = utils::ProgressTracker::create_multi();
         let main_progress =
             utils::ProgressTracker::add_to_multi(&multi, steps as u64, Some(&terminating_message));
@@ -325,16 +403,16 @@ impl CloudResourceManager for AwsInterface {
         /*
          * AWS CLUSTER CLOUD RESOURCE DESTRUCTION CYCLE
          *
-         * 1. Request EFS mount target deletion
+         * 1. (optional) Request EFS mount target deletion
          * 2. Request termination of all EC2 Instances
-         * 3. Wait for EFS mount target to be deleted
-         * 4. Request EFS device deletion
+         * 3. (optional) Wait for EFS mount target to be deleted
+         * 4. (optional) Request EFS device deletion
          * 5. Wait for all EC2 instances to be terminated
          * 6. for each node {
          *    6.1. Dissociate from ENI device and deallocate Elastic IP
          *    6.2. Destroy ENI device
          * }
-         * 7. Destroy Placement Group
+         * 7. (optional) Destroy Placement Group
          * 8. Destroy SSH Key Pair
          * 9. Destroy Security Groups
          * 10. Destroy IAM Profile
@@ -343,7 +421,7 @@ impl CloudResourceManager for AwsInterface {
          * 13. Destroy Internet Gateway
          * 14. Destroy Subnet
          * 15. Destroy VPC
-         * 16. Wait for EFS device to be deleted
+         * 16. (optional) Wait for EFS device to be deleted
          */
 
         // 1. Request EFS mount target deletion
@@ -465,6 +543,8 @@ impl CloudResourceManager for AwsInterface {
             main_progress.inc(1);
         }
 
+        cluster.update_state(pool, ClusterState::Terminated).await?;
+
         operation_spinner.finish_with_message("All Cloud operations completed");
         main_progress.finish_with_message(&format!(
             "Cluster '{}' terminated successfully!",
@@ -476,6 +556,7 @@ impl CloudResourceManager for AwsInterface {
 
     async fn simulate_cluster_failure(
         &self,
+        pool: &SqlitePool,
         cluster: Cluster,
         node_private_ip: &str,
     ) -> Result<()> {
@@ -493,6 +574,24 @@ impl CloudResourceManager for AwsInterface {
                 println!(
                     "Private IP: '{}' not found in Cluster '{}'",
                     node_private_ip, cluster.display_name
+                );
+                return Ok(());
+            }
+        }
+
+        match Node::fetch_by_private_ip(pool, node_private_ip).await? {
+            Some(failed_node) => {
+                failed_node.set_efs_configuration_state(pool, false).await?;
+                sleep(Duration::from_secs(30)).await;
+                println!(
+                    "Requested termination for Instance '{}' (failure simulation)",
+                    failed_node.id
+                );
+            }
+            None => {
+                println!(
+                    "Couldn't find Node record (private_ip='{}') in the database",
+                    node_private_ip
                 );
             }
         }

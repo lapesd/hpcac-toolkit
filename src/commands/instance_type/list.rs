@@ -1,4 +1,6 @@
 use crate::database::models::{InstanceType, InstanceTypeFilters};
+
+use anyhow::Result;
 use sqlx::sqlite::SqlitePool;
 use tabled::{Table, Tabled, settings::Style};
 
@@ -36,7 +38,7 @@ struct InstanceTypeDisplay {
     supports_efa: bool,
 }
 
-pub async fn list(pool: &SqlitePool, filters: InstanceTypeFilters) -> anyhow::Result<()> {
+pub async fn list(pool: &SqlitePool, filters: InstanceTypeFilters) -> Result<()> {
     let instance_types = InstanceType::fetch_all(pool, filters).await?;
     let total = instance_types.len();
 

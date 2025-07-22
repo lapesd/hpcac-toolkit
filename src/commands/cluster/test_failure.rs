@@ -59,7 +59,7 @@ pub async fn test_failure(
     }
 
     cloud_interface
-        .simulate_cluster_failure(cluster, node_private_ip)
+        .simulate_cluster_failure(pool, cluster, node_private_ip)
         .await?;
     Ok(())
 }

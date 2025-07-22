@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqlitePool;
 use tracing::error;
@@ -40,7 +40,7 @@ impl Provider {
             Ok(result) => result,
             Err(e) => {
                 error!("SQLx Error: {}", e.to_string());
-                anyhow::bail!("DB Operation Failure");
+                bail!("DB Operation Failure");
             }
         };
         Ok(provider)
@@ -64,7 +64,7 @@ impl Provider {
             Ok(result) => result,
             Err(e) => {
                 error!("SQLx Error: {}", e.to_string());
-                anyhow::bail!("DB Operation Failure");
+                bail!("DB Operation Failure");
             }
         };
         Ok(providers)

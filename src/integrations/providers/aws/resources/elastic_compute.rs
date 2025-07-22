@@ -13,10 +13,6 @@ impl AwsInterface {
         node_index: usize,
     ) -> Result<String> {
         let instance_name = context.ec2_instance_name(node_index);
-
-        // Sleep for 20s to give time for the IAM Profile to be propagated
-        sleep(Duration::from_secs(20)).await;
-
         let describe_instances_response = match context
             .ec2_client
             .describe_instances()
@@ -183,9 +179,6 @@ impl AwsInterface {
             info!("No EC2 instances to wait for");
             return Ok(());
         }
-
-        sleep(Duration::from_secs(5)).await;
-
         let max_wait_time = Duration::from_secs(600);
         let poll_interval = Duration::from_secs(15);
         let start_time = std::time::Instant::now();

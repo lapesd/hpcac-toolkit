@@ -368,13 +368,14 @@ pub async fn create(
         nodes_to_insert.push(Node {
             id: new_node_id,
             cluster_id: new_cluster_id.clone(),
-            status: "PLANNED".to_string(),
             instance_type: instance_type_name,
             allocation_mode,
             burstable_mode: burstable_mode.cloned(),
             image_id,
             private_ip: None,
             public_ip: None,
+            was_efs_configured: false,
+            was_ssh_configured: false,
         });
         nodes_tracker.inc(1);
     }

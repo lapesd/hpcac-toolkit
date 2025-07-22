@@ -1,6 +1,6 @@
 use crate::database::models::ShellCommand;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 use sqlx::{Transaction, sqlite::SqlitePool};
 use tracing::error;
@@ -9,13 +9,14 @@ use tracing::error;
 pub struct Node {
     pub id: String,
     pub cluster_id: String,
-    pub status: String,
     pub instance_type: String,
     pub allocation_mode: String,
     pub burstable_mode: Option<String>,
     pub image_id: String,
     pub private_ip: Option<String>,
     pub public_ip: Option<String>,
+    pub was_efs_configured: bool,
+    pub was_ssh_configured: bool,
 }
 
 impl Node {
@@ -25,21 +26,23 @@ impl Node {
                 INSERT INTO nodes (
                     id,
                     cluster_id, 
-                    status, 
                     instance_type, 
                     allocation_mode, 
                     burstable_mode, 
-                    image_id
+                    image_id,
+                    was_efs_configured,
+                    was_ssh_configured
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             "#,
             self.id,
             self.cluster_id,
-            self.status,
             self.instance_type,
             self.allocation_mode,
             self.burstable_mode,
             self.image_id,
+            self.was_efs_configured,
+            self.was_ssh_configured,
         )
         .execute(&mut **tx)
         .await
@@ -47,7 +50,7 @@ impl Node {
             Ok(_) => {}
             Err(e) => {
                 error!("SQLx Error: {}", e.to_string());
-                anyhow::bail!("DB Operation Failure");
+                bail!("DB Operation Failure");
             }
         };
 
@@ -66,5 +69,101 @@ impl Node {
             .collect();
 
         Ok(scripts)
+    }
+
+    pub async fn set_efs_configuration_state(
+        &self,
+        pool: &SqlitePool,
+        configured: bool,
+    ) -> Result<()> {
+        match sqlx::query!(
+            r#"
+                UPDATE nodes 
+                SET was_efs_configured = ? 
+                WHERE id = ?
+            "#,
+            configured,
+            self.id
+        )
+        .execute(pool)
+        .await
+        {
+            Ok(result) => {
+                if result.rows_affected() == 0 {
+                    error!("No node found with id '{}'", self.id);
+                    bail!("DB Operation Failure");
+                }
+            }
+            Err(e) => {
+                error!("SQLx Error: {:?}", e);
+                bail!("DB Operation Failure");
+            }
+        }
+
+        Ok(())
+    }
+
+    pub async fn set_ips(
+        &self,
+        pool: &SqlitePool,
+        private_ip: &str,
+        public_ip: &str,
+    ) -> Result<()> {
+        match sqlx::query!(
+            r#"
+            UPDATE nodes 
+            SET private_ip = ?, public_ip = ? 
+            WHERE id = ?
+        "#,
+            private_ip,
+            public_ip,
+            self.id
+        )
+        .execute(pool)
+        .await
+        {
+            Ok(result) => {
+                if result.rows_affected() == 0 {
+                    error!("No node found with id '{}'", self.id);
+                    bail!("DB Operation Failure");
+                }
+            }
+            Err(e) => {
+                error!("SQLx Error: {:?}", e);
+                bail!("DB Operation Failure");
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn fetch_by_private_ip(pool: &SqlitePool, private_ip: &str) -> Result<Option<Node>> {
+        match sqlx::query_as!(
+            Node,
+            r#"
+            SELECT 
+                id as "id!",
+                cluster_id,
+                instance_type,
+                allocation_mode,
+                burstable_mode,
+                image_id,
+                private_ip,
+                public_ip,
+                was_efs_configured,
+                was_ssh_configured
+            FROM nodes 
+            WHERE private_ip = ?
+        "#,
+            private_ip
+        )
+        .fetch_optional(pool)
+        .await
+        {
+            Ok(node) => Ok(node),
+            Err(e) => {
+                error!("SQLx Error: {:?}", e);
+                bail!("DB Operation Failure");
+            }
+        }
     }
 }

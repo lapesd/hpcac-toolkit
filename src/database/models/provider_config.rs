@@ -1,8 +1,9 @@
-use anyhow::Result;
+use std::fmt;
+
+use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use sqlx::sqlite::{SqlitePool, SqliteRow};
-use std::fmt;
 use tracing::error;
 
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
@@ -70,7 +71,7 @@ impl ProviderConfig {
             Ok(result) => result,
             Err(e) => {
                 error!("SQLx Error: {}", e.to_string());
-                anyhow::bail!("DB Operation Failure");
+                bail!("DB Operation Failure");
             }
         };
 
@@ -99,7 +100,7 @@ impl ProviderConfig {
             Ok(result) => result,
             Err(e) => {
                 error!("SQLx Error: {}", e.to_string());
-                anyhow::bail!("DB Operation Failure");
+                bail!("DB Operation Failure");
             }
         };
 
@@ -123,7 +124,7 @@ impl ProviderConfig {
             Ok(result) => result,
             Err(e) => {
                 error!("SQLx Error: {}", e.to_string());
-                anyhow::bail!("DB Operation Failure");
+                bail!("DB Operation Failure");
             }
         };
 
@@ -140,7 +141,7 @@ impl ProviderConfig {
             Ok(result) => result,
             Err(e) => {
                 error!("SQLx Error: {}", e.to_string());
-                anyhow::bail!("DB Operation Failure");
+                bail!("DB Operation Failure");
             }
         };
         let inserted_config = match sqlx::query(
@@ -163,7 +164,7 @@ impl ProviderConfig {
             Ok(result) => result,
             Err(e) => {
                 error!("SQLx Error: {}", e.to_string());
-                anyhow::bail!("DB Operation Failure");
+                bail!("DB Operation Failure");
             }
         };
 
@@ -182,7 +183,7 @@ impl ProviderConfig {
                 Ok(result) => result,
                 Err(e) => {
                     error!("SQLx Error: {}", e.to_string());
-                    anyhow::bail!("DB Operation Failure");
+                    bail!("DB Operation Failure");
                 }
             };
         }
@@ -206,7 +207,7 @@ impl ProviderConfig {
             Ok(result) => result,
             Err(e) => {
                 error!("SQLx Error: {}", e.to_string());
-                anyhow::bail!("DB Operation Failure");
+                bail!("DB Operation Failure");
             }
         };
 
@@ -218,7 +219,7 @@ impl ProviderConfig {
             Ok(result) => result,
             Err(e) => {
                 error!("SQLx Error: {}", e.to_string());
-                anyhow::bail!("DB Operation Failure");
+                bail!("DB Operation Failure");
             }
         };
 
@@ -236,7 +237,7 @@ impl ProviderConfig {
             Ok(result) => result,
             Err(e) => {
                 error!("SQLx Error: {}", e.to_string());
-                anyhow::bail!("DB Operation Failure");
+                bail!("DB Operation Failure");
             }
         };
 
@@ -254,7 +255,7 @@ impl ProviderConfig {
             Ok(result) => result,
             Err(e) => {
                 error!("SQLx Error: {}", e.to_string());
-                anyhow::bail!("DB Operation Failure");
+                bail!("DB Operation Failure");
             }
         };
 
