@@ -24,7 +24,9 @@ impl CloudResourceManager for AwsInterface {
             steps += 1;
         }
         if cluster.use_elastic_file_system {
-            steps += 4 + (2 * nodes.len());
+            steps += 4 + (2 * nodes.len()) + nodes.len();
+        } else {
+            steps += nodes.len();
         }
 
         let spawning_message = format!("Spawning Cluster '{}'...", cluster.display_name);
@@ -67,8 +69,9 @@ impl CloudResourceManager for AwsInterface {
          * }
          * 15. Wait for all EC2 instances to be ready
          * 16. (conditional) Wait for EFS mount target to be ready
-         * 17. (conditional) Attach EC2 Instances to EFS mount target using SSM
-         * 18. (conditional) Dispatch EC2 Instances initialization commands
+         * 17. Wait for SSM agents to be ready on all instances
+         * 18. (conditional) Attach EC2 Instances to EFS mount target using SSM
+         * 19. (conditional) Dispatch EC2 Instances initialization commands
          */
 
         // 1. Request EFS device creation...
@@ -232,7 +235,20 @@ impl CloudResourceManager for AwsInterface {
                 .await?;
             main_progress.inc(1);
 
-            // 17. Attach EC2 Instances to EFS mount target using SSM
+            // 17. Wait for SSM agents to be ready on all instances (for EFS mounting)
+            for (node_index, _) in nodes.iter().enumerate() {
+                let node_instance_id = &context.ec2_instance_ids[&node_index];
+                operation_spinner.update_message(&format!(
+                    "Waiting for SSM agent readiness on Node {} of {} (for EFS mounting)...",
+                    node_index + 1,
+                    nodes.len()
+                ));
+                self.wait_for_ssm_agent_ready(&context, node_instance_id, Duration::from_secs(300))
+                    .await?;
+                main_progress.inc(1);
+            }
+
+            // 18. Attach EC2 Instances to EFS mount target using SSM
             let efs_dns_name = format!(
                 "{}.efs.{}.amazonaws.com",
                 context.efs_device_id.clone().unwrap(),
@@ -313,9 +329,22 @@ echo "EFS mount and setup complete!"
                 }
                 main_progress.inc(1);
             }
+        } else {
+            // Wait for SSM agents to be ready for init commands (when not using EFS)
+            for (node_index, _) in nodes.iter().enumerate() {
+                let node_instance_id = &context.ec2_instance_ids[&node_index];
+                operation_spinner.update_message(&format!(
+                    "Waiting for SSM agent readiness on Node {} of {} (for init commands)...",
+                    node_index + 1,
+                    nodes.len()
+                ));
+                self.wait_for_ssm_agent_ready(&context, node_instance_id, Duration::from_secs(300))
+                    .await?;
+                main_progress.inc(1);
+            }
         }
 
-        // 18. Dispatch EC2 Instance initialization commands
+        // 19. Dispatch EC2 Instance initialization commands
         let mut ssm_init_command_ids: HashMap<usize, String> = HashMap::new();
         for (node_index, node) in nodes.iter().enumerate() {
             let node_init_commands = node.get_init_commands(pool).await?;
@@ -582,7 +611,6 @@ echo "EFS mount and setup complete!"
         match Node::fetch_by_private_ip(pool, node_private_ip).await? {
             Some(failed_node) => {
                 failed_node.set_efs_configuration_state(pool, false).await?;
-                sleep(Duration::from_secs(30)).await;
                 println!(
                     "Requested termination for Instance '{}' (failure simulation)",
                     failed_node.id

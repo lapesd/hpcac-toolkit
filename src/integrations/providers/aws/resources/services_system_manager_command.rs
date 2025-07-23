@@ -4,11 +4,58 @@ use std::collections::HashMap;
 
 use anyhow::{Result, bail};
 use aws_sdk_ssm::error::SdkError;
-use aws_sdk_ssm::types::CommandInvocationStatus;
+use aws_sdk_ssm::types::{
+    CommandInvocationStatus, InstanceInformationFilter, InstanceInformationFilterKey, PingStatus,
+};
 use tokio::time::{Duration, sleep};
 use tracing::{error, info, warn};
 
 impl AwsInterface {
+    pub async fn wait_for_ssm_agent_ready(
+        &self,
+        context: &AwsClusterContext,
+        instance_id: &str,
+        max_wait_time: Duration,
+    ) -> Result<()> {
+        let start_time = std::time::Instant::now();
+
+        loop {
+            if start_time.elapsed() > max_wait_time {
+                bail!(
+                    "SSM agent readiness check timed out for instance '{}'",
+                    instance_id
+                );
+            }
+
+            // Check if instance is managed by SSM
+            let response = context
+                .ssm_client
+                .describe_instance_information()
+                .instance_information_filter_list(
+                    InstanceInformationFilter::builder()
+                        .key(InstanceInformationFilterKey::InstanceIds)
+                        .value_set(instance_id)
+                        .build()?,
+                )
+                .send()
+                .await?;
+
+            if !response.instance_information_list().is_empty() {
+                let instance_info = &response.instance_information_list()[0];
+                if instance_info.ping_status() == Some(&PingStatus::Online) {
+                    info!("SSM agent is ready for instance '{}'", instance_id);
+                    return Ok(());
+                }
+            }
+
+            info!(
+                "Waiting for SSM agent to be ready for instance '{}'...",
+                instance_id
+            );
+            sleep(Duration::from_secs(10)).await;
+        }
+    }
+
     pub async fn create_ssm_command(
         &self,
         context: &AwsClusterContext,
@@ -79,6 +126,10 @@ EOF"#,
                         "Successfully created SSM Command (id='{}') for EC2 Instance (id='{}') on attempt {}",
                         ssm_command_id, ec2_instance_id, attempt
                     );
+
+                    info!("Waiting for command invocation to become available...");
+                    sleep(Duration::from_secs(5)).await;
+
                     return Ok(ssm_command_id.to_string());
                 }
                 Err(aws_error) => {
@@ -161,9 +212,29 @@ EOF"#,
                 );
             }
 
-            let (status, stdout, stderr) = self
+            let check_result = self
                 .check_ssm_command_status(context, command_id, instance_id)
-                .await?;
+                .await;
+
+            let (status, stdout, stderr) = match check_result {
+                Ok(result) => result,
+                Err(e) => {
+                    let error_string = e.to_string();
+                    if error_string.contains("InvocationDoesNotExist") {
+                        warn!(
+                            "Command invocation '{}' not yet available for instance '{}', continuing to poll...",
+                            command_id, instance_id
+                        );
+                        (
+                            CommandInvocationStatus::Pending,
+                            String::new(),
+                            String::new(),
+                        )
+                    } else {
+                        bail!("Unhandled error with SSM command: {:?}", e);
+                    }
+                }
+            };
 
             match status {
                 CommandInvocationStatus::Success => {
@@ -173,15 +244,34 @@ EOF"#,
                 CommandInvocationStatus::InProgress | CommandInvocationStatus::Pending => {
                     info!("SSM command '{}' is still running...", command_id);
                 }
-                _ => {
-                    println!("SSM Command '{}' aborted", command_id);
+                CommandInvocationStatus::Failed
+                | CommandInvocationStatus::Cancelled
+                | CommandInvocationStatus::TimedOut
+                | CommandInvocationStatus::Cancelling => {
+                    println!(
+                        "SSM Command '{}' failed with status: {:?}",
+                        command_id, status
+                    );
                     if !stdout.trim().is_empty() {
                         println!("Output: {}", stdout);
                     }
                     if !stderr.trim().is_empty() {
                         println!("Error: {}", stderr);
                     }
-                    bail!("Failure running SSM command");
+                    bail!("SSM command failed with status: {:?}", status);
+                }
+                _ => {
+                    println!(
+                        "SSM Command '{}' has unexpected status: {:?}",
+                        command_id, status
+                    );
+                    if !stdout.trim().is_empty() {
+                        println!("Output: {}", stdout);
+                    }
+                    if !stderr.trim().is_empty() {
+                        println!("Error: {}", stderr);
+                    }
+                    bail!("SSM command has unexpected status: {:?}", status);
                 }
             }
 

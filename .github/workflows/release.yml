@@ -17,18 +17,19 @@ jobs:
     strategy:
       matrix:
         include:
-          # macOS Intel (x86_64)
-          - target: x86_64-apple-darwin
-            os: macos-13
-            name: macos-intel
-            asset_name: hpcac-toolkit-macos-intel
+          # macOS Intel (x86_64) - TEMPORARILY SKIPPED
+          # - target: x86_64-apple-darwin
+          #   os: macos-13
+          #   name: macos-intel
+          #   asset_name: hpcac-toolkit-macos-intel
+          #   skip: true
             
           # macOS Apple Silicon (ARM64) - TEMPORARILY SKIPPED
-          - target: aarch64-apple-darwin
-            os: macos-14
-            name: macos-arm64
-            asset_name: hpcac-toolkit-macos-arm64
-            skip: true
+          # - target: aarch64-apple-darwin
+          #   os: macos-14
+          #   name: macos-arm64
+          #   asset_name: hpcac-toolkit-macos-arm64
+          #   skip: true
             
           # Linux x86_64
           - target: x86_64-unknown-linux-gnu
@@ -37,12 +38,12 @@ jobs:
             asset_name: hpcac-toolkit-linux-amd64
             
           # Linux ARM64 - TEMPORARILY SKIPPED
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
-            name: linux-arm64
-            asset_name: hpcac-toolkit-linux-arm64
-            use_cross: true
-            skip: true
+          # - target: aarch64-unknown-linux-gnu
+          #   os: ubuntu-latest
+          #   name: linux-arm64
+          #   asset_name: hpcac-toolkit-linux-arm64
+          #   use_cross: true
+          #   skip: true
 
     steps:
       - name: Skip ARM builds temporarily
@@ -168,11 +169,10 @@ jobs:
             
             ## Downloads
             
-            - **macOS Intel**: `hpcac-toolkit-macos-intel.tar.gz`
             - **Linux x86_64**: `hpcac-toolkit-linux-amd64.tar.gz`
             
-            *Note: ARM64 builds temporarily disabled*
-            
+            *Note: macOS and ARM64 builds temporarily disabled*
+
             ## Installation
 
             1. Download the appropriate archive for your platform
@@ -181,16 +181,6 @@ jobs:
             4. Run: `./hpcac-toolkit-*`
           draft: false
           prerelease: false
-
-      - name: Upload macOS Intel
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: artifacts/hpcac-toolkit-macos-intel/hpcac-toolkit-macos-intel.tar.gz
-          asset_name: hpcac-toolkit-macos-intel.tar.gz
-          asset_content_type: application/gzip
 
       - name: Upload Linux x86_64
         uses: actions/upload-release-asset@v1
@@ -201,6 +191,17 @@ jobs:
           asset_path: artifacts/hpcac-toolkit-linux-amd64/hpcac-toolkit-linux-amd64.tar.gz
           asset_name: hpcac-toolkit-linux-amd64.tar.gz
           asset_content_type: application/gzip
+
+      # macOS Intel upload commented out while builds are skipped
+      # - name: Upload macOS Intel
+      #   uses: actions/upload-release-asset@v1
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #   with:
+      #     upload_url: ${{ steps.create_release.outputs.upload_url }}
+      #     asset_path: artifacts/hpcac-toolkit-macos-intel/hpcac-toolkit-macos-intel.tar.gz
+      #     asset_name: hpcac-toolkit-macos-intel.tar.gz
+      #     asset_content_type: application/gzip
 
       # ARM64 uploads commented out while builds are skipped
       # - name: Upload macOS ARM64
