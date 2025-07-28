@@ -32,6 +32,9 @@ pub async fn run_task(
     cluster_id: &str,
     skip_confirmation: bool,
 ) -> Result<()> {
+    info!("Invoked `run_tasks` command...");
+    info!("Parsing contents of `tasks_config.yaml` file...");
+
     // Load and parse the task YAML
     let path = Path::new(yaml_file_path);
     let tasks_yaml_str: String = match fs::read_to_string(path) {
@@ -60,6 +63,7 @@ pub async fn run_task(
         }
     };
 
+    info!("fetching Clusters (id='{}')", cluster_id);
     // get cluster and nodes
     let cluster = match Cluster::fetch_by_id(pool, cluster_id).await? {
         Some(cluster) => cluster,
@@ -74,6 +78,7 @@ pub async fn run_task(
         println!("Cluster with id '{}' was not spawned.", cluster_id);
         return Ok(());
     }
+    info!("Found online Cluster (id='{}')!", cluster_id);
 
     // Get cloud interface
     let provider_config =
@@ -92,7 +97,6 @@ pub async fn run_task(
             bail!("Provider '{}' is currently not supported.", &provider_id)
         }
     };
-
 
     // Confirm with user
     println!("Tasks:");
@@ -197,6 +201,7 @@ pub async fn run_task(
     let main_progress = utils::ProgressTracker::add_to_multi(&multi, steps as u64, Some("Initializing..."));
     let operation_spinner = utils::ProgressTracker::new_indeterminate(&multi, "Initializing...");
 
+    info!("Starting Task loop...");
     for task in tasks_yaml.tasks.iter() {
         report_str.push_str(&format!("===> Task: '{}'\n", task.task_tag));
 
@@ -204,6 +209,7 @@ pub async fn run_task(
         info!(running_task_message);
         main_progress.update_message(&running_task_message);
 
+        let setup_commands_start = time::Instant::now();
         for command in task.setup_commands.iter() {
             operation_spinner.update_message(&format!("Executing command: '{}'", command));
             report_str.push_str(&format!("$ {}\n", command));
@@ -215,6 +221,8 @@ pub async fn run_task(
 
             main_progress.inc(1);
         }
+        let setup_commands_elapsed_ms = setup_commands_start.elapsed().as_millis();
+        let setup_commands_elapsed_sec = setup_commands_elapsed_ms as f64 / 1000.0;
 
         let running_task_message = format!("Running task '{}' run_commands...", task.task_tag);
         info!(running_task_message);
@@ -233,9 +241,14 @@ pub async fn run_task(
             main_progress.inc(1);
         }
 
-        let elapsed_ms = run_commands_start.elapsed().as_millis();
-        let elapsed_secs = elapsed_ms as f64 / 1000.0;
-        report_str.push_str(&format!("===== End of Task '{}' - exec time: {:.3} s =====\n\n", task.task_tag, elapsed_secs));
+        let run_commands_elapsed_ms = run_commands_start.elapsed().as_millis();
+        let run_commands_elapsed_sec = run_commands_elapsed_ms as f64 / 1000.0;
+        let exec_time = setup_commands_elapsed_sec + run_commands_elapsed_sec;
+
+        report_str.push_str(
+            &format!("===== End of Task '{}' - setup time: {:.3} s - run time: {:.3} s - total: {} s =====\n\n",
+                task.task_tag, setup_commands_elapsed_sec, run_commands_elapsed_sec, exec_time)
+        );
     }
 
     operation_spinner.finish_with_message("All commands of all tasks completed!");
@@ -245,17 +258,21 @@ pub async fn run_task(
     // save report
     let mut created_dir = true;
     let report_path = format!("results/cluster_{}", cluster_id);
-    match fs::create_dir_all(&report_path) {
-        Ok(v) => v,
-        Err(e) => { println!("Unable to create directory for result report: {}", e); created_dir = false; },
+    if let Err(e) = fs::create_dir_all(&report_path) {
+        println!("Failed to create directory for result report: {}", e);
+        created_dir = false;
     };
 
     if created_dir {
         let timestamp = Local::now().format("%Y-%m-%dT%H:%M:%S");
         let filename = format!("{}.txt", timestamp);
-        let mut file = fs::File::create(&format!("{}/{}", report_path, filename))?;
-        writeln!(file, "{}", report_str)?;
-        println!("Result report saved at '{}/{}'", report_path, filename);
+        match fs::File::create(&format!("{}/{}", report_path, filename)) {
+            Err(e) => println!("Failed to create report file: {}", e),
+            Ok(mut file) => {
+                writeln!(file, "{}", report_str)?;
+                println!("Result report saved at '{}/{}'", report_path, filename);
+            },
+        };
     }
 
     Ok(())

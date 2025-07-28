@@ -11,4 +11,8 @@ tasks:
       - ls
       - mkdir task3_dir
       - ls
+      - mkdir task3_dir
+      - rm -rf task3_dir
+      - ls
+
 
