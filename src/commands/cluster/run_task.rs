@@ -246,7 +246,7 @@ pub async fn run_task(
         let exec_time = setup_commands_elapsed_sec + run_commands_elapsed_sec;
 
         report_str.push_str(
-            &format!("===== End of Task '{}' - setup time: {:.3} s - run time: {:.3} s - total: {} s =====\n\n",
+            &format!("===== End of Task '{}' - setup time: {:.3} s - run time: {:.3} s - total: {:.3} s =====\n\n",
                 task.task_tag, setup_commands_elapsed_sec, run_commands_elapsed_sec, exec_time)
         );
     }

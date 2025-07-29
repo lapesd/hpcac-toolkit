@@ -7,12 +7,12 @@ tasks:
 
   - task_tag: "task2"
     setup_commands:
+      - if [ -f "hostfile" ]; then rm hostfile; else echo "hostfile does not exist"; fi
+      - echo -e '10.0.0.10 slots=4\n10.0.0.11 slots=4\n' > hostfile
+      - cat hostfile
+      - git clone https://github.com/lapesd/hpcac-toolkit-apps.git 
+      - mkdir hpcac-toolkit-apps/NPB3.3.1/NPB3.3-MPI/bin
+      - make -C hpcac-toolkit-apps/NPB3.3.1/NPB3.3-MPI is NPROCS=4 CLASS=A
     run_commands:
-      - ls
-      - mkdir task3_dir
-      - ls
-      - mkdir task3_dir
-      - rm -rf task3_dir
-      - ls
-
+      - mpirun -np 4 -hostfile hostfile hpcac-toolkit-apps/NPB3.3.1/NPB3.3-MPI/bin/is.A.4
 
