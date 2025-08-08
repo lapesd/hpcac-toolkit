@@ -6,7 +6,7 @@ use crate::utils;
 
 use std::collections::HashMap;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use sqlx::sqlite::SqlitePool;
 use tokio::time::{Duration, sleep};
 use tracing::info;
@@ -345,9 +345,34 @@ echo "EFS mount and setup complete!"
         }
 
         // 19. Dispatch EC2 Instance initialization commands
+        // TODO: Add logic to track/skip individual commands
         let mut ssm_init_command_ids: HashMap<usize, String> = HashMap::new();
+        let private_key_content = match std::fs::read_to_string(&cluster.private_ssh_key_path) {
+            Ok(content) => content,
+            Err(e) => {
+                bail!(
+                    "Failed to read private SSH key file '{}': {}",
+                    cluster.private_ssh_key_path,
+                    e
+                );
+            }
+        };
         for (node_index, node) in nodes.iter().enumerate() {
-            let node_init_commands = node.get_init_commands(pool).await?;
+            let mut node_init_commands = node.get_init_commands(pool).await?;
+            let ssh_key_setup_script = format!(
+                r#"echo "Setting up private SSH key..." && \
+mkdir -p ~/.ssh && \
+cat > ~/.ssh/id_rsa_temp << 'PRIVATE_KEY_EOF'
+{}
+PRIVATE_KEY_EOF
+mv ~/.ssh/id_rsa_temp ~/.ssh/id_rsa && \
+chmod 600 ~/.ssh/id_rsa && \
+chown ec2-user:ec2-user ~/.ssh/id_rsa && \
+echo "Private SSH key successfully installed" && \
+ls -la ~/.ssh/id_rsa"#,
+                private_key_content
+            );
+            node_init_commands.insert(0, ssh_key_setup_script);
             let op_msg = format!(
                 "Dispatching init script for Node {} of {}...",
                 node_index + 1,

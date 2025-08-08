@@ -73,6 +73,21 @@ pub async fn create(
     // Validate cluster.id
     let new_cluster_id = match cluster_yaml.id {
         Some(id) => {
+            if id.is_empty() {
+                bail!("Cluster ID cannot be empty");
+            }
+
+            for (i, ch) in id.chars().enumerate() {
+                if !ch.is_alphanumeric() && ch != '-' && ch != '_' {
+                    bail!(
+                        "Invalid character '{}' at position {} in cluster ID '{}'. Only alphanumeric characters, hyphens (-), and underscores (_) are allowed",
+                        ch,
+                        i,
+                        id
+                    )
+                }
+            }
+
             let existing_cluster = Cluster::fetch_by_id(pool, &id).await?;
             if existing_cluster.is_some() {
                 bail!(

@@ -96,6 +96,19 @@ impl AwsInterface {
             }
         };
 
+        // TODO: Verify if this is the best configuration for our purposes
+        let block_device_mapping = aws_sdk_ec2::types::BlockDeviceMapping::builder()
+            .device_name("/dev/xvda")
+            .ebs(
+                aws_sdk_ec2::types::EbsBlockDevice::builder()
+                    .volume_size(30)
+                    .volume_type(aws_sdk_ec2::types::VolumeType::Gp3)
+                    .delete_on_termination(true)
+                    .encrypted(false)
+                    .build(),
+            )
+            .build();
+
         let mut run_instances_request = context
             .ec2_client
             .run_instances()
@@ -116,7 +129,8 @@ impl AwsInterface {
                 aws_sdk_ec2::types::IamInstanceProfileSpecification::builder()
                     .name(context.iam_profile_name.clone())
                     .build(),
-            );
+            )
+            .block_device_mappings(block_device_mapping);
 
         if let Some(burstable_mode) = &node.burstable_mode {
             let credit_spec = aws_sdk_ec2::types::CreditSpecificationRequest::builder()
@@ -159,7 +173,7 @@ impl AwsInterface {
         if let Some(instance) = run_instances_response.instances().first() {
             if let Some(instance_id) = instance.instance_id() {
                 info!(
-                    "Requested new instance '{}' with ID '{}'",
+                    "Requested new instance '{}' with ID '{}' and 30GB root volume",
                     instance_name, instance_id
                 );
                 return Ok(instance_id.to_string());

@@ -253,10 +253,10 @@ EOF"#,
                         command_id, status
                     );
                     if !stdout.trim().is_empty() {
-                        println!("Output: {}", stdout);
+                        println!("SSM Output: {}", stdout);
                     }
                     if !stderr.trim().is_empty() {
-                        println!("Error: {}", stderr);
+                        println!("SSM Error: {}", stderr);
                     }
                     bail!("SSM command failed with status: {:?}", status);
                 }
@@ -266,10 +266,10 @@ EOF"#,
                         command_id, status
                     );
                     if !stdout.trim().is_empty() {
-                        println!("Output: {}", stdout);
+                        println!("SSM Output: {}", stdout);
                     }
                     if !stderr.trim().is_empty() {
-                        println!("Error: {}", stderr);
+                        println!("SSM Error: {}", stderr);
                     }
                     bail!("SSM command has unexpected status: {:?}", status);
                 }
