@@ -2,7 +2,7 @@ use crate::database::models::{ConfigVar, Provider, ProviderConfig};
 use crate::utils;
 
 use anyhow::{Result, bail};
-use inquire::{Password, Select, Text};
+use inquire::{Select, Text};
 use sqlx::sqlite::SqlitePool;
 use tracing::error;
 
@@ -44,10 +44,7 @@ pub async fn create(pool: &SqlitePool, skip_confirmation: bool) -> Result<()> {
     let mut config_vars: Vec<ConfigVar> = vec![];
     let required_keys = provider.get_required_config_vars();
     for key in required_keys {
-        let value = Password::new(&format!("Enter value for {}:", key))
-            .without_confirmation()
-            .with_display_toggle_enabled()
-            .prompt()?;
+        let value = Text::new(&format!("Enter value for {}:", key)).prompt()?;
         config_vars.push(ConfigVar {
             id: 0,
             provider_config_id: 0,
