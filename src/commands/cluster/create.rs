@@ -80,7 +80,8 @@ pub async fn create(
             for (i, ch) in id.chars().enumerate() {
                 if !ch.is_alphanumeric() && ch != '-' && ch != '_' {
                     bail!(
-                        "Invalid character '{}' at position {} in cluster ID '{}'. Only alphanumeric characters, hyphens (-), and underscores (_) are allowed",
+                        "Invalid character '{}' at position {} in cluster ID '{}'. Only \
+                        alphanumeric characters, hyphens (-), and underscores (_) are allowed",
                         ch,
                         i,
                         id
@@ -91,7 +92,8 @@ pub async fn create(
             let existing_cluster = Cluster::fetch_by_id(pool, &id).await?;
             if existing_cluster.is_some() {
                 bail!(
-                    "Cluster with id: '{}' already exists. Please update the yaml file and try again",
+                    "Cluster with id: '{}' already exists. Please update the yaml file and try \
+                    again",
                     id
                 );
             }
@@ -105,7 +107,8 @@ pub async fn create(
     let existing_cluster = Cluster::fetch_by_name(pool, &cluster_name).await?;
     if existing_cluster.is_some() {
         bail!(
-            "Cluster with display_name: '{}' already exists. Please update the yaml file and try again.",
+            "Cluster with display_name: '{}' already exists. Please update the yaml file and try \
+            again.",
             cluster_name
         );
     }
@@ -310,7 +313,7 @@ pub async fn create(
             None => "on-demand".to_string(), // Default when not specified
         };
 
-        // Validade node_affinity
+        // Validate node_affinity
         if cluster_yaml.use_node_affinity && !instance_type_details.has_affinity_settings {
             bail!(
                 "Instance type '{}' does not support node affinity settings",
@@ -334,7 +337,8 @@ pub async fn create(
                     if !valid_modes.contains(&burstable_mode.to_lowercase().as_str()) {
                         bail!(
                             "Invalid burstable mode '{}' specified for node '{}'.\
-                            The instance type '{}' in region '{}' only supports the following burstale modes: {}",
+                            The instance type '{}' in region '{}' only supports the following \
+                            burstable modes: {}",
                             burstable_mode,
                             i + 1,
                             &instance_type_name,
@@ -430,20 +434,7 @@ pub async fn create(
                 .await?
                 .unwrap(); // Because of the previous validation, unwrap won't fail here
 
-        let processor_info = match &instance_details.core_count {
-            Some(cores) => {
-                format!(
-                    "{}-Core {} {}",
-                    cores, instance_details.cpu_architecture, instance_details.cpu_type
-                )
-            }
-            None => {
-                format!(
-                    "{} {}",
-                    instance_details.cpu_architecture, instance_details.cpu_type
-                )
-            }
-        };
+        let processor_info = utils::format_processor_info(instance_details.core_count, instance_details.cpu_architecture, instance_details.cpu_type);
 
         let gpu_info = match instance_details.gpu_type {
             Some(gpu) => {
@@ -469,10 +460,10 @@ pub async fn create(
         println!();
     }
 
-    if !(utils::user_confirmation(
+    if !utils::user_confirmation(
         skip_confirmation,
         "Do you want to proceed creating this cluster?",
-    )?) {
+    )? {
         return Ok(());
     }
 

@@ -11,7 +11,7 @@ use_elastic_file_system: true
 nodes:
   - instance_type: t3.2xlarge
     allocation_mode: on-demand  # on-demand | spot
-    # burstable_mode: Standard  # Standerd | Unlimited
+    # burstable_mode: Standard  # Standard | Unlimited
     image_id: ami-0150ccaf51ab55a51
 
   - instance_type: t3.2xlarge

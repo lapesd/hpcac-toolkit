@@ -103,7 +103,7 @@ enum ClusterCommands {
 
 #[derive(Subcommand, Debug)]
 enum InstanceTypeCommands {
-    /// Fetchs available instance types
+    /// Fetches available instance types
     List {
         /// Filter instance_types by provider (examples: 'aws', 'vultr')
         #[arg(long)]
@@ -196,13 +196,10 @@ async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
 
     // Setup logger, file directory and tracing subscriber
-    let logs_directory = match std::env::var("LOGS_DIRECTORY") {
-        Ok(result) => result,
-        Err(_) => {
-            println!("LOGS_DIRECTORY environment variable not set, using default.");
-            "./logs".to_string()
-        }
-    };
+    let logs_directory = std::env::var("LOGS_DIRECTORY").unwrap_or_else(|_| {
+        println!("LOGS_DIRECTORY environment variable not set, using default.");
+        "./logs".to_string()
+    });
 
     let log_file = OpenOptions::new()
         .create(true)
@@ -223,13 +220,10 @@ async fn main() -> Result<()> {
 
     // Read SQLite connection data from environment variables.
     // If DATABASE_URL is not set, default to a local SQLite database.
-    let db_url = match std::env::var("DATABASE_URL") {
-        Ok(result) => result,
-        Err(_) => {
-            println!("DATABASE_URL environment variable not set, using default.");
-            "sqlite://db.sqlite".to_string()
-        }
-    };
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        println!("DATABASE_URL environment variable not set, using default.");
+        "sqlite://db.sqlite".to_string()
+    });
 
     // Create a SQLite connection pool
     let sqlite_pool = match SqlitePool::connect(&db_url).await {

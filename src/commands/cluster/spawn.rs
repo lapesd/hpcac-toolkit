@@ -39,10 +39,10 @@ pub async fn spawn(pool: &SqlitePool, cluster_id: &str, skip_confirmation: bool)
     let nodes = cluster.get_nodes(pool).await?;
     cluster.print_details(pool).await?;
 
-    if !(utils::user_confirmation(
+    if !utils::user_confirmation(
         skip_confirmation,
         "Do you want to proceed spawning this cluster?",
-    )?) {
+    )? {
         return Ok(());
     }
 
