@@ -1,0 +1,18 @@
+tasks:
+  - task_tag: "task1"
+    setup_commands:
+      - hostname
+      - uptime
+    run_commands:
+
+  - task_tag: "task2"
+    setup_commands:
+      - if [ -f "/shared/hostfile" ]; then rm /shared/hostfile; else echo "hostfile does not exist"; fi
+      - echo -e '10.0.0.10 slots=4\n10.0.0.11 slots=4\n10.0.0.12 slots=4\n10.0.0.13 slots=4\n' > /shared/hostfile
+      - cat /shared/hostfile
+      - if [ ! -d "/shared/hpcac-toolkit-apps" ]; then git clone https://github.com/lapesd/hpcac-toolkit-apps.git /shared/hpcac-toolkit-apps; else echo "Repo already exists"; fi
+      - mkdir -p /shared/hpcac-toolkit-apps/NPB3.3.1/NPB3.3-MPI/bin
+      - make -C /shared/hpcac-toolkit-apps/NPB3.3.1/NPB3.3-MPI is NPROCS=16 CLASS=C
+    run_commands:
+      - mpirun -np 16 -hostfile /shared/hostfile /shared/hpcac-toolkit-apps/NPB3.3.1/NPB3.3-MPI/bin/is.C.16
+

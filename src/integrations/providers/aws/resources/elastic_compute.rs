@@ -5,6 +5,7 @@ use anyhow::{Result, bail};
 use tokio::time::{Duration, sleep};
 use tracing::{error, info, warn};
 
+
 impl AwsInterface {
     pub async fn request_elastic_compute_instance_creation(
         &self,
@@ -101,7 +102,7 @@ impl AwsInterface {
             .device_name("/dev/xvda")
             .ebs(
                 aws_sdk_ec2::types::EbsBlockDevice::builder()
-                    .volume_size(30)
+                    .volume_size(100)
                     .volume_type(aws_sdk_ec2::types::VolumeType::Gp3)
                     .delete_on_termination(true)
                     .encrypted(false)
@@ -132,11 +133,28 @@ impl AwsInterface {
             )
             .block_device_mappings(block_device_mapping);
 
+        if node.allocation_mode.to_lowercase() == "spot" {
+            run_instances_request = run_instances_request
+                .instance_market_options(
+                    aws_sdk_ec2::types::InstanceMarketOptionsRequest::builder()
+                        .market_type(aws_sdk_ec2::types::MarketType::Spot)
+                        .build()
+                );
+        }
+
         if let Some(burstable_mode) = &node.burstable_mode {
-            let credit_spec = aws_sdk_ec2::types::CreditSpecificationRequest::builder()
-                .cpu_credits(burstable_mode.to_lowercase())
-                .build();
-            run_instances_request = run_instances_request.credit_specification(credit_spec);
+            // Only apply credit specs to T-series instances
+            if node.instance_type.to_lowercase().starts_with('t') {
+                let credit_spec = aws_sdk_ec2::types::CreditSpecificationRequest::builder()
+                    .cpu_credits(burstable_mode.to_lowercase())
+                    .build();
+                run_instances_request = run_instances_request.credit_specification(credit_spec);
+            } else {
+                warn!(
+                    "Node has burstable_mode set to '{}' but instance_type is '{}'. Ignoring credit specification to prevent AWS API error.",
+                    burstable_mode, node.instance_type
+                );
+            }
         }
 
         if context.use_node_affinity {

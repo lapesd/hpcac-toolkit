@@ -1,6 +1,5 @@
 use super::interface::AwsInterface;
-
-use crate::database::models::{Cluster, ClusterState, Node};
+use crate::database::models::{Cluster, ClusterState, Node, InstanceCreationFailurePolicy};
 use crate::integrations::CloudResourceManager;
 use crate::utils;
 
@@ -10,6 +9,10 @@ use anyhow::{Result, bail};
 use sqlx::sqlite::SqlitePool;
 use tokio::time::{Duration, sleep};
 use tracing::info;
+use tracing::error;
+use tracing::warn;
+
+const MAX_MIGRATION_ATTEMPTS: usize = 3;
 
 impl CloudResourceManager for AwsInterface {
     async fn spawn_cluster(
@@ -18,6 +21,14 @@ impl CloudResourceManager for AwsInterface {
         cluster: Cluster,
         nodes: Vec<Node>,
     ) -> Result<()> {
+
+        let attempts: usize = cluster.migration_attempts as usize;
+        if attempts >= MAX_MIGRATION_ATTEMPTS {
+            bail!("\nMaximum migration of {} attempts reached for cluster '{}'.", attempts, cluster.display_name);
+        }
+
+        eprintln!("\n ATTEMPT: {}", attempts+1);
+
         let mut context = self.create_cluster_context(&cluster)?;
         let mut steps = 9 + (6 * nodes.len());
         if cluster.use_node_affinity {
@@ -205,18 +216,152 @@ impl CloudResourceManager for AwsInterface {
             }
             _ => {}
         }
+
         for (node_index, node) in nodes.iter().enumerate() {
             // 14.1. Request EC2 instance creation...
-            // TODO: Add Spot support
             operation_spinner.update_message(&format!(
                 "Requesting {} of {} EC2 Instances (type='{}')",
                 node_index + 1,
                 nodes.len(),
                 node.instance_type
             ));
-            let instance_id = self
+            let instance_id = match self
                 .request_elastic_compute_instance_creation(&context, node, node_index)
-                .await?;
+                .await {
+                    Ok(id) => id,
+                    Err(e) => {
+                        match cluster.on_instance_creation_failure.as_ref().unwrap() {
+                            InstanceCreationFailurePolicy::Cancel => {
+                                // Stop the progress bars before printing errors
+                                operation_spinner.finish_with_message("Error occurred, cleaning up...");
+                                main_progress.finish_with_message("Cluster creation failed.");
+                                
+                                // Print the error
+                                eprintln!("Failed to create instance for node {}: {:#}", node_index+1, e);
+                                eprintln!("\nDestroying and canceling the cluster");
+
+                                // Attempt to terminate/cleanup the cluster
+                                let cleanup_result = self.terminate_cluster(pool, cluster.clone(), nodes.clone()).await;
+                                if let Err(cleanup_err) = cleanup_result {
+                                    error!("Failed to cleanup cluster after instance creation failure: {:?}", cleanup_err);
+                                }
+                            },
+                            InstanceCreationFailurePolicy::OnDemand => {
+                                // Stop progress bars to report status
+                                operation_spinner.finish_with_message("Spot allocation failed, switching strategy...");
+                                main_progress.finish_with_message("Cluster creation interrupted.");
+
+                                warn!(
+                                    "Failed to create Spot instance for node {} (Allocation: '{}'). Error: {:#}", 
+                                    node_index + 1, 
+                                    nodes[node_index].allocation_mode, 
+                                    e
+                                );
+
+                                eprintln!(
+                                    "\nCreation failed. Switching Node {} to 'on-demand' and retrying (keeping Networking/IAM intact)...", 
+                                    node_index + 1
+                                );
+
+                                // Terminate only the instances, not the whole cluster
+                                if let Err(term_err) = self.request_termination_of_all_elastic_compute_instances(&context).await {
+                                    error!("Failed to terminate instances during fallback: {:?}", term_err);
+                                    // If we can't clean up instances, we must fail hard
+                                    return Err(term_err); 
+                                }
+                                
+                                // Wait for them to actually shut down so we can reuse the ENIs/Volumes cleanly
+                                if let Err(wait_err) = self.wait_for_all_elastic_compute_instances_to_be_terminated(&context).await {
+                                    error!("Timeout waiting for instances to terminate: {:?}", wait_err);
+                                    return Err(wait_err);
+                                }
+
+                                // We must update the database so if the process crashes, we don't retry Spot next time.
+                                let update_query = sqlx::query!(
+                                    "UPDATE nodes SET allocation_mode = 'on-demand' WHERE id = ?",
+                                    nodes[node_index].id
+                                )
+                                .execute(pool)
+                                .await;
+
+                                if let Err(db_err) = update_query {
+                                    error!("Failed to persist allocation mode change to DB: {:?}", db_err);
+                                    bail!("Database error during fallback");
+                                }
+
+                                // Update local state for the recursion
+                                let mut new_cluster = cluster.clone();
+                                new_cluster.migration_attempts += 1;
+                                
+                                let mut new_nodes = nodes.clone();
+                                new_nodes[node_index].allocation_mode = "on-demand".to_string();
+
+                                return Box::pin(self.spawn_cluster(
+                                    pool,
+                                    new_cluster,
+                                    new_nodes,
+                                )).await;
+                            },
+                            InstanceCreationFailurePolicy::Migrate => {
+                                // Stop the progress bars before printing errors
+                                operation_spinner.finish_with_message("Error occurred, cleaning up...");
+                                main_progress.finish_with_message("Cluster creation failed.");
+                                
+                                // Print the error
+                                eprintln!("Failed to create instance for node {} in availability zone {}: {:#}", node_index+1, cluster.availability_zone, e);
+                                eprintln!("\nDestroying cluster and retrying in a different availability zone.");
+
+                                // Attempt to terminate/cleanup the cluster
+                                let cleanup_result = self.terminate_cluster(pool, cluster.clone(), nodes.clone()).await;
+                                if let Err(cleanup_err) = cleanup_result {
+                                    bail!("Failed to cleanup cluster after instance creation failure: {:?}", cleanup_err);
+                                }
+
+                                // Split the tried_zones string into a Vec<&str>, removing empty entries
+                                let mut tried_zones: Vec<_> = cluster.tried_zones
+                                    .as_deref()
+                                    .unwrap_or("")
+                                    .split(',')
+                                    .filter(|s| !s.is_empty())
+                                    .collect();
+                                tried_zones.push(cluster.availability_zone.as_str());
+
+                                // Get all available zones in the region
+                                let all_zones = self.get_all_availability_zones(&context.ec2_client, &cluster.region).await?;
+
+                                // Filter out the current zone that failed
+                                let alternative_zones: Vec<_> = all_zones.into_iter()
+                                    .filter(|z| !tried_zones.contains(&z.as_str()))
+                                    .collect();
+                                if alternative_zones.is_empty() {
+                                    bail!("No alternative availability zones available in region {}", cluster.region);
+                                }
+
+                                // Try next alternative zone
+                                if let Some(zone) = alternative_zones.first() {
+                                    eprintln!("Attempting to create cluster in zone {}", zone);
+
+                                    // Update the cluster with the new zone
+                                    let mut new_cluster = cluster.clone();
+                                    new_cluster.tried_zones = Some(tried_zones.join(","));
+                                    new_cluster.availability_zone = zone.clone();
+                                    new_cluster.migration_attempts += 1;
+
+                                    // Try creating the cluster in the new zone
+                                    return Box::pin(self.spawn_cluster(
+                                        pool,
+                                        new_cluster,
+                                        nodes.clone(),
+                                    )).await;
+                                }
+
+                                // If get here, all zones failed
+                                bail!("Failed to find an availability zone with sufficient capacity");
+                            }
+                        }
+                        return Err(e);
+                    }
+                };
             context.ec2_instance_ids.insert(node_index, instance_id);
             main_progress.inc(1);
         }
@@ -357,21 +502,30 @@ echo "EFS mount and setup complete!"
                 );
             }
         };
+
+        let local_key_path = std::path::Path::new(&cluster.private_ssh_key_path);
+        let key_filename = local_key_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("id_rsa"); // Fallback to id_rsa if path is weird
+
         for (node_index, node) in nodes.iter().enumerate() {
             let mut node_init_commands = node.get_init_commands(pool).await?;
+
             let ssh_key_setup_script = format!(
                 r#"echo "Setting up private SSH key..." && \
 mkdir -p ~/.ssh && \
-cat > ~/.ssh/id_rsa_temp << 'PRIVATE_KEY_EOF'
-{}
+rm -f ~/.ssh/*.pub && \
+cat > ~/.ssh/{0} << 'PRIVATE_KEY_EOF'
+{1}
 PRIVATE_KEY_EOF
-mv ~/.ssh/id_rsa_temp ~/.ssh/id_rsa && \
-chmod 600 ~/.ssh/id_rsa && \
-chown ec2-user:ec2-user ~/.ssh/id_rsa && \
-echo "Private SSH key successfully installed" && \
-ls -la ~/.ssh/id_rsa"#,
+chmod 600 ~/.ssh/{0} && \
+chown ec2-user:ec2-user ~/.ssh/{0} && \
+echo "Private SSH key successfully installed at ~/.ssh/{0}""#,
+                key_filename,
                 private_key_content
             );
+
             node_init_commands.insert(0, ssh_key_setup_script);
             let op_msg = format!(
                 "Dispatching init script for Node {} of {}...",

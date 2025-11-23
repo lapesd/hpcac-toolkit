@@ -85,6 +85,21 @@ enum ClusterCommands {
         yes: bool,
     },
 
+    /// Run tasks on a Cluster
+    RunTask {
+        /// Cluster ID
+        #[arg(long)]
+        cluster_id: String,
+        
+        /// Path to the tasks YAML file
+        #[arg(short = 'f', long = "file")]
+        yaml_file_path: String,
+
+        /// Skip confirmation prompt
+        #[arg(short = 'y', long = "yes")]
+        yes: bool,
+    },
+
     /// Test a Cluster failure
     TestFailure {
         /// Cluster identifier
@@ -252,6 +267,9 @@ async fn main() -> Result<()> {
             }
             ClusterCommands::Spawn { cluster_id, yes } => {
                 commands::cluster::spawn(&sqlite_pool, cluster_id, *yes).await?;
+            }
+            ClusterCommands::RunTask { yaml_file_path, cluster_id, yes } => {
+                commands::cluster::run_task (&sqlite_pool, yaml_file_path, cluster_id, *yes).await?;
             }
             ClusterCommands::Terminate { cluster_id, yes } => {
                 commands::cluster::terminate(&sqlite_pool, cluster_id, *yes).await?;
