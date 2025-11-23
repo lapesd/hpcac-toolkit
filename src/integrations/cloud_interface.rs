@@ -3,6 +3,7 @@ use crate::integrations::providers::{aws::AwsInterface, vultr::VultrInterface};
 use crate::utils::ProgressTracker;
 
 use anyhow::{Error, Result};
+use sqlx::sqlite::SqlitePool;
 use std::collections::HashMap;
 
 pub trait CloudInfoProvider {
@@ -37,11 +38,22 @@ pub trait CloudInfoProvider {
 pub trait CloudResourceManager {
     async fn spawn_cluster(
         &self,
+        pool: &SqlitePool,
         cluster: Cluster,
         nodes: Vec<Node>,
-        init_commands: HashMap<usize, Vec<String>>,
     ) -> Result<(), Error>;
-    async fn destroy_cluster(&self, cluster: Cluster, nodes: Vec<Node>) -> Result<(), Error>;
+    async fn terminate_cluster(
+        &self,
+        pool: &SqlitePool,
+        cluster: Cluster,
+        nodes: Vec<Node>,
+    ) -> Result<(), Error>;
+    async fn simulate_cluster_failure(
+        &self,
+        pool: &SqlitePool,
+        cluster: Cluster,
+        node_private_ip: &str,
+    ) -> Result<(), Error>;
 }
 
 pub enum CloudProvider {
@@ -108,20 +120,44 @@ impl CloudInfoProvider for CloudProvider {
 impl CloudResourceManager for CloudProvider {
     async fn spawn_cluster(
         &self,
+        pool: &SqlitePool,
         cluster: Cluster,
         nodes: Vec<Node>,
-        init_commands: HashMap<usize, Vec<String>>,
     ) -> Result<(), Error> {
         match self {
-            CloudProvider::Aws(aws) => aws.spawn_cluster(cluster, nodes, init_commands).await,
-            CloudProvider::Vultr(vultr) => vultr.spawn_cluster(cluster, nodes, init_commands).await,
+            CloudProvider::Aws(aws) => aws.spawn_cluster(pool, cluster, nodes).await,
+            CloudProvider::Vultr(vultr) => vultr.spawn_cluster(pool, cluster, nodes).await,
         }
     }
 
-    async fn destroy_cluster(&self, cluster: Cluster, nodes: Vec<Node>) -> Result<(), Error> {
+    async fn terminate_cluster(
+        &self,
+        pool: &SqlitePool,
+        cluster: Cluster,
+        nodes: Vec<Node>,
+    ) -> Result<(), Error> {
         match self {
-            CloudProvider::Aws(aws) => aws.destroy_cluster(cluster, nodes).await,
-            CloudProvider::Vultr(vultr) => vultr.destroy_cluster(cluster, nodes).await,
+            CloudProvider::Aws(aws) => aws.terminate_cluster(pool, cluster, nodes).await,
+            CloudProvider::Vultr(vultr) => vultr.terminate_cluster(pool, cluster, nodes).await,
+        }
+    }
+
+    async fn simulate_cluster_failure(
+        &self,
+        pool: &SqlitePool,
+        cluster: Cluster,
+        node_private_ip: &str,
+    ) -> Result<(), Error> {
+        match self {
+            CloudProvider::Aws(aws) => {
+                aws.simulate_cluster_failure(pool, cluster, node_private_ip)
+                    .await
+            }
+            CloudProvider::Vultr(vultr) => {
+                vultr
+                    .simulate_cluster_failure(pool, cluster, node_private_ip)
+                    .await
+            }
         }
     }
 }

@@ -71,6 +71,49 @@ pub async fn create(
         }
     };
 
+    // Validate cluster.id
+    let new_cluster_id = match cluster_yaml.id {
+        Some(id) => {
+            if id.is_empty() {
+                bail!("Cluster ID cannot be empty");
+            }
+
+            for (i, ch) in id.chars().enumerate() {
+                if !ch.is_alphanumeric() && ch != '-' && ch != '_' {
+                    bail!(
+                        "Invalid character '{}' at position {} in cluster ID '{}'. Only \
+                        alphanumeric characters, hyphens (-), and underscores (_) are allowed",
+                        ch,
+                        i,
+                        id
+                    )
+                }
+            }
+
+            let existing_cluster = Cluster::fetch_by_id(pool, &id).await?;
+            if existing_cluster.is_some() {
+                bail!(
+                    "Cluster with id: '{}' already exists. Please update the yaml file and try \
+                    again",
+                    id
+                );
+            }
+            id
+        }
+        None => utils::generate_id(),
+    };
+
+    // Validate cluster.display_name
+    let cluster_name = cluster_yaml.display_name.clone();
+    let existing_cluster = Cluster::fetch_by_name(pool, &cluster_name).await?;
+    if existing_cluster.is_some() {
+        bail!(
+            "Cluster with display_name: '{}' already exists. Please update the yaml file and try \
+            again.",
+            cluster_name
+        );
+    }
+
     // Validate provided SSH key pair
     let public_key_path_string = utils::expand_tilde(&cluster_yaml.public_ssh_key_path);
     let public_key_path = Path::new(&public_key_path_string);
@@ -219,10 +262,6 @@ pub async fn create(
     };
 
     // Validate node data
-    let new_cluster_id = match cluster_yaml.id {
-        Some(id) => id,
-        None => utils::generate_id(),
-    };
     let mut nodes_to_insert: Vec<Node> = vec![];
     let mut commands_to_insert: Vec<ShellCommand> = vec![];
     let node_count = cluster_yaml.nodes.len() as u64;
@@ -283,7 +322,7 @@ pub async fn create(
             None => "on-demand".to_string(), // Default when not specified
         };
 
-        // Validade node_affinity
+        // Validate node_affinity
         if cluster_yaml.use_node_affinity && !instance_type_details.has_affinity_settings {
             bail!(
                 "Instance type '{}' does not support node affinity settings",
@@ -307,7 +346,8 @@ pub async fn create(
                     if !valid_modes.contains(&burstable_mode.to_lowercase().as_str()) {
                         bail!(
                             "Invalid burstable mode '{}' specified for node '{}'.\
-                            The instance type '{}' in region '{}' only supports the following burstale modes: {}",
+                            The instance type '{}' in region '{}' only supports the following \
+                            burstable modes: {}",
                             burstable_mode,
                             i + 1,
                             &instance_type_name,
@@ -356,13 +396,14 @@ pub async fn create(
         nodes_to_insert.push(Node {
             id: new_node_id,
             cluster_id: new_cluster_id.clone(),
-            status: "PLANNED".to_string(),
             instance_type: instance_type_name,
             allocation_mode,
             burstable_mode: burstable_mode.cloned(),
             image_id,
             private_ip: None,
             public_ip: None,
+            was_efs_configured: false,
+            was_ssh_configured: false,
         });
         nodes_tracker.inc(1);
     }
@@ -406,20 +447,7 @@ pub async fn create(
                 .await?
                 .unwrap(); // Because of the previous validation, unwrap won't fail here
 
-        let processor_info = match &instance_details.core_count {
-            Some(cores) => {
-                format!(
-                    "{}-Core {} {}",
-                    cores, instance_details.cpu_architecture, instance_details.cpu_type
-                )
-            }
-            None => {
-                format!(
-                    "{} {}",
-                    instance_details.cpu_architecture, instance_details.cpu_type
-                )
-            }
-        };
+        let processor_info = utils::format_processor_info(instance_details.core_count, instance_details.cpu_architecture, instance_details.cpu_type);
 
         let gpu_info = match instance_details.gpu_type {
             Some(gpu) => {
@@ -445,14 +473,13 @@ pub async fn create(
         println!();
     }
 
-    if !(utils::user_confirmation(
+    if !utils::user_confirmation(
         skip_confirmation,
         "Do you want to proceed creating this cluster?",
-    )?) {
+    )? {
         return Ok(());
     }
 
-    let cluster_name = cluster_yaml.display_name.clone();
     let cluster = Cluster {
         id: new_cluster_id.clone(),
         display_name: cluster_name.clone(),

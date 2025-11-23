@@ -1,13 +1,15 @@
 use crate::database::models::{ConfigVar, Provider, ProviderConfig};
 use crate::utils;
-use inquire::{Password, Select, Text};
+
+use anyhow::{Result, bail};
+use inquire::{Select, Text};
 use sqlx::sqlite::SqlitePool;
 use tracing::error;
 
-pub async fn create(pool: &SqlitePool, skip_confirmation: bool) -> anyhow::Result<()> {
+pub async fn create(pool: &SqlitePool, skip_confirmation: bool) -> Result<()> {
     let providers = Provider::fetch_all(pool).await?;
     if providers.is_empty() {
-        anyhow::bail!("Providers table is empty, please check SQLite seed data");
+        bail!("Providers table is empty, please check SQLite seed data");
     }
 
     let provider_options: Vec<&str> = providers.iter().map(|p| p.display_name.as_str()).collect();
@@ -24,7 +26,7 @@ pub async fn create(pool: &SqlitePool, skip_confirmation: bool) -> anyhow::Resul
             .expect("Selected provider not found"),
         Err(e) => {
             error!("{}", e.to_string());
-            anyhow::bail!("Failed processing user selection")
+            bail!("Failed processing user selection")
         }
     };
 
@@ -33,7 +35,7 @@ pub async fn create(pool: &SqlitePool, skip_confirmation: bool) -> anyhow::Resul
         .chars()
         .all(|c| c.is_alphanumeric() || c == ' ' || c == '-' || c == '_')
     {
-        anyhow::bail!(
+        bail!(
             "Invalid display_name `{}` contains invalid characters.",
             display_name
         )
@@ -42,10 +44,7 @@ pub async fn create(pool: &SqlitePool, skip_confirmation: bool) -> anyhow::Resul
     let mut config_vars: Vec<ConfigVar> = vec![];
     let required_keys = provider.get_required_config_vars();
     for key in required_keys {
-        let value = Password::new(&format!("Enter value for {}:", key))
-            .without_confirmation()
-            .with_display_toggle_enabled()
-            .prompt()?;
+        let value = Text::new(&format!("Enter value for {}:", key)).prompt()?;
         config_vars.push(ConfigVar {
             id: 0,
             provider_config_id: 0,

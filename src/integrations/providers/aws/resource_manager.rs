@@ -1,23 +1,25 @@
 use super::interface::AwsInterface;
-use crate::database::models::{Cluster, Node, InstanceCreationFailurePolicy};
+use crate::database::models::{Cluster, ClusterState, Node, InstanceCreationFailurePolicy};
 use crate::integrations::CloudResourceManager;
 use crate::utils;
 
 use std::collections::HashMap;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
+use sqlx::sqlite::SqlitePool;
+use tokio::time::{Duration, sleep};
 use tracing::info;
 use tracing::error;
-use anyhow::bail;
+use tracing::warn;
 
 const MAX_MIGRATION_ATTEMPTS: usize = 3;
 
 impl CloudResourceManager for AwsInterface {
     async fn spawn_cluster(
         &self,
+        pool: &SqlitePool,
         cluster: Cluster,
         nodes: Vec<Node>,
-        init_commands: HashMap<usize, Vec<String>>,
     ) -> Result<()> {
 
         let attempts: usize = cluster.migration_attempts as usize;
@@ -28,19 +30,25 @@ impl CloudResourceManager for AwsInterface {
         eprintln!("\n ATTEMPT: {}", attempts+1);
 
         let mut context = self.create_cluster_context(&cluster)?;
-        let mut steps = 8 + (4 * nodes.len()) + nodes.len();
+        let mut steps = 9 + (6 * nodes.len());
         if cluster.use_node_affinity {
             steps += 1;
         }
         if cluster.use_elastic_file_system {
-            steps += 4 + nodes.len();
+            steps += 4 + (2 * nodes.len()) + nodes.len();
+        } else {
+            steps += nodes.len();
         }
-        let total_init_commands: usize =
-            init_commands.values().map(|commands| commands.len()).sum();
-        steps += total_init_commands;
 
         let spawning_message = format!("Spawning Cluster '{}'...", cluster.display_name);
         info!(spawning_message);
+
+        let new_state = match cluster.state {
+            ClusterState::Running => ClusterState::Restoring,
+            _ => ClusterState::Spawning,
+        };
+        cluster.update_state(pool, new_state).await?;
+
         let multi = utils::ProgressTracker::create_multi();
         let main_progress =
             utils::ProgressTracker::add_to_multi(&multi, steps as u64, Some(&spawning_message));
@@ -71,9 +79,10 @@ impl CloudResourceManager for AwsInterface {
          *     14.1. Request EC2 instance creation
          * }
          * 15. Wait for all EC2 instances to be ready
-         * 16. Wait for EFS mount target to be ready
-         * 17. Attach EC2 Instances to EFS mount target
-         * 18. Dispatch EC2 Instances initialization commands
+         * 16. (conditional) Wait for EFS mount target to be ready
+         * 17. Wait for SSM agents to be ready on all instances
+         * 18. (conditional) Attach EC2 Instances to EFS mount target using SSM
+         * 19. (conditional) Dispatch EC2 Instances initialization commands
          */
 
         // 1. Request EFS device creation...
@@ -154,7 +163,7 @@ impl CloudResourceManager for AwsInterface {
         }
 
         // 13. Create ENI devices, Elastic IPs, and associate them
-        for (node_index, _node) in nodes.iter().enumerate() {
+        for (node_index, node) in nodes.iter().enumerate() {
             // 13.1. Create ENI device
             operation_spinner.update_message(&format!(
                 "Creating {} of {} Elastic Network Interface (ENI) devices",
@@ -187,11 +196,27 @@ impl CloudResourceManager for AwsInterface {
             let node_public_ip = self
                 .associate_elastic_ip_with_network_interface(&context, &eip_id, &eni_id)
                 .await?;
-            context.elastic_ips.insert(node_index, node_public_ip);
+            context
+                .elastic_ips
+                .insert(node_index, node_public_ip.clone());
+            let node_private_ip = context.network_interface_private_ip(node_index);
+            node.set_ips(pool, &node_private_ip, &node_public_ip)
+                .await?;
             main_progress.inc(1);
         }
 
         // 14. Request EC2 Instances
+        match cluster.state {
+            // Sleep for 20s to give time for the IAM Profile to be propagated the first time the
+            // Cluster is created
+            ClusterState::Pending | ClusterState::Spawning => {
+                operation_spinner
+                    .update_message("Giving time for the IAM Profile to be propagated...");
+                sleep(Duration::from_secs(20)).await;
+            }
+            _ => {}
+        }
+
         for (node_index, node) in nodes.iter().enumerate() {
             // 14.1. Request EC2 instance creation...
             operation_spinner.update_message(&format!(
@@ -216,37 +241,65 @@ impl CloudResourceManager for AwsInterface {
                                 eprintln!("\nDestroying and canceling the cluster");
 
                                 // Attempt to terminate/cleanup the cluster
-                                let cleanup_result = self.destroy_cluster(cluster.clone(), nodes.clone()).await;
+                                let cleanup_result = self.terminate_cluster(pool, cluster.clone(), nodes.clone()).await;
                                 if let Err(cleanup_err) = cleanup_result {
                                     error!("Failed to cleanup cluster after instance creation failure: {:?}", cleanup_err);
                                 }
                             },
                             InstanceCreationFailurePolicy::OnDemand => {
-                                // Stop the progress bars before printing errors
-                                operation_spinner.finish_with_message("Error occurred, cleaning up...");
-                                main_progress.finish_with_message("Cluster creation failed.");
-                                
-                                // Print the error
-                                eprintln!("Failed to create instance for node {} with '{}' allocation: {:#}", node_index+1, nodes[node_index].allocation_mode, e);
-                                eprintln!("\nDestroying cluster and changing the allocation mode of node {} to 'on-demand'.", node_index+1);
+                                // Stop progress bars to report status
+                                operation_spinner.finish_with_message("Spot allocation failed, switching strategy...");
+                                main_progress.finish_with_message("Cluster creation interrupted.");
 
-                                // Attempt to terminate/cleanup the cluster
-                                let cleanup_result = self.destroy_cluster(cluster.clone(), nodes.clone()).await;
-                                if let Err(cleanup_err) = cleanup_result {
-                                    bail!("Failed to cleanup cluster after instance creation failure: {:?}", cleanup_err);
+                                warn!(
+                                    "Failed to create Spot instance for node {} (Allocation: '{}'). Error: {:#}", 
+                                    node_index + 1, 
+                                    nodes[node_index].allocation_mode, 
+                                    e
+                                );
+
+                                eprintln!(
+                                    "\nCreation failed. Switching Node {} to 'on-demand' and retrying (keeping Networking/IAM intact)...", 
+                                    node_index + 1
+                                );
+
+                                // Terminate only the instances, not the whole cluster
+                                if let Err(term_err) = self.request_termination_of_all_elastic_compute_instances(&context).await {
+                                    error!("Failed to terminate instances during fallback: {:?}", term_err);
+                                    // If we can't clean up instances, we must fail hard
+                                    return Err(term_err); 
+                                }
+                                
+                                // Wait for them to actually shut down so we can reuse the ENIs/Volumes cleanly
+                                if let Err(wait_err) = self.wait_for_all_elastic_compute_instances_to_be_terminated(&context).await {
+                                    error!("Timeout waiting for instances to terminate: {:?}", wait_err);
+                                    return Err(wait_err);
                                 }
 
-                                // Update the cluster and the node
+                                // We must update the database so if the process crashes, we don't retry Spot next time.
+                                let update_query = sqlx::query!(
+                                    "UPDATE nodes SET allocation_mode = 'on-demand' WHERE id = ?",
+                                    nodes[node_index].id
+                                )
+                                .execute(pool)
+                                .await;
+
+                                if let Err(db_err) = update_query {
+                                    error!("Failed to persist allocation mode change to DB: {:?}", db_err);
+                                    bail!("Database error during fallback");
+                                }
+
+                                // Update local state for the recursion
                                 let mut new_cluster = cluster.clone();
                                 new_cluster.migration_attempts += 1;
+                                
                                 let mut new_nodes = nodes.clone();
                                 new_nodes[node_index].allocation_mode = "on-demand".to_string();
 
-                                // Try creating the cluster in the new zone
                                 return Box::pin(self.spawn_cluster(
+                                    pool,
                                     new_cluster,
                                     new_nodes,
-                                    init_commands.clone(),
                                 )).await;
                             },
                             InstanceCreationFailurePolicy::Migrate => {
@@ -259,7 +312,7 @@ impl CloudResourceManager for AwsInterface {
                                 eprintln!("\nDestroying cluster and retrying in a different availability zone.");
 
                                 // Attempt to terminate/cleanup the cluster
-                                let cleanup_result = self.destroy_cluster(cluster.clone(), nodes.clone()).await;
+                                let cleanup_result = self.terminate_cluster(pool, cluster.clone(), nodes.clone()).await;
                                 if let Err(cleanup_err) = cleanup_result {
                                     bail!("Failed to cleanup cluster after instance creation failure: {:?}", cleanup_err);
                                 }
@@ -296,9 +349,9 @@ impl CloudResourceManager for AwsInterface {
 
                                     // Try creating the cluster in the new zone
                                     return Box::pin(self.spawn_cluster(
+                                        pool,
                                         new_cluster,
                                         nodes.clone(),
-                                        init_commands.clone(),
                                     )).await;
                                 }
 
@@ -315,6 +368,7 @@ impl CloudResourceManager for AwsInterface {
 
         // 15. Wait for all EC2 Instances to be available
         operation_spinner.update_message("Waiting for all EC2 Instances to be available...");
+        sleep(Duration::from_secs(5)).await;
         self.wait_for_all_elastic_compute_instances_to_be_available(&context)
             .await?;
         main_progress.inc(1);
@@ -326,80 +380,185 @@ impl CloudResourceManager for AwsInterface {
                 .await?;
             main_progress.inc(1);
 
-            // 17. Attach EC2 Instances to EFS mount target
+            // 17. Wait for SSM agents to be ready on all instances (for EFS mounting)
             for (node_index, _) in nodes.iter().enumerate() {
-                let op_msg = format!(
-                    "Attaching Node {} of {} to EFS Mount Target...",
+                let node_instance_id = &context.ec2_instance_ids[&node_index];
+                operation_spinner.update_message(&format!(
+                    "Waiting for SSM agent readiness on Node {} of {} (for EFS mounting)...",
                     node_index + 1,
                     nodes.len()
-                );
-                operation_spinner.update_message(&op_msg);
-                let node_instance_id = &context.ec2_instance_ids[&node_index];
-                let efs_dns_name = format!(
-                    "{}.efs.{}.amazonaws.com",
-                    context.efs_device_id.clone().unwrap(),
-                    cluster.region,
-                );
-
-                // Script to attach instances to EFS
-                let efs_attach_script = [
-                    "sudo dnf install -y nfs-utils".to_string(),
-                    "sudo mkdir -p /shared".to_string(),
-                    format!("sudo mount -t nfs4 {}:/ /shared", efs_dns_name),
-                    "sudo chmod ugo+rwx /shared".to_string(),
-                ];
-
-                for command in efs_attach_script {
-                    self.send_and_wait_for_ssm_command(&context, node_instance_id, command)
-                        .await?;
-                }
-                main_progress.inc(1);
-            }
-        }
-
-        // 18. Dispatch EC2 Instance initialization commands
-        for (node_index, _) in nodes.iter().enumerate() {
-            let node_instance_id = &context.ec2_instance_ids[&node_index];
-            let node_init_commands = &init_commands[&node_index];
-            let op_msg = format!(
-                "Dispatching {} initialization commands to Instance {} (Node {} of {})...",
-                node_init_commands.len(),
-                node_instance_id,
-                node_index + 1,
-                nodes.len()
-            );
-            operation_spinner.update_message(&op_msg);
-
-            for (cmd_index, command) in node_init_commands.iter().enumerate() {
-                let cmd_msg = format!(
-                    "Executing command {} of {} on Instance {} (Node {})...",
-                    cmd_index + 1,
-                    node_init_commands.len(),
-                    node_instance_id,
-                    node_index + 1
-                );
-                operation_spinner.update_message(&cmd_msg);
-
-                info!(
-                    "Executing command {}/{} on node {}: {}",
-                    cmd_index + 1,
-                    node_init_commands.len(),
-                    node_index + 1,
-                    command
-                );
-
-                self.send_and_wait_for_ssm_command(&context, node_instance_id, command.clone())
+                ));
+                self.wait_for_ssm_agent_ready(&context, node_instance_id, Duration::from_secs(300))
                     .await?;
                 main_progress.inc(1);
             }
 
-            info!(
-                "Successfully completed all {} initialization commands for Instance {} (Node {})",
-                node_init_commands.len(),
-                node_instance_id,
-                node_index + 1
+            // 18. Attach EC2 Instances to EFS mount target using SSM
+            let efs_dns_name = format!(
+                "{}.efs.{}.amazonaws.com",
+                context.efs_device_id.clone().unwrap(),
+                cluster.region,
             );
+            let mut ssm_command_ids: HashMap<usize, String> = HashMap::new();
+            for (node_index, _) in nodes.iter().enumerate() {
+                let op_msg = format!(
+                    "Requesting EFS Mount Target attachment for Node {} of {}...",
+                    node_index + 1,
+                    nodes.len()
+                );
+                operation_spinner.update_message(&op_msg);
+                match nodes[node_index].was_efs_configured {
+                    true => {
+                        info!(
+                            "Skipping Node {} of {} (already configured for EFS)...",
+                            node_index + 1,
+                            nodes.len()
+                        );
+                    }
+                    false => {
+                        let node_instance_id = &context.ec2_instance_ids[&node_index];
+                        let efs_attach_script = format!(
+                            r#"
+sudo yum install -y nfs-utils
+sudo mkdir -p /shared
+i=1
+while true; do
+   echo "EFS mount attempt $i..."
+   if sudo mount -t nfs4 {}:/ /shared; then
+       echo "EFS mount successful!"
+       break
+   else
+       echo "EFS mount failed, waiting 10 seconds for DNS propagation..."
+       sleep 10
+       i=$((i + 1))
+   fi
+done
+sudo chown ec2-user:ec2-user /shared
+echo "EFS mount and setup complete!"
+"#,
+                            efs_dns_name
+                        );
+                        let ssm_command_id = self
+                            .create_ssm_command(&context, node_instance_id, efs_attach_script)
+                            .await?;
+                        ssm_command_ids.insert(node_index, ssm_command_id);
+                    }
+                }
+                main_progress.inc(1);
+            }
+            for (node_index, _) in nodes.iter().enumerate() {
+                let max_wait_time = Duration::from_secs(5 * 60);
+                let poll_interval = Duration::from_secs(15);
+                let op_msg = format!(
+                    "Waiting for Node {} of {} to attach to EFS Mount Target...",
+                    node_index + 1,
+                    nodes.len()
+                );
+                operation_spinner.update_message(&op_msg);
+                match nodes[node_index].was_efs_configured {
+                    true => {}
+                    false => {
+                        let node_instance_id = &context.ec2_instance_ids[&node_index];
+                        self.poll_ssm_command_until_completion(
+                            &context,
+                            &ssm_command_ids[&node_index],
+                            node_instance_id,
+                            max_wait_time,
+                            poll_interval,
+                        )
+                        .await?;
+                        nodes[node_index]
+                            .set_efs_configuration_state(pool, true)
+                            .await?;
+                    }
+                }
+                main_progress.inc(1);
+            }
+        } else {
+            // Wait for SSM agents to be ready for init commands (when not using EFS)
+            for (node_index, _) in nodes.iter().enumerate() {
+                let node_instance_id = &context.ec2_instance_ids[&node_index];
+                operation_spinner.update_message(&format!(
+                    "Waiting for SSM agent readiness on Node {} of {} (for init commands)...",
+                    node_index + 1,
+                    nodes.len()
+                ));
+                self.wait_for_ssm_agent_ready(&context, node_instance_id, Duration::from_secs(300))
+                    .await?;
+                main_progress.inc(1);
+            }
         }
+
+        // 19. Dispatch EC2 Instance initialization commands
+        // TODO: Add logic to track/skip individual commands
+        let mut ssm_init_command_ids: HashMap<usize, String> = HashMap::new();
+        let private_key_content = match std::fs::read_to_string(&cluster.private_ssh_key_path) {
+            Ok(content) => content,
+            Err(e) => {
+                bail!(
+                    "Failed to read private SSH key file '{}': {}",
+                    cluster.private_ssh_key_path,
+                    e
+                );
+            }
+        };
+
+        let local_key_path = std::path::Path::new(&cluster.private_ssh_key_path);
+        let key_filename = local_key_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("id_rsa"); // Fallback to id_rsa if path is weird
+
+        for (node_index, node) in nodes.iter().enumerate() {
+            let mut node_init_commands = node.get_init_commands(pool).await?;
+
+            let ssh_key_setup_script = format!(
+                r#"echo "Setting up private SSH key..." && \
+mkdir -p ~/.ssh && \
+rm -f ~/.ssh/*.pub && \
+cat > ~/.ssh/{0} << 'PRIVATE_KEY_EOF'
+{1}
+PRIVATE_KEY_EOF
+chmod 600 ~/.ssh/{0} && \
+chown ec2-user:ec2-user ~/.ssh/{0} && \
+echo "Private SSH key successfully installed at ~/.ssh/{0}""#,
+                key_filename,
+                private_key_content
+            );
+
+            node_init_commands.insert(0, ssh_key_setup_script);
+            let op_msg = format!(
+                "Dispatching init script for Node {} of {}...",
+                node_index + 1,
+                nodes.len()
+            );
+            operation_spinner.update_message(&op_msg);
+            if node_init_commands.is_empty() {
+                continue;
+            }
+            let node_instance_id = &context.ec2_instance_ids[&node_index];
+            let node_init_script = node_init_commands.join(" && ");
+            let ssm_command_id = self
+                .create_ssm_command(&context, node_instance_id, node_init_script)
+                .await?;
+            ssm_init_command_ids.insert(node_index, ssm_command_id);
+            main_progress.inc(1);
+        }
+        for (node_index, ssm_init_command_id) in ssm_init_command_ids.iter() {
+            let node_instance_id = &context.ec2_instance_ids[node_index];
+            let max_wait_time = Duration::from_secs(15 * 60);
+            let poll_interval = Duration::from_secs(15);
+            self.poll_ssm_command_until_completion(
+                &context,
+                ssm_init_command_id,
+                node_instance_id,
+                max_wait_time,
+                poll_interval,
+            )
+            .await?;
+        }
+
+        cluster.update_state(pool, ClusterState::Running).await?;
 
         operation_spinner.finish_with_message("All Cloud operations completed");
         main_progress.finish_with_message(&format!(
@@ -417,9 +576,15 @@ impl CloudResourceManager for AwsInterface {
         Ok(())
     }
 
-    async fn destroy_cluster(&self, cluster: Cluster, nodes: Vec<Node>) -> Result<()> {
+    async fn terminate_cluster(
+        &self,
+        pool: &SqlitePool,
+        cluster: Cluster,
+        nodes: Vec<Node>,
+    ) -> Result<()> {
         let context = self.create_cluster_context(&cluster)?;
-        let mut steps = 9 + (2 * nodes.len());
+        let mut steps = 10;
+        steps += 2 * nodes.len();
         if cluster.use_node_affinity {
             steps += 1;
         }
@@ -427,27 +592,35 @@ impl CloudResourceManager for AwsInterface {
             steps += 4;
         }
 
-        let destroying_message = format!("Destroying Cluster '{}'...", cluster.display_name);
-        info!(destroying_message);
+        let terminating_message = format!("Terminating Cluster '{}'...", cluster.display_name);
+        info!(terminating_message);
+
+        cluster
+            .update_state(pool, ClusterState::Terminating)
+            .await?;
+        for node in nodes.iter() {
+            node.set_efs_configuration_state(pool, false).await?;
+        }
+
         let multi = utils::ProgressTracker::create_multi();
         let main_progress =
-            utils::ProgressTracker::add_to_multi(&multi, steps as u64, Some(&destroying_message));
+            utils::ProgressTracker::add_to_multi(&multi, steps as u64, Some(&terminating_message));
         let operation_spinner =
             utils::ProgressTracker::new_indeterminate(&multi, "Initializing...");
 
         /*
          * AWS CLUSTER CLOUD RESOURCE DESTRUCTION CYCLE
          *
-         * 1. Request EFS mount target deletion
+         * 1. (optional) Request EFS mount target deletion
          * 2. Request termination of all EC2 Instances
-         * 3. Wait for EFS mount target to be deleted
-         * 4. Request EFS device deletion
+         * 3. (optional) Wait for EFS mount target to be deleted
+         * 4. (optional) Request EFS device deletion
          * 5. Wait for all EC2 instances to be terminated
          * 6. for each node {
          *    6.1. Dissociate from ENI device and deallocate Elastic IP
          *    6.2. Destroy ENI device
          * }
-         * 7. Destroy Placement Group
+         * 7. (optional) Destroy Placement Group
          * 8. Destroy SSH Key Pair
          * 9. Destroy Security Groups
          * 10. Destroy IAM Profile
@@ -456,7 +629,7 @@ impl CloudResourceManager for AwsInterface {
          * 13. Destroy Internet Gateway
          * 14. Destroy Subnet
          * 15. Destroy VPC
-         * 16. Wait for EFS device to be deleted
+         * 16. (optional) Wait for EFS device to be deleted
          */
 
         // 1. Request EFS mount target deletion
@@ -578,12 +751,58 @@ impl CloudResourceManager for AwsInterface {
             main_progress.inc(1);
         }
 
+        cluster.update_state(pool, ClusterState::Terminated).await?;
+
         operation_spinner.finish_with_message("All Cloud operations completed");
         main_progress.finish_with_message(&format!(
-            "Cluster '{}' destroyed successfully!",
+            "Cluster '{}' terminated successfully!",
             cluster.display_name
         ));
-        println!("Cluster destruction completed successfully!");
+        println!("Cluster termination completed successfully!");
+        Ok(())
+    }
+
+    async fn simulate_cluster_failure(
+        &self,
+        pool: &SqlitePool,
+        cluster: Cluster,
+        node_private_ip: &str,
+    ) -> Result<()> {
+        let context = self.create_cluster_context(&cluster)?;
+        match self
+            .find_elastic_compute_instance_by_private_ip(&context, node_private_ip)
+            .await?
+        {
+            Some(id) => {
+                println!("Terminating instance with IP: '{}'", node_private_ip);
+                self.terminate_elastic_compute_instance(&context, &id)
+                    .await?;
+            }
+            None => {
+                println!(
+                    "Private IP: '{}' not found in Cluster '{}'",
+                    node_private_ip, cluster.display_name
+                );
+                return Ok(());
+            }
+        }
+
+        match Node::fetch_by_private_ip(pool, node_private_ip).await? {
+            Some(failed_node) => {
+                failed_node.set_efs_configuration_state(pool, false).await?;
+                println!(
+                    "Requested termination for Instance '{}' (failure simulation)",
+                    failed_node.id
+                );
+            }
+            None => {
+                println!(
+                    "Couldn't find Node record (private_ip='{}') in the database",
+                    node_private_ip
+                );
+            }
+        }
+
         Ok(())
     }
 }

@@ -14,26 +14,36 @@ nodes:
     allocation_mode: on-demand
     burstable_mode: Standard
     image_id: ami-0845a3d4093ba6e49
-    init_commands:
-      - ls
 
   - instance_type: t3.2xlarge
     allocation_mode: on-demand
-    burstable_mode: Standard
+    burstable_mode: Unlimited
     image_id: ami-0845a3d4093ba6e49
-    init_commands:
-      - ls
 
-  - instance_type: t3.2xlarge
+  - instance_type: m5.2xlarge
     allocation_mode: on-demand
-    burstable_mode: Standard
+    #burstable_mode: Standard
     image_id: ami-0845a3d4093ba6e49
-    init_commands:
-      - ls
 
-  - instance_type: t3.2xlarge
+  - instance_type: m5.2xlarge
     allocation_mode: on-demand
-    burstable_mode: Standard
+    #burstable_mode: Standard
     image_id: ami-0845a3d4093ba6e49
-    init_commands:
-      - ls
+
+#nodes:
+#  - instance_type: t3.2xlarge
+#    allocation_mode: on-demand  # on-demand | spot
+#    # burstable_mode: Standard  # Standard | Unlimited
+#    image_id: ami-0150ccaf51ab55a51
+#
+#  - instance_type: t3.2xlarge
+#    allocation_mode: on-demand
+#    image_id: ami-0150ccaf51ab55a51
+#    init_commands:  # Completely optional
+#      - ls
+#
+#  - instance_type: t3.2xlarge
+#    allocation_mode: on-demand
+#    image_id: ami-0150ccaf51ab55a51
+#    init_commands:
+#      - ls

@@ -31,3 +31,8 @@ db.sqlite-wal
 
 # result reports
 results/
+
+# YAML files in root directory (except cluster.example.yaml)
+/*.yaml
+!cluster.example.yaml
+!task.example.yaml

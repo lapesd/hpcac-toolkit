@@ -5,6 +5,7 @@ use crate::integrations::{
 };
 use crate::utils;
 
+use anyhow::{Result, bail};
 use inquire::Select;
 use sqlx::sqlite::SqlitePool;
 use tracing::error;
@@ -14,14 +15,14 @@ pub async fn load(
     provider_id: Option<String>,
     provider_config_id: Option<String>,
     region: Option<String>,
-) -> anyhow::Result<()> {
+) -> Result<()> {
     let provider_config = match provider_config_id {
         Some(config_id) => {
             let config_id_parsed = match config_id.parse::<i64>() {
                 Ok(id) => id,
                 Err(e) => {
                     error!("{}", e.to_string());
-                    anyhow::bail!(
+                    bail!(
                         "Invalid Provider Configuration ID: '{}' is not a valid number",
                         config_id
                     )
@@ -31,7 +32,7 @@ pub async fn load(
             match config_query {
                 Some(result) => result,
                 None => {
-                    anyhow::bail!("Provider Configuration '{}' not found", config_id_parsed)
+                    bail!("Provider Configuration '{}' not found", config_id_parsed)
                 }
             }
         }
@@ -42,14 +43,14 @@ pub async fn load(
                     match provider_query {
                         Some(result) => result,
                         None => {
-                            anyhow::bail!("Provider '{}' not found", provider_id)
+                            bail!("Provider '{}' not found", provider_id)
                         }
                     }
                 }
                 None => {
                     let mut providers = Provider::fetch_all(pool).await?;
                     if providers.is_empty() {
-                        anyhow::bail!("Providers table is empty")
+                        bail!("Providers table is empty")
                     } else if providers.len() == 1 {
                         // Use the only option available
                         providers.swap_remove(0)
@@ -64,7 +65,7 @@ pub async fn load(
                                 Ok(selection) => selection,
                                 Err(e) => {
                                     error!("{}", e.to_string());
-                                    anyhow::bail!("Failed processing user selection")
+                                    bail!("Failed processing user selection")
                                 }
                             };
 
@@ -80,7 +81,7 @@ pub async fn load(
 
             let mut configs = ProviderConfig::fetch_all_by_provider(pool, &provider.id).await?;
             if configs.is_empty() {
-                anyhow::bail!("No provider configuration found for {}", &provider.id)
+                bail!("No provider configuration found for {}", &provider.id)
             } else if configs.len() == 1 {
                 // Use the only config available
                 configs.swap_remove(0)
@@ -95,7 +96,7 @@ pub async fn load(
                         Ok(selection) => selection,
                         Err(e) => {
                             error!("{}", e.to_string());
-                            anyhow::bail!("Failed processing user selection")
+                            bail!("Failed processing user selection")
                         }
                     };
 
@@ -115,7 +116,7 @@ pub async fn load(
         "aws" => CloudProvider::Aws(AwsInterface { config_vars }),
         "vultr" => CloudProvider::Vultr(VultrInterface { config_vars }),
         _ => {
-            anyhow::bail!("Provider '{}' is currently not supported.", &provider_id)
+            bail!("Provider '{}' is currently not supported.", &provider_id)
         }
     };
 

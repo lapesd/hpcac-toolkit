@@ -1,18 +1,17 @@
-use crate::database::models::{ Cluster, ProviderConfig };
+use crate::database::models::{Cluster, ClusterState, InstanceType, ProviderConfig};
 use crate::integrations::providers::aws::AwsInterface;
-use crate::database::models::{ ClusterState, InstanceType };
 use crate::utils;
 
-use std::time;
-use serde::{Deserialize, Serialize};
-use anyhow::{Result, bail};
-use sqlx::sqlite::SqlitePool;
-use std::fs;
-use std::path::Path;
-use tracing::{info, error};
+use anyhow::{bail, Result};
 use aws_sdk_ec2::types::Filter;
 use chrono::Local;
+use serde::{Deserialize, Serialize};
+use sqlx::sqlite::SqlitePool;
+use std::fs::{self, OpenOptions};
 use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
+use tracing::{error, info};
 
 #[derive(Debug, Deserialize, Serialize)]
 struct TasksYaml {
@@ -33,9 +32,52 @@ pub async fn run_task(
     skip_confirmation: bool,
 ) -> Result<()> {
     info!("Invoked `run_tasks` command...");
-    info!("Parsing contents of `tasks_config.yaml` file...");
 
-    // Load and parse the task YAML
+    // Prepare report file
+    let mut report_dir = PathBuf::from("results");
+    report_dir.push(format!("cluster_{}", cluster_id));
+
+    if let Err(e) = fs::create_dir_all(&report_dir) {
+        error!("Failed to create directory for result report: {}", e);
+        bail!("FileSystem error: {}", e);
+    }
+
+    let timestamp = Local::now().format("%Y-%m-%dT%H:%M:%S");
+    let filename = format!("{}.txt", timestamp);
+    let report_path = report_dir.join(&filename);
+
+    // Open file in Append/Create mode
+    let mut report_file = match OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&report_path)
+    {
+        Ok(f) => {
+            info!("Result report will be streamed to '{:?}'", report_path);
+            f
+        }
+        Err(e) => {
+            error!("Failed to create report file: {}", e);
+            bail!("FileSystem error: {}", e);
+        }
+    };
+
+    // Helper closure to write to file and handle errors cleanly
+    macro_rules! log_report {
+        ($($arg:tt)*) => ({
+            let text = format!($($arg)*);
+            // print!("{}", text);
+            if let Err(e) = report_file.write_all(text.as_bytes()) {
+                error!("Failed to write to report file: {}", e);
+            }
+            if let Err(e) = report_file.flush() {
+                error!("Failed to flush report file: {}", e);
+            }
+        })
+    }
+
+    info!("Parsing contents of `tasks_config.yaml` file...");
     let path = Path::new(yaml_file_path);
     let tasks_yaml_str: String = match fs::read_to_string(path) {
         Ok(result) => {
@@ -64,7 +106,6 @@ pub async fn run_task(
     };
 
     info!("fetching Clusters (id='{}')", cluster_id);
-    // get cluster and nodes
     let cluster = match Cluster::fetch_by_id(pool, cluster_id).await? {
         Some(cluster) => cluster,
         None => {
@@ -80,7 +121,6 @@ pub async fn run_task(
     }
     info!("Found online Cluster (id='{}')!", cluster_id);
 
-    // Get cloud interface
     let provider_config =
         match ProviderConfig::fetch_by_id(pool, cluster.provider_config_id).await? {
             Some(config) => config,
@@ -112,10 +152,7 @@ pub async fn run_task(
         }
         println!();
     }
-    if !(utils::user_confirmation(
-        skip_confirmation,
-        "Run this tasks on the cluster?",
-    )?) {
+    if !(utils::user_confirmation(skip_confirmation, "Run this tasks on the cluster?")?) {
         return Ok(());
     }
     println!();
@@ -123,41 +160,96 @@ pub async fn run_task(
     // Get context and task_runner_instance_id
     let context = cloud_interface.create_cluster_context(&cluster)?;
     let task_runner_instance_name = context.ec2_instance_name(0);
-    let filter = Filter::builder()
+    
+    // Filter by Name
+    let name_filter = Filter::builder()
         .name("tag:Name")
         .values(&task_runner_instance_name)
         .build();
-    let resp = context.ec2_client.describe_instances()
-        .filters(filter)
+
+    // Filter by State
+    let state_filter = Filter::builder()
+        .name("instance-state-name")
+        .values("running")
+        .build();
+
+    let resp = context
+        .ec2_client
+        .describe_instances()
+        .filters(name_filter)
+        .filters(state_filter)
         .send()
         .await?;
-    let ec2_id = resp.reservations()
+
+    let ec2_id = resp
+        .reservations()
         .iter()
         .flat_map(|r| r.instances())
         .find_map(|i| i.instance_id().map(|id| id.to_string()));
+
     let task_runner_instance_ec2_id = match ec2_id {
         Some(id) => id,
-        None     => bail!("Unable to retrieve ec2 instance id."),
+        None => bail!("Unable to retrieve ec2 instance id."),
     };
 
-    // Report result string
-    let mut report_str = String::new();
-    report_str.push_str(&format!("-=-=-=-=-=-=-=-= CLUSTER DETAILS =-=-=-=-=-=-=-=-\n"));
-    report_str.push_str(&format!("{:<35}: {}\n", "Cluster Name", cluster.display_name));
-    report_str.push_str(&format!("{:<35}: {}\n", "Provider", cluster.provider_id));
-    report_str.push_str(&format!("{:<35}: {}\n", "Region", cluster.region));
-    report_str.push_str(&format!("{:<35}: {}\n", "Availability Zone", cluster.availability_zone));
-    report_str.push_str(&format!("{:<35}: {}\n", "Use Node Affinity", cluster.use_node_affinity));
-    report_str.push_str(&format!("{:<35}: {}\n", "Use Elastic Fabric Adapters (EFAs)", cluster.use_elastic_fabric_adapters));
-    report_str.push_str(&format!("{:<35}: {}\n", "Use Elastic File System (EFS)", cluster.use_elastic_file_system));
-    report_str.push_str(&format!("{:<35}: {}\n", "On Instance Creation Failure", cluster.on_instance_creation_failure.clone().unwrap().to_string()));
-    report_str.push_str(&format!("{:<35}: {}\n", "Provider Config", provider_config.display_name));
-    report_str.push_str(&format!("{:<35}: {}\n\n", "Node Count", nodes.len()));
+    info!("Checking SSM Agent status for instance '{}'...", task_runner_instance_ec2_id);
+    println!("Waiting for node to be ready for commands (SSM Agent)...");
+    
+    cloud_interface.wait_for_ssm_agent_ready(
+        &context, 
+        &task_runner_instance_ec2_id, 
+        Duration::from_secs(300) // Wait up to 5 minutes
+    ).await?;
+    
+    info!("SSM Agent is ready!");
 
-    report_str.push_str(&format!("Node Details:\n"));
+    // Write cluster details to file
+    log_report!("-=-=-=-=-=-=-=-= CLUSTER DETAILS =-=-=-=-=-=-=-=-\n");
+    log_report!("{:<35}: {}\n", "Cluster Name", cluster.display_name);
+    log_report!("{:<35}: {}\n", "Provider", cluster.provider_id);
+    log_report!("{:<35}: {}\n", "Region", cluster.region);
+    log_report!(
+        "{:<35}: {}\n",
+        "Availability Zone",
+        cluster.availability_zone
+    );
+    log_report!("{:<35}: {}\n", "Use Node Affinity", cluster.use_node_affinity);
+    log_report!(
+        "{:<35}: {}\n",
+        "Use Elastic Fabric Adapters (EFAs)",
+        cluster.use_elastic_fabric_adapters
+    );
+    log_report!(
+        "{:<35}: {}\n",
+        "Use Elastic File System (EFS)",
+        cluster.use_elastic_file_system
+    );
+    log_report!(
+        "{:<35}: {}\n",
+        "On Instance Creation Failure",
+        cluster
+            .on_instance_creation_failure
+            .clone()
+            .unwrap()
+            .to_string()
+    );
+    log_report!(
+        "{:<35}: {}\n",
+        "Provider Config",
+        provider_config.display_name
+    );
+    log_report!("{:<35}: {}\n\n", "Node Count", nodes.len());
+
+    log_report!("Node Details:\n");
     for (i, node) in nodes.iter().enumerate() {
         let instance_type_name = &node.instance_type;
-        let instance_details = InstanceType::fetch_by_name_and_region(pool, instance_type_name, &cluster.region).await?.unwrap();
+        let instance_details = InstanceType::fetch_by_name_and_region(
+            pool,
+            instance_type_name,
+            &cluster.region,
+        )
+        .await?
+        .unwrap();
         let processor_info = match &instance_details.core_count {
             Some(cores) => {
                 format!(
@@ -180,74 +272,122 @@ pub async fn run_task(
             None => "N/A".to_string(),
         };
 
-        report_str.push_str(&format!("  Node {}:\n", i + 1));
-        report_str.push_str(&format!("    Instance Type   : {}\n", node.instance_type));
-        report_str.push_str(&format!("    Processor       : {}\n", processor_info));
-        report_str.push_str(&format!("    vCPUs:          : {}\n", instance_details.vcpus));
-        report_str.push_str(&format!("    GPUs:           : {}\n", gpu_info));
-        report_str.push_str(&format!("    Image ID        : {}\n", node.image_id));
-        report_str.push_str(&format!("    Allocation Mode : {}\n", node.allocation_mode));
-        report_str.push_str(&format!("    Burstable Mode  : {}\n",
+        log_report!("  Node {}:\n", i + 1);
+        log_report!("    Instance Type   : {}\n", node.instance_type);
+        log_report!("    Processor       : {}\n", processor_info);
+        log_report!("    vCPUs:          : {}\n", instance_details.vcpus);
+        log_report!("    GPUs:           : {}\n", gpu_info);
+        log_report!("    Image ID        : {}\n", node.image_id);
+        log_report!("    Allocation Mode : {}\n", node.allocation_mode);
+        log_report!(
+            "    Burstable Mode  : {}\n",
             node.burstable_mode.as_deref().unwrap_or("N/A")
-        ));
+        );
     }
-    report_str.push_str(&format!("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-\n\n"));
+    log_report!("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-\n\n");
 
     // Running tasks
-    let steps: usize = tasks_yaml.tasks.iter()
-        .fold(0, |acc, task| acc + task.setup_commands.len() + task.run_commands.len());
+    let steps: usize = tasks_yaml.tasks.iter().fold(0, |acc, task| {
+        acc + task.setup_commands.len() + task.run_commands.len()
+    });
 
     let multi = utils::ProgressTracker::create_multi();
-    let main_progress = utils::ProgressTracker::add_to_multi(&multi, steps as u64, Some("Initializing..."));
+    let main_progress =
+        utils::ProgressTracker::add_to_multi(&multi, steps as u64, Some("Initializing..."));
     let operation_spinner = utils::ProgressTracker::new_indeterminate(&multi, "Initializing...");
 
     info!("Starting Task loop...");
     for task in tasks_yaml.tasks.iter() {
-        report_str.push_str(&format!("===> Task: '{}'\n", task.task_tag));
+        log_report!("===> Task: '{}'\n", task.task_tag);
 
         let running_task_message = format!("Running task '{}' setup commands...", task.task_tag);
         info!(running_task_message);
         main_progress.update_message(&running_task_message);
 
-        let setup_commands_start = time::Instant::now();
+        let setup_commands_start = Instant::now();
         for command in task.setup_commands.iter() {
             operation_spinner.update_message(&format!("Executing command: '{}'", command));
-            report_str.push_str(&format!("$ {}\n", command));
-            
-            match cloud_interface.send_and_wait_for_ssm_command(&context, &task_runner_instance_ec2_id, command.clone()).await {
-                Ok(out) => report_str.push_str(&format!("{}\n", out)),
-                Err(e)  => report_str.push_str(&format!("error: {}\n\n", e)),
+            log_report!("$ {}\n", command);
+
+            let result = async {
+                // Create Command
+                let cmd_id = cloud_interface
+                    .create_ssm_command(
+                        &context,
+                        &task_runner_instance_ec2_id,
+                        command.clone(),
+                    )
+                    .await?;
+
+                // Poll until completion
+                cloud_interface
+                    .poll_ssm_command_until_completion(
+                        &context,
+                        &cmd_id,
+                        &task_runner_instance_ec2_id,
+                        Duration::from_secs(3600), // 1 hour timeout
+                        Duration::from_secs(2),
+                    )
+                    .await
+            }
+            .await;
+
+            match result {
+                Ok(out) => log_report!("{}\n", out),
+                Err(e) => log_report!("error: {}\n\n", e),
             }
 
             main_progress.inc(1);
         }
-        let setup_commands_elapsed_ms = setup_commands_start.elapsed().as_millis();
-        let setup_commands_elapsed_sec = setup_commands_elapsed_ms as f64 / 1000.0;
+        let setup_commands_elapsed_sec = setup_commands_start.elapsed().as_secs_f64();
 
         let running_task_message = format!("Running task '{}' run_commands...", task.task_tag);
         info!(running_task_message);
         main_progress.update_message(&running_task_message);
 
-        let run_commands_start = time::Instant::now();
+        let run_commands_start = Instant::now();
         for command in task.run_commands.iter() {
             operation_spinner.update_message(&format!("Executing command: '{}'", command));
-            report_str.push_str(&format!("$ {}\n", command));
-            
-            match cloud_interface.send_and_wait_for_ssm_command(&context, &task_runner_instance_ec2_id, command.clone()).await {
-                Ok(out) => report_str.push_str(&format!("{}\n", out)),
-                Err(e)  => report_str.push_str(&format!("{}\n\n", e)),
+            log_report!("$ {}\n", command);
+
+            let result = async {
+                let cmd_id = cloud_interface
+                    .create_ssm_command(
+                        &context,
+                        &task_runner_instance_ec2_id,
+                        command.clone(),
+                    )
+                    .await?;
+
+                cloud_interface
+                    .poll_ssm_command_until_completion(
+                        &context,
+                        &cmd_id,
+                        &task_runner_instance_ec2_id,
+                        Duration::from_secs(3600),
+                        Duration::from_secs(2),
+                    )
+                    .await
+            }
+            .await;
+
+            match result {
+                Ok(out) => log_report!("{}\n", out),
+                Err(e) => log_report!("{}\n\n", e),
             }
 
             main_progress.inc(1);
         }
 
-        let run_commands_elapsed_ms = run_commands_start.elapsed().as_millis();
-        let run_commands_elapsed_sec = run_commands_elapsed_ms as f64 / 1000.0;
+        let run_commands_elapsed_sec = run_commands_start.elapsed().as_secs_f64();
         let exec_time = setup_commands_elapsed_sec + run_commands_elapsed_sec;
 
-        report_str.push_str(
-            &format!("===== End of Task '{}' - setup time: {:.3} s - run time: {:.3} s - total: {:.3} s =====\n\n",
-                task.task_tag, setup_commands_elapsed_sec, run_commands_elapsed_sec, exec_time)
+        log_report!(
+            "===== End of Task '{}' - setup time: {:.3} s - run time: {:.3} s - total: {:.3} s =====\n\n",
+            task.task_tag,
+            setup_commands_elapsed_sec,
+            run_commands_elapsed_sec,
+            exec_time
         );
     }
 
@@ -255,26 +395,7 @@ pub async fn run_task(
     main_progress.finish_with_message("All tasks completed!");
     info!("All tasks completed!");
 
-    // save report
-    let mut created_dir = true;
-    let report_path = format!("results/cluster_{}", cluster_id);
-    if let Err(e) = fs::create_dir_all(&report_path) {
-        println!("Failed to create directory for result report: {}", e);
-        created_dir = false;
-    };
-
-    if created_dir {
-        let timestamp = Local::now().format("%Y-%m-%dT%H:%M:%S");
-        let filename = format!("{}.txt", timestamp);
-        match fs::File::create(&format!("{}/{}", report_path, filename)) {
-            Err(e) => println!("Failed to create report file: {}", e),
-            Ok(mut file) => {
-                writeln!(file, "{}", report_str)?;
-                println!("Result report saved at '{}/{}'", report_path, filename);
-            },
-        };
-    }
+    info!("Result report saved at '{:?}'", report_path);
 
     Ok(())
 }
-

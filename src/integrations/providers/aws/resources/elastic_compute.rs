@@ -5,6 +5,7 @@ use anyhow::{Result, bail};
 use tokio::time::{Duration, sleep};
 use tracing::{error, info, warn};
 
+
 impl AwsInterface {
     pub async fn request_elastic_compute_instance_creation(
         &self,
@@ -13,10 +14,6 @@ impl AwsInterface {
         node_index: usize,
     ) -> Result<String> {
         let instance_name = context.ec2_instance_name(node_index);
-
-        // Sleep for 20s to give time for the IAM Profile to be propagated
-        sleep(Duration::from_secs(20)).await;
-
         let describe_instances_response = match context
             .ec2_client
             .describe_instances()
@@ -100,6 +97,19 @@ impl AwsInterface {
             }
         };
 
+        // TODO: Verify if this is the best configuration for our purposes
+        let block_device_mapping = aws_sdk_ec2::types::BlockDeviceMapping::builder()
+            .device_name("/dev/xvda")
+            .ebs(
+                aws_sdk_ec2::types::EbsBlockDevice::builder()
+                    .volume_size(100)
+                    .volume_type(aws_sdk_ec2::types::VolumeType::Gp3)
+                    .delete_on_termination(true)
+                    .encrypted(false)
+                    .build(),
+            )
+            .build();
+
         let mut run_instances_request = context
             .ec2_client
             .run_instances()
@@ -120,7 +130,8 @@ impl AwsInterface {
                 aws_sdk_ec2::types::IamInstanceProfileSpecification::builder()
                     .name(context.iam_profile_name.clone())
                     .build(),
-            );
+            )
+            .block_device_mappings(block_device_mapping);
 
         if node.allocation_mode.to_lowercase() == "spot" {
             run_instances_request = run_instances_request
@@ -132,10 +143,18 @@ impl AwsInterface {
         }
 
         if let Some(burstable_mode) = &node.burstable_mode {
-            let credit_spec = aws_sdk_ec2::types::CreditSpecificationRequest::builder()
-                .cpu_credits(burstable_mode.to_lowercase())
-                .build();
-            run_instances_request = run_instances_request.credit_specification(credit_spec);
+            // Only apply credit specs to T-series instances
+            if node.instance_type.to_lowercase().starts_with('t') {
+                let credit_spec = aws_sdk_ec2::types::CreditSpecificationRequest::builder()
+                    .cpu_credits(burstable_mode.to_lowercase())
+                    .build();
+                run_instances_request = run_instances_request.credit_specification(credit_spec);
+            } else {
+                warn!(
+                    "Node has burstable_mode set to '{}' but instance_type is '{}'. Ignoring credit specification to prevent AWS API error.",
+                    burstable_mode, node.instance_type
+                );
+            }
         }
 
         if context.use_node_affinity {
@@ -172,7 +191,7 @@ impl AwsInterface {
         if let Some(instance) = run_instances_response.instances().first() {
             if let Some(instance_id) = instance.instance_id() {
                 info!(
-                    "Requested new instance '{}' with ID '{}'",
+                    "Requested new instance '{}' with ID '{}' and 30GB root volume",
                     instance_name, instance_id
                 );
                 return Ok(instance_id.to_string());
@@ -192,9 +211,6 @@ impl AwsInterface {
             info!("No EC2 instances to wait for");
             return Ok(());
         }
-
-        sleep(Duration::from_secs(5)).await;
-
         let max_wait_time = Duration::from_secs(600);
         let poll_interval = Duration::from_secs(15);
         let start_time = std::time::Instant::now();
@@ -502,6 +518,113 @@ impl AwsInterface {
             }
 
             sleep(poll_interval).await;
+        }
+
+        Ok(())
+    }
+
+    pub async fn find_elastic_compute_instance_by_private_ip(
+        &self,
+        context: &AwsClusterContext,
+        private_ip: &str,
+    ) -> Result<Option<String>> {
+        info!("Looking for instance with private IP: {}", private_ip);
+
+        let describe_instances_response = match context
+            .ec2_client
+            .describe_instances()
+            .filters(
+                aws_sdk_ec2::types::Filter::builder()
+                    .name("private-ip-address")
+                    .values(private_ip)
+                    .build(),
+            )
+            .filters(context.cluster_id_filter.clone())
+            .send()
+            .await
+        {
+            Ok(response) => response,
+            Err(e) => {
+                error!("{:?}", e);
+                bail!(
+                    "Failure describing EC2 instances by private IP '{}'",
+                    private_ip
+                );
+            }
+        };
+
+        for reservation in describe_instances_response.reservations() {
+            for instance in reservation.instances() {
+                if let Some(instance_id) = instance.instance_id() {
+                    if let Some(state) = instance.state() {
+                        if let Some(state_name) = state.name() {
+                            match state_name {
+                                aws_sdk_ec2::types::InstanceStateName::Running
+                                | aws_sdk_ec2::types::InstanceStateName::Pending => {
+                                    info!(
+                                        "Found running instance '{}' with private IP '{}'",
+                                        instance_id, private_ip
+                                    );
+                                    return Ok(Some(instance_id.to_string()));
+                                }
+                                aws_sdk_ec2::types::InstanceStateName::Terminated
+                                | aws_sdk_ec2::types::InstanceStateName::ShuttingDown => {
+                                    info!(
+                                        "Found instance '{}' with private IP '{}' but it's already terminated/terminating (state: {:?})",
+                                        instance_id, private_ip, state_name
+                                    );
+                                    return Ok(None);
+                                }
+                                _ => {
+                                    warn!(
+                                        "Found instance '{}' with private IP '{}' in unexpected state: {:?}",
+                                        instance_id, private_ip, state_name
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        info!("No instance found with private IP '{}'", private_ip);
+        Ok(None)
+    }
+
+    pub async fn terminate_elastic_compute_instance(
+        &self,
+        context: &AwsClusterContext,
+        instance_id: &str,
+    ) -> Result<()> {
+        info!("Requesting termination of instance '{}'", instance_id);
+
+        match context
+            .ec2_client
+            .terminate_instances()
+            .instance_ids(instance_id)
+            .send()
+            .await
+        {
+            Ok(response) => {
+                let terminating_instances = response.terminating_instances();
+                for terminating_instance in terminating_instances {
+                    if let Some(id) = terminating_instance.instance_id() {
+                        if let Some(current_state) = terminating_instance.current_state() {
+                            if let Some(state_name) = current_state.name() {
+                                info!(
+                                    "Instance '{}' termination initiated, current state: {:?}",
+                                    id, state_name
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                error!("{:?}", e);
+                bail!("Failure terminating instance '{}'", instance_id);
+            }
         }
 
         Ok(())

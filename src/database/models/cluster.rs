@@ -18,6 +18,8 @@ pub enum ClusterState {
     Spawning,
     #[sqlx(rename = "running")]
     Running,
+    #[sqlx(rename = "restoring")]
+    Restoring,
     #[sqlx(rename = "terminating")]
     Terminating,
     #[sqlx(rename = "terminated")]
@@ -32,6 +34,7 @@ impl std::fmt::Display for ClusterState {
             ClusterState::Pending => "pending",
             ClusterState::Spawning => "spawning",
             ClusterState::Running => "running",
+            ClusterState::Restoring => "restoring",
             ClusterState::Terminating => "terminating",
             ClusterState::Terminated => "terminated",
             ClusterState::Failed => "failed",
@@ -48,6 +51,7 @@ impl std::str::FromStr for ClusterState {
             "pending" => Ok(ClusterState::Pending),
             "spawning" => Ok(ClusterState::Spawning),
             "running" => Ok(ClusterState::Running),
+            "restoring" => Ok(ClusterState::Restoring),
             "terminating" => Ok(ClusterState::Terminating),
             "terminated" => Ok(ClusterState::Terminated),
             "failed" => Ok(ClusterState::Failed),
@@ -193,6 +197,45 @@ impl Cluster {
                 WHERE id = ?
             "#,
             cluster_id
+        )
+        .fetch_optional(pool)
+        .await
+        {
+            Ok(result) => result,
+            Err(e) => {
+                error!("SQLx Error: {:?}", e);
+                bail!("DB Operation Failure");
+            }
+        };
+
+        Ok(cluster)
+    }
+
+    pub async fn fetch_by_name(pool: &SqlitePool, cluster_name: &str) -> Result<Option<Cluster>> {
+        let cluster = match sqlx::query_as!(
+            Cluster,
+            r#"
+                SELECT 
+                    id as "id!", 
+                    display_name,
+                    provider_id,
+                    provider_config_id as "provider_config_id!",
+                    public_ssh_key_path,
+                    private_ssh_key_path,
+                    region,
+                    availability_zone,
+                    use_node_affinity,
+                    use_elastic_fabric_adapters,
+                    use_elastic_file_system,
+                    created_at,
+                    state as "state: ClusterState",
+                    on_instance_creation_failure as "on_instance_creation_failure: InstanceCreationFailurePolicy",
+                    migration_attempts as "migration_attempts!",
+                    tried_zones
+                FROM clusters
+                WHERE display_name = ?
+            "#,
+            cluster_name
         )
         .fetch_optional(pool)
         .await
@@ -482,13 +525,14 @@ impl Cluster {
                 SELECT
                     id as "id!", 
                     cluster_id, 
-                    status, 
                     instance_type, 
                     allocation_mode, 
                     burstable_mode, 
                     image_id, 
                     private_ip, 
-                    public_ip 
+                    public_ip,
+                    was_efs_configured,
+                    was_ssh_configured
                 FROM nodes 
                 WHERE cluster_id = ?
             "#,
@@ -507,14 +551,10 @@ impl Cluster {
         Ok(nodes)
     }
 
-    pub async fn update_cluster_state(
-        pool: &SqlitePool,
-        cluster_id: &str,
-        new_state: ClusterState,
-    ) -> Result<()> {
+    pub async fn update_state(&self, pool: &SqlitePool, new_state: ClusterState) -> Result<()> {
         info!(
             "Transitioning Cluster (id='{}') to state '{}'",
-            cluster_id, new_state
+            self.id, new_state
         );
 
         match sqlx::query!(
@@ -524,7 +564,7 @@ impl Cluster {
                 WHERE id = ?
             "#,
             new_state,
-            cluster_id
+            self.id
         )
         .execute(pool)
         .await
@@ -533,14 +573,14 @@ impl Cluster {
                 if result.rows_affected() == 0 {
                     error!(
                         "No cluster found with id '{}' for state transition",
-                        cluster_id
+                        self.id
                     );
                     bail!("DB Operation Failure");
                 }
 
                 info!(
                     "Successfully transitioned Cluster (id='{}') to '{}'",
-                    cluster_id, new_state
+                    self.id, new_state
                 );
             }
             Err(e) => {

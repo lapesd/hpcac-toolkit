@@ -1,10 +1,9 @@
-use crate::database::models::{Cluster, ClusterState, ProviderConfig};
+use crate::database::models::{Cluster, ProviderConfig};
 use crate::integrations::{cloud_interface::CloudResourceManager, providers::aws::AwsInterface};
 use crate::utils;
 
 use anyhow::{Result, bail};
 use sqlx::sqlite::SqlitePool;
-use std::collections::HashMap;
 
 pub async fn spawn(pool: &SqlitePool, cluster_id: &str, skip_confirmation: bool) -> Result<()> {
     let cluster = match Cluster::fetch_by_id(pool, cluster_id).await? {
@@ -40,29 +39,13 @@ pub async fn spawn(pool: &SqlitePool, cluster_id: &str, skip_confirmation: bool)
     let nodes = cluster.get_nodes(pool).await?;
     cluster.print_details(pool).await?;
 
-    let mut init_commands_map: HashMap<usize, Vec<String>> = HashMap::new();
-    for (node_index, node) in nodes.iter().enumerate() {
-        let node_commands = node.get_init_commands(pool).await?;
-        init_commands_map.insert(node_index, node_commands);
-    }
-
-    if !(utils::user_confirmation(
+    if !utils::user_confirmation(
         skip_confirmation,
         "Do you want to proceed spawning this cluster?",
-    )?) {
+    )? {
         return Ok(());
     }
 
-    Cluster::update_cluster_state(pool, cluster_id, ClusterState::Spawning).await?;
-    match cloud_interface
-        .spawn_cluster(cluster, nodes, init_commands_map)
-        .await {
-            Ok(())   => Cluster::update_cluster_state(pool, cluster_id, ClusterState::Running).await?,
-            Err(e)   => {
-                Cluster::update_cluster_state(pool, cluster_id, ClusterState::Pending).await?;
-                return Err(e);
-            },
-    }
-    
+    cloud_interface.spawn_cluster(pool, cluster, nodes).await?;
     Ok(())
 }

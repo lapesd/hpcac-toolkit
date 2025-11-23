@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, bail};
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqlitePool;
@@ -43,7 +43,7 @@ impl MachineImage {
             Ok(result) => result,
             Err(e) => {
                 error!("SQLx Error: {}", e.to_string());
-                anyhow::bail!("DB Operation Failure: {}", e);
+                bail!("DB Operation Failure: {}", e);
             }
         };
 
@@ -80,7 +80,7 @@ impl MachineImage {
             Ok(result) => result,
             Err(e) => {
                 error!("SQLx Error: {}", e.to_string());
-                anyhow::bail!("DB Operation Failure: {}", e);
+                bail!("DB Operation Failure: {}", e);
             }
         };
 
@@ -119,7 +119,7 @@ impl MachineImage {
             Ok(_) => Ok(()),
             Err(e) => {
                 error!("Failed to insert machine image: {}", e.to_string());
-                anyhow::bail!("DB Operation Failure: {}", e);
+                bail!("DB Operation Failure: {}", e);
             }
         }
     }

@@ -14,10 +14,13 @@ pub async fn delete(pool: &SqlitePool, cluster_id: &str) -> Result<()> {
     };
 
     match cluster.state {
-        ClusterState::Pending | ClusterState::Terminated | ClusterState::Failed => {
+        ClusterState::Pending
+        | ClusterState::Terminated
+        | ClusterState::Failed
+        | ClusterState::Restoring => {
             info!("Deleting Cluster '{}'...", cluster.display_name)
         }
-        ClusterState::Spawning | ClusterState::Running | ClusterState::Terminating => {
+        _ => {
             bail!(
                 "Cannot delete Cluster '{}' in state '{}' from the DB",
                 cluster.display_name,
