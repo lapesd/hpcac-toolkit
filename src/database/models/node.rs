@@ -24,10 +24,10 @@ impl Node {
             r#"
                 INSERT INTO nodes (
                     id,
-                    cluster_id, 
-                    instance_type, 
-                    allocation_mode, 
-                    burstable_mode, 
+                    cluster_id,
+                    instance_type,
+                    allocation_mode,
+                    burstable_mode,
                     image_id,
                     was_efs_configured,
                     was_ssh_configured
@@ -146,7 +146,7 @@ impl Node {
                 public_ip,
                 was_efs_configured,
                 was_ssh_configured
-            FROM nodes 
+            FROM nodes
             WHERE private_ip = ?
         "#,
             private_ip

@@ -17,7 +17,7 @@ impl CloudResourceManager for AwsInterface {
         nodes: Vec<Node>,
     ) -> Result<()> {
         let mut context = self.create_cluster_context(&cluster).await?;
-        let mut steps = 9 + (6 * nodes.len());
+        let mut steps = 7 + (6 * nodes.len());
         if cluster.use_node_affinity {
             steps += 1;
         }
@@ -51,25 +51,23 @@ impl CloudResourceManager for AwsInterface {
          * 4. Create Internet Gateway
          * 5. Create Route Table (and Routing Rules and Internet Gateway and Subnet attachments)
          * 6. Create Security Groups (and attach all of them to the VPC)
-         * 7. Create IAM Role and attach Trust Policies
-         * 8. Create IAM Profile and assume IAM Role
-         * 9. (conditional) Wait for EFS device to be ready
-         * 10. (conditional) Request EFS mount target
-         * 11. Create SSH Key Pair
-         * 12. (conditional) Create Placement Group
-         * 13. for each node {
-         *     13.1. Create ENI device
-         *     13.2. Create Elastic IP
-         *     13.3. Associate Elastic IP with ENI device
+         * 7. (conditional) Wait for EFS device to be ready
+         * 8. (conditional) Request EFS mount target
+         * 9. Create SSH Key Pair
+         * 10. (conditional) Create Placement Group
+         * 11. for each node {
+         *     11.1. Create ENI device
+         *     11.2. Create Elastic IP
+         *     11.3. Associate Elastic IP with ENI device
          * }
-         * 14. for each node {
-         *     14.1. Request EC2 instance creation
+         * 12. for each node {
+         *     12.1. Request EC2 instance creation
          * }
-         * 15. Wait for all EC2 instances to be ready
-         * 16. (conditional) Wait for EFS mount target to be ready
-         * 17. Wait for SSH to be ready on all instances
-         * 18. (conditional) Attach EC2 Instances to EFS mount target via SSH
-         * 19. Dispatch EC2 Instance initialization commands via SSH
+         * 13. Wait for all EC2 instances to be ready
+         * 14. (conditional) Wait for EFS mount target to be ready
+         * 15. Wait for SSH to be ready on all instances
+         * 16. (conditional) Attach EC2 Instances to EFS mount target via SSH
+         * 17. Dispatch EC2 Instance initialization commands via SSH
          */
 
         // 1. Request EFS device creation...
@@ -108,25 +106,15 @@ impl CloudResourceManager for AwsInterface {
         context.security_group_ids = self.ensure_security_group(&context).await?;
         main_progress.inc(1);
 
-        // 7. Create IAM Role and attach Trust Policies
-        operation_spinner.update_message("Creating IAM Role and Trust Policies...");
-        self.ensure_iam_role_and_trust_policies(&context).await?;
-        main_progress.inc(1);
-
-        // 8. Create IAM Profile and assume IAM Role
-        operation_spinner.update_message("Creating IAM Profile and assuming IAM Roles...");
-        self.ensure_iam_profile(&context).await?;
-        main_progress.inc(1);
-
         if cluster.use_elastic_file_system {
-            // 9. Wait for EFS device to be ready...
+            // 7. Wait for EFS device to be ready...
             operation_spinner
                 .update_message("Waiting for Elastic File System (EFS) device to be ready...");
             self.wait_for_elastic_file_system_device_to_be_ready(&context)
                 .await?;
             main_progress.inc(1);
 
-            // 10. Request EFS mount target creation...
+            // 8. Request EFS mount target creation...
             operation_spinner
                 .update_message("Requesting Elastic File System (EFS) mount target creation...");
             context.efs_mount_target_id = Some(
@@ -136,12 +124,12 @@ impl CloudResourceManager for AwsInterface {
             main_progress.inc(1);
         }
 
-        // 11. Create SSH Key Pair
+        // 9. Create SSH Key Pair
         operation_spinner.update_message("Importing the SSH key pair...");
         context.ssh_key_id = Some(self.ensure_ssh_key(&context).await?);
         main_progress.inc(1);
 
-        // 12. Create Placement Group
+        // 10. Create Placement Group
         if context.use_node_affinity {
             operation_spinner.update_message("Creating a Placement Group...");
             context.placement_group_name_actual =
@@ -165,7 +153,7 @@ impl CloudResourceManager for AwsInterface {
                 .insert(node_index, eni_id.clone());
             main_progress.inc(1);
 
-            // 13.2. Create Elastic IP
+            // 11.2. Create Elastic IP
             operation_spinner.update_message(&format!(
                 "Allocating {} of {} Elastic IPs",
                 node_index + 1,
@@ -175,7 +163,7 @@ impl CloudResourceManager for AwsInterface {
             context.elastic_ip_ids.insert(node_index, eip_id.clone());
             main_progress.inc(1);
 
-            // 13.3. Attach Elastic IP to ENI device
+            // 11.3. Attach Elastic IP to ENI device
             operation_spinner.update_message(&format!(
                 "Associating allocated Elastic IP {} with Elastic Network Interface (ENI) device {}...",
                 eip_id, eni_id
@@ -192,19 +180,9 @@ impl CloudResourceManager for AwsInterface {
             main_progress.inc(1);
         }
 
-        // 14. Request EC2 Instances
-        match cluster.state {
-            // Sleep for 20s to give time for the IAM Profile to be propagated the first time the
-            // Cluster is created
-            ClusterState::Pending | ClusterState::Spawning => {
-                operation_spinner
-                    .update_message("Giving time for the IAM Profile to be propagated...");
-                sleep(Duration::from_secs(20)).await;
-            }
-            _ => {}
-        }
+        // 12. Request EC2 Instances
         for (node_index, node) in nodes.iter().enumerate() {
-            // 14.1. Request EC2 instance creation...
+            // 12.1. Request EC2 instance creation...
             // TODO: Add Spot support
             operation_spinner.update_message(&format!(
                 "Requesting {} of {} EC2 Instances (type='{}')",
@@ -372,7 +350,7 @@ echo "EFS mount and setup complete!"
         nodes: Vec<Node>,
     ) -> Result<()> {
         let context = self.create_cluster_context(&cluster).await?;
-        let mut steps = 10;
+        let mut steps = 8;
         steps += 2 * nodes.len();
         if cluster.use_node_affinity {
             steps += 1;
@@ -412,13 +390,11 @@ echo "EFS mount and setup complete!"
          * 7. (optional) Destroy Placement Group
          * 8. Destroy SSH Key Pair
          * 9. Destroy Security Groups
-         * 10. Destroy IAM Profile
-         * 11. Destroy IAM Role and Trust Policies
-         * 12. Destroy Route Table
-         * 13. Destroy Internet Gateway
-         * 14. Destroy Subnet
-         * 15. Destroy VPC
-         * 16. (optional) Wait for EFS device to be deleted
+         * 10. Destroy Route Table
+         * 11. Destroy Internet Gateway
+         * 12. Destroy Subnet
+         * 13. Destroy VPC
+         * 14. (optional) Wait for EFS device to be deleted
          */
 
         // 1. Request EFS mount target deletion
@@ -502,17 +478,7 @@ echo "EFS mount and setup complete!"
         self.cleanup_security_group(&context).await?;
         main_progress.inc(1);
 
-        // 10. Destroy IAM Profile
-        operation_spinner.update_message("Destroying IAM Profile...");
-        self.cleanup_iam_profile(&context).await?;
-        main_progress.inc(1);
-
-        // 11. Destroy IAM Role
-        operation_spinner.update_message("Destroying IAM Role and Trust Policies...");
-        self.cleanup_trust_policies_and_iam_role(&context).await?;
-        main_progress.inc(1);
-
-        // 12. Destroy Route Table
+        // 10. Destroy Route Table
         operation_spinner.update_message("Destroying Routing Rules and Route Table...");
         self.cleanup_route_table(&context).await?;
         main_progress.inc(1);
@@ -618,23 +584,20 @@ echo "EFS mount and setup complete!"
         for reservation in response.reservations() {
             for instance in reservation.instances() {
                 let state = instance.state().and_then(|s| s.name());
-                match state {
-                    Some(
-                        aws_sdk_ec2::types::InstanceStateName::Terminated
-                        | aws_sdk_ec2::types::InstanceStateName::ShuttingDown
-                        | aws_sdk_ec2::types::InstanceStateName::Stopped
-                        | aws_sdk_ec2::types::InstanceStateName::Stopping,
-                    ) => {
-                        if let Some(ip) = instance.private_ip_address() {
-                            tracing::info!(
-                                "Instance (private_ip='{}') is in failed state '{:?}'",
-                                ip,
-                                state
-                            );
-                            failed_ips.push(ip.to_string());
-                        }
-                    }
-                    _ => {}
+                if let Some(
+                    aws_sdk_ec2::types::InstanceStateName::Terminated
+                    | aws_sdk_ec2::types::InstanceStateName::ShuttingDown
+                    | aws_sdk_ec2::types::InstanceStateName::Stopped
+                    | aws_sdk_ec2::types::InstanceStateName::Stopping,
+                ) = state
+                    && let Some(ip) = instance.private_ip_address()
+                {
+                    tracing::info!(
+                        "Instance (private_ip='{}') is in failed state '{:?}'",
+                        ip,
+                        state
+                    );
+                    failed_ips.push(ip.to_string());
                 }
             }
         }

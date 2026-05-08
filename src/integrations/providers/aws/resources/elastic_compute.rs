@@ -127,11 +127,6 @@ impl AwsInterface {
                     .network_interface_id(eni_id)
                     .build(),
             )
-            .iam_instance_profile(
-                aws_sdk_ec2::types::IamInstanceProfileSpecification::builder()
-                    .name(context.iam_profile_name.clone())
-                    .build(),
-            )
             .block_device_mappings(block_device_mapping);
 
         if let Some(burstable_mode) = &node.burstable_mode {

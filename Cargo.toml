@@ -26,4 +26,3 @@ aws-sdk-pricing = "1.67.0"
 reqwest = { version = "0.12.15", features = ["json"] }
 indicatif = "0.18.0"
 aws-sdk-efs = "1.73.0"
-aws-sdk-iam = "1.76.0"

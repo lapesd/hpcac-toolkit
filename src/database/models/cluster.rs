@@ -515,11 +515,11 @@ impl Cluster {
                     allocation_mode, 
                     burstable_mode, 
                     image_id, 
-                    private_ip, 
+                    private_ip,
                     public_ip,
                     was_efs_configured,
                     was_ssh_configured
-                FROM nodes 
+                FROM nodes
                 WHERE cluster_id = ?
             "#,
             self.id

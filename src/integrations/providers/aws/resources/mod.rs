@@ -3,8 +3,6 @@ pub mod elastic_file_system_device;
 pub mod elastic_file_system_mount_target;
 pub mod elastic_ip;
 pub mod elastic_network_interface;
-pub mod iam_profile;
-pub mod iam_role_and_trust_policy;
 pub mod internet_gateway;
 pub mod machine_image;
 pub mod placement_group;
