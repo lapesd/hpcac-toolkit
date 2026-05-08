@@ -3,6 +3,7 @@ pub mod os;
 pub mod progress_bars;
 pub mod prompts;
 pub mod random;
+pub mod ssh;
 
 pub use formatting::*;
 pub use os::*;

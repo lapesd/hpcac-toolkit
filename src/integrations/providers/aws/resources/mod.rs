@@ -10,7 +10,6 @@ pub mod machine_image;
 pub mod placement_group;
 pub mod route_table;
 pub mod security_group;
-pub mod services_system_manager_command;
 pub mod ssh_key;
 pub mod subnet;
 pub mod vpc;

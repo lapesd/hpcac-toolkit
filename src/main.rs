@@ -5,6 +5,18 @@ use sqlx::sqlite::SqlitePool;
 use std::fs::OpenOptions;
 use tracing_subscriber::{Layer, layer::SubscriberExt, util::SubscriberInitExt};
 
+/// Routes tracing stdout output through the active `MultiProgress` (if any),
+/// so progress bars and log lines don't corrupt each other.
+struct MultiProgressMakeWriter;
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for MultiProgressMakeWriter {
+    type Writer = utils::progress_bars::MultiProgressWriter;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        utils::ProgressTracker::make_writer()
+    }
+}
+
 mod commands;
 mod constants;
 mod database;
@@ -225,7 +237,7 @@ async fn main() -> Result<()> {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::fmt::layer()
-                .with_writer(std::io::stdout)
+                .with_writer(MultiProgressMakeWriter)
                 .without_time()
                 .with_level(false)
                 .with_target(false)

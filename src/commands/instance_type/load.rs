@@ -143,7 +143,7 @@ pub async fn load(
     };
 
     let mut total_instance_types = 0;
-    let multi = utils::ProgressTracker::create_multi();
+    let (multi, _guard) = utils::ProgressTracker::create_multi();
     let main_tracker = utils::ProgressTracker::add_to_multi(
         &multi,
         regions.len() as u64,

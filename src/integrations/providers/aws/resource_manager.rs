@@ -3,8 +3,7 @@ use super::interface::AwsInterface;
 use crate::database::models::{Cluster, ClusterState, Node};
 use crate::integrations::CloudResourceManager;
 use crate::utils;
-
-use std::collections::HashMap;
+use crate::utils::ssh::SshSession;
 
 use anyhow::Result;
 use sqlx::sqlite::SqlitePool;
@@ -37,7 +36,7 @@ impl CloudResourceManager for AwsInterface {
         };
         cluster.update_state(pool, new_state).await?;
 
-        let multi = utils::ProgressTracker::create_multi();
+        let (multi, _guard) = utils::ProgressTracker::create_multi();
         let main_progress =
             utils::ProgressTracker::add_to_multi(&multi, steps as u64, Some(&spawning_message));
         let operation_spinner =
@@ -68,9 +67,9 @@ impl CloudResourceManager for AwsInterface {
          * }
          * 15. Wait for all EC2 instances to be ready
          * 16. (conditional) Wait for EFS mount target to be ready
-         * 17. Wait for SSM agents to be ready on all instances
-         * 18. (conditional) Attach EC2 Instances to EFS mount target using SSM
-         * 19. (conditional) Dispatch EC2 Instances initialization commands
+         * 17. Wait for SSH to be ready on all instances
+         * 18. (conditional) Attach EC2 Instances to EFS mount target via SSH
+         * 19. Dispatch EC2 Instance initialization commands via SSH
          */
 
         // 1. Request EFS device creation...
@@ -233,174 +232,119 @@ impl CloudResourceManager for AwsInterface {
             self.wait_for_elastic_file_system_mount_target_to_be_ready(&context)
                 .await?;
             main_progress.inc(1);
+        }
 
-            // 17. Wait for SSM agents to be ready on all instances (for EFS mounting)
-            for (node_index, _) in nodes.iter().enumerate() {
-                let node_instance_id = &context.ec2_instance_ids[&node_index];
-                operation_spinner.update_message(&format!(
-                    "Waiting for SSM agent readiness on Node {} of {} (for EFS mounting)...",
-                    node_index + 1,
-                    nodes.len()
-                ));
-                self.wait_for_ssm_agent_ready(&context, node_instance_id, Duration::from_secs(300))
-                    .await?;
-                main_progress.inc(1);
-            }
+        let private_key_content =
+            std::fs::read_to_string(&cluster.private_ssh_key_path).map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to read private SSH key '{}': {}",
+                    cluster.private_ssh_key_path,
+                    e
+                )
+            })?;
 
-            // 18. Attach EC2 Instances to EFS mount target using SSM
+        // 17. Wait for SSH to be ready on all instances
+        for (node_index, _node) in nodes.iter().enumerate() {
+            let public_ip = context
+                .elastic_ips
+                .get(&node_index)
+                .map(|s| s.as_str())
+                .unwrap_or_default();
+            let ssh = SshSession::for_aws(public_ip, &cluster.private_ssh_key_path);
+            operation_spinner.update_message(&format!(
+                "Waiting for SSH on Node {} of {} ({})...",
+                node_index + 1,
+                nodes.len(),
+                public_ip
+            ));
+            ssh.wait_until_ready(Duration::from_secs(300)).await?;
+            main_progress.inc(1);
+        }
+
+        // 18. (conditional) Attach EC2 Instances to EFS mount target via SSH
+        if cluster.use_elastic_file_system {
             let efs_dns_name = format!(
                 "{}.efs.{}.amazonaws.com",
                 context.efs_device_id.clone().unwrap(),
                 cluster.region,
             );
-            let mut ssm_command_ids: HashMap<usize, String> = HashMap::new();
-            for (node_index, _) in nodes.iter().enumerate() {
-                let op_msg = format!(
-                    "Requesting EFS Mount Target attachment for Node {} of {}...",
+            for (node_index, _node) in nodes.iter().enumerate() {
+                operation_spinner.update_message(&format!(
+                    "Attaching Node {} of {} to EFS mount target...",
                     node_index + 1,
                     nodes.len()
-                );
-                operation_spinner.update_message(&op_msg);
-                match nodes[node_index].was_efs_configured {
-                    true => {
-                        tracing::info!(
-                            "Skipping Node {} of {} (already configured for EFS)...",
-                            node_index + 1,
-                            nodes.len()
-                        );
-                    }
-                    false => {
-                        let node_instance_id = &context.ec2_instance_ids[&node_index];
-                        let efs_attach_script = format!(
-                            r#"
+                ));
+                if nodes[node_index].was_efs_configured {
+                    tracing::info!(
+                        "Skipping Node {} of {} (already configured for EFS)...",
+                        node_index + 1,
+                        nodes.len()
+                    );
+                } else {
+                    let public_ip = context
+                        .elastic_ips
+                        .get(&node_index)
+                        .map(|s| s.as_str())
+                        .unwrap_or_default();
+                    let ssh = SshSession::for_aws(public_ip, &cluster.private_ssh_key_path);
+                    let efs_attach_script = format!(
+                        r#"
 sudo yum install -y nfs-utils
 sudo mkdir -p /shared
 i=1
 while true; do
-   echo "EFS mount attempt $i..."
-   if sudo mount -t nfs4 {}:/ /shared; then
-       echo "EFS mount successful!"
-       break
-   else
-       echo "EFS mount failed, waiting 10 seconds for DNS propagation..."
-       sleep 10
-       i=$((i + 1))
-   fi
+    echo "EFS mount attempt $i..."
+    if sudo mount -t nfs4 {efs_dns_name}:/ /shared; then
+        echo "EFS mount successful!"
+        break
+    else
+        echo "EFS mount failed, waiting 10 seconds for DNS propagation..."
+        sleep 10
+        i=$((i + 1))
+    fi
 done
 sudo chown ec2-user:ec2-user /shared
 echo "EFS mount and setup complete!"
-"#,
-                            efs_dns_name
-                        );
-                        let ssm_command_id = self
-                            .create_ssm_command(&context, node_instance_id, efs_attach_script)
-                            .await?;
-                        ssm_command_ids.insert(node_index, ssm_command_id);
-                    }
-                }
-                main_progress.inc(1);
-            }
-            for (node_index, _) in nodes.iter().enumerate() {
-                let max_wait_time = Duration::from_secs(5 * 60);
-                let poll_interval = Duration::from_secs(15);
-                let op_msg = format!(
-                    "Waiting for Node {} of {} to attach to EFS Mount Target...",
-                    node_index + 1,
-                    nodes.len()
-                );
-                operation_spinner.update_message(&op_msg);
-                match nodes[node_index].was_efs_configured {
-                    true => {}
-                    false => {
-                        let node_instance_id = &context.ec2_instance_ids[&node_index];
-                        self.poll_ssm_command_until_completion(
-                            &context,
-                            &ssm_command_ids[&node_index],
-                            node_instance_id,
-                            max_wait_time,
-                            poll_interval,
-                        )
+"#
+                    );
+                    ssh.run_command(&efs_attach_script).await?;
+                    nodes[node_index]
+                        .set_efs_configuration_state(pool, true)
                         .await?;
-                        nodes[node_index]
-                            .set_efs_configuration_state(pool, true)
-                            .await?;
-                    }
                 }
-                main_progress.inc(1);
-            }
-        } else {
-            // Wait for SSM agents to be ready for init commands (when not using EFS)
-            for (node_index, _) in nodes.iter().enumerate() {
-                let node_instance_id = &context.ec2_instance_ids[&node_index];
-                operation_spinner.update_message(&format!(
-                    "Waiting for SSM agent readiness on Node {} of {} (for init commands)...",
-                    node_index + 1,
-                    nodes.len()
-                ));
-                self.wait_for_ssm_agent_ready(&context, node_instance_id, Duration::from_secs(300))
-                    .await?;
                 main_progress.inc(1);
             }
         }
 
-        // 19. Dispatch EC2 Instance initialization commands
-        // TODO: Add logic to track/skip individual commands
-        let mut ssm_init_command_ids: HashMap<usize, String> = HashMap::new();
-        let private_key_content = match std::fs::read_to_string(&cluster.private_ssh_key_path) {
-            Ok(content) => content,
-            Err(e) => {
-                anyhow::bail!(
-                    "Failed to read private SSH key file '{}': {}",
-                    cluster.private_ssh_key_path,
-                    e
-                );
-            }
-        };
+        // 19. Dispatch EC2 Instance initialization commands via SSH
         for (node_index, node) in nodes.iter().enumerate() {
-            let mut node_init_commands = node.get_init_commands(pool).await?;
-            let ssh_key_setup_script = format!(
-                r#"echo "Setting up private SSH key..." && \
-mkdir -p ~/.ssh && \
-cat > ~/.ssh/id_rsa_temp << 'PRIVATE_KEY_EOF'
-{}
-PRIVATE_KEY_EOF
-mv ~/.ssh/id_rsa_temp ~/.ssh/id_rsa && \
-chmod 600 ~/.ssh/id_rsa && \
-chown ec2-user:ec2-user ~/.ssh/id_rsa && \
-echo "Private SSH key successfully installed" && \
-ls -la ~/.ssh/id_rsa"#,
-                private_key_content
-            );
-            node_init_commands.insert(0, ssh_key_setup_script);
-            let op_msg = format!(
-                "Dispatching init script for Node {} of {}...",
-                node_index + 1,
-                nodes.len()
-            );
-            operation_spinner.update_message(&op_msg);
+            let node_init_commands = node.get_init_commands(pool).await?;
             if node_init_commands.is_empty() {
+                main_progress.inc(1);
                 continue;
             }
-            let node_instance_id = &context.ec2_instance_ids[&node_index];
-            let node_init_script = node_init_commands.join(" && ");
-            let ssm_command_id = self
-                .create_ssm_command(&context, node_instance_id, node_init_script)
+            operation_spinner.update_message(&format!(
+                "Running init commands on Node {} of {}...",
+                node_index + 1,
+                nodes.len()
+            ));
+            let public_ip = context
+                .elastic_ips
+                .get(&node_index)
+                .map(|s| s.as_str())
+                .unwrap_or_default();
+            let ssh = SshSession::for_aws(public_ip, &cluster.private_ssh_key_path);
+
+            // Install the private key so nodes can SSH to each other (needed for MPI)
+            ssh.run_command("mkdir -p ~/.ssh && chmod 700 ~/.ssh")
                 .await?;
-            ssm_init_command_ids.insert(node_index, ssm_command_id);
+            ssh.upload_file("$HOME/.ssh/id_rsa", &private_key_content)
+                .await?;
+            ssh.run_command("chmod 600 ~/.ssh/id_rsa").await?;
+
+            let init_script = node_init_commands.join("\n");
+            ssh.run_command(&init_script).await?;
             main_progress.inc(1);
-        }
-        for (node_index, ssm_init_command_id) in ssm_init_command_ids.iter() {
-            let node_instance_id = &context.ec2_instance_ids[node_index];
-            let max_wait_time = Duration::from_secs(15 * 60);
-            let poll_interval = Duration::from_secs(15);
-            self.poll_ssm_command_until_completion(
-                &context,
-                ssm_init_command_id,
-                node_instance_id,
-                max_wait_time,
-                poll_interval,
-            )
-            .await?;
         }
 
         cluster.update_state(pool, ClusterState::Running).await?;
@@ -447,7 +391,7 @@ ls -la ~/.ssh/id_rsa"#,
             node.set_efs_configuration_state(pool, false).await?;
         }
 
-        let multi = utils::ProgressTracker::create_multi();
+        let (multi, _guard) = utils::ProgressTracker::create_multi();
         let main_progress =
             utils::ProgressTracker::add_to_multi(&multi, steps as u64, Some(&terminating_message));
         let operation_spinner =

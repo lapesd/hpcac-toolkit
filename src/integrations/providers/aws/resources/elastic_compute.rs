@@ -202,109 +202,109 @@ impl AwsInterface {
 
         loop {
             if start_time.elapsed() >= max_wait_time {
-                tracing::warn!(
-                    "Timeout waiting for EC2 Instances to reach Running state after {} seconds",
+                anyhow::bail!(
+                    "Timeout waiting for EC2 instances to pass status checks after {} seconds",
                     max_wait_time.as_secs()
                 );
-                anyhow::bail!("Timeout waiting for EC2 Instances to reach Running state");
             }
 
-            let mut describe_request = context.ec2_client.describe_instances();
+            // describe_instance_status returns both the instance/system status check results.
+            // include_all_instances(true) also returns instances still in pending state.
+            let mut status_request = context
+                .ec2_client
+                .describe_instance_status()
+                .include_all_instances(true);
             for instance_id in &instance_ids {
-                describe_request = describe_request.instance_ids(instance_id);
+                status_request = status_request.instance_ids(instance_id);
             }
 
-            let describe_response = match describe_request.send().await {
+            let status_response = match status_request.send().await {
                 Ok(response) => response,
                 Err(e) => {
                     tracing::error!("{:?}", e);
-                    anyhow::bail!(
-                        "Failure checking EC2 Instance states during status wait: {}",
-                        e
-                    );
+                    anyhow::bail!("Failure checking EC2 instance status checks: {}", e);
                 }
             };
 
-            let mut all_running = true;
-            let mut pending_instances = Vec::new();
+            let statuses = status_response.instance_statuses();
+            let mut all_ok = true;
+            let mut not_ready: Vec<String> = Vec::new();
 
             for instance_id in &instance_ids {
-                let mut found_instance = false;
-                let mut instance_running = false;
+                let entry = statuses
+                    .iter()
+                    .find(|s| s.instance_id() == Some(instance_id.as_str()));
 
-                for reservation in describe_response.reservations() {
-                    for instance in reservation.instances() {
-                        if let Some(current_instance_id) = instance.instance_id() {
-                            if current_instance_id == instance_id {
-                                found_instance = true;
-                                if let Some(state) = instance.state() {
-                                    if let Some(state_name) = state.name() {
-                                        match state_name {
-                                            aws_sdk_ec2::types::InstanceStateName::Running => {
-                                                instance_running = true;
-                                            }
-                                            aws_sdk_ec2::types::InstanceStateName::Pending => {
-                                                tracing::info!(
-                                                    "Instance '{}' is still pending startup...",
-                                                    instance_id
-                                                );
-                                                pending_instances.push(instance_id.clone());
-                                            }
-                                            aws_sdk_ec2::types::InstanceStateName::Terminated
-                                            | aws_sdk_ec2::types::InstanceStateName::ShuttingDown =>
-                                            {
-                                                tracing::error!(
-                                                    "Instance '{}' unexpectedly terminated during startup (state: {:?})",
-                                                    instance_id,
-                                                    state_name
-                                                );
-                                                anyhow::bail!(
-                                                    "Instance '{}' terminated unexpectedly during startup",
-                                                    instance_id
-                                                );
-                                            }
-                                            _ => {
-                                                tracing::info!(
-                                                    "Instance '{}' is in state: {:?}, waiting for Running",
-                                                    instance_id,
-                                                    state_name
-                                                );
-                                                pending_instances.push(instance_id.clone());
-                                            }
-                                        }
+                match entry {
+                    None => {
+                        all_ok = false;
+                        not_ready.push(instance_id.clone());
+                    }
+                    Some(s) => {
+                        // Check for unexpected termination first
+                        if let Some(state) = s.instance_state() {
+                            if let Some(name) = state.name() {
+                                match name {
+                                    aws_sdk_ec2::types::InstanceStateName::Terminated
+                                    | aws_sdk_ec2::types::InstanceStateName::ShuttingDown => {
+                                        anyhow::bail!(
+                                            "Instance '{}' terminated unexpectedly during startup (state: {:?})",
+                                            instance_id,
+                                            name
+                                        );
                                     }
+                                    _ => {}
                                 }
-                                break;
                             }
+                        }
+
+                        let instance_ok = s
+                            .instance_status()
+                            .and_then(|is| is.status())
+                            .map(|st| st.as_str() == "ok")
+                            .unwrap_or(false);
+                        let system_ok = s
+                            .system_status()
+                            .and_then(|ss| ss.status())
+                            .map(|st| st.as_str() == "ok")
+                            .unwrap_or(false);
+
+                        if !instance_ok || !system_ok {
+                            let inst_st = s
+                                .instance_status()
+                                .and_then(|is| is.status())
+                                .map(|st| st.as_str().to_string())
+                                .unwrap_or_else(|| "unknown".to_string());
+                            let sys_st = s
+                                .system_status()
+                                .and_then(|ss| ss.status())
+                                .map(|st| st.as_str().to_string())
+                                .unwrap_or_else(|| "unknown".to_string());
+                            tracing::info!(
+                                "Instance '{}' status checks not yet ok (instance: {}, system: {})",
+                                instance_id,
+                                inst_st,
+                                sys_st
+                            );
+                            all_ok = false;
+                            not_ready.push(instance_id.clone());
                         }
                     }
                 }
-
-                if !found_instance {
-                    anyhow::bail!("Instance '{}' not found during status check", instance_id);
-                }
-
-                if !instance_running {
-                    all_running = false;
-                }
             }
 
-            if all_running {
+            if all_ok {
                 tracing::info!(
-                    "All {} instance(s) are now ready and running!",
-                    context.ec2_instance_ids.len()
+                    "All {} instance(s) passed status checks and are ready",
+                    instance_ids.len()
                 );
                 break;
             }
 
-            if !pending_instances.is_empty() {
-                tracing::info!(
-                    "Still waiting for {} instance(s) to reach Running state: {:?}",
-                    pending_instances.len(),
-                    pending_instances
-                );
-            }
-
+            tracing::info!(
+                "Waiting for {} instance(s) to pass status checks...",
+                not_ready.len()
+            );
             sleep(poll_interval).await;
         }
 
@@ -449,6 +449,16 @@ impl AwsInterface {
             for reservation in describe_instances_response.reservations() {
                 for instance in reservation.instances() {
                     if let Some(instance_id) = instance.instance_id() {
+                        if let Some(state) = instance.state() {
+                            if let Some(state_name) = state.name() {
+                                // Skip instances that were already terminated before
+                                // this operation — AWS keeps them visible for ~1 hour.
+                                if *state_name == aws_sdk_ec2::types::InstanceStateName::Terminated
+                                {
+                                    continue;
+                                }
+                            }
+                        }
                         total_instances += 1;
 
                         if let Some(state) = instance.state() {

@@ -52,10 +52,7 @@ impl AwsInterface {
                 {
                     "Effect": "Allow",
                     "Principal": {
-                        "Service": [
-                            "ec2.amazonaws.com",
-                            "ssm.amazonaws.com"
-                        ]
+                        "Service": "ec2.amazonaws.com"
                     },
                     "Action": "sts:AssumeRole"
                 }
@@ -67,7 +64,7 @@ impl AwsInterface {
             .create_role()
             .role_name(&role_name)
             .assume_role_policy_document(trust_policy)
-            .description("Role for EC2 instances to use Systems Manager")
+            .description("Role for EC2 instances")
             .tags(
                 aws_sdk_iam::types::Tag::builder()
                     .key("Name")
@@ -94,26 +91,6 @@ impl AwsInterface {
                 anyhow::bail!("Failed to create IAM role (name='{}')", role_name);
             }
         };
-
-        match context
-            .iam_client
-            .attach_role_policy()
-            .role_name(&role_name)
-            .policy_arn("arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore")
-            .send()
-            .await
-        {
-            Ok(_) => {
-                tracing::info!("Attached SSM Policy to IAM Role '{}'", role_name);
-            }
-            Err(e) => {
-                tracing::error!("{:?}", e);
-                anyhow::bail!(
-                    "Failed to attach SSM Policy to IAM Role (name='{}')",
-                    role_name
-                );
-            }
-        }
 
         let role_id = create_iam_role_response
             .role()
@@ -171,30 +148,6 @@ impl AwsInterface {
                 anyhow::bail!("Failure describing IAM Role '{}'", role_name);
             }
         }
-
-        let _detach_ssm_policy_from_iam_role_response = match context
-            .iam_client
-            .detach_role_policy()
-            .role_name(&role_name)
-            .policy_arn("arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore")
-            .send()
-            .await
-        {
-            Ok(response) => {
-                tracing::info!(
-                    "Detached SSM Trust Policy from IAM Role (name='{}')",
-                    role_name
-                );
-                response
-            }
-            Err(e) => {
-                tracing::error!("{:?}", e);
-                anyhow::bail!(
-                    "Failure detaching SSM Trust Policy from IAM Role (name='{}')",
-                    role_name
-                );
-            }
-        };
 
         let _delete_iam_role_response = match context
             .iam_client

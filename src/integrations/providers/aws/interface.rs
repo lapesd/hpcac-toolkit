@@ -8,7 +8,6 @@ use aws_sdk_efs::Client as EfsClient;
 use aws_sdk_iam::Client as IamClient;
 use aws_sdk_pricing::Client as PricingClient;
 use aws_sdk_servicequotas::Client as ServiceQuotasClient;
-use aws_sdk_ssm::Client as SsmClient;
 use std::collections::HashMap;
 
 /// Context struct containing all cluster-related information and resource identifiers
@@ -17,7 +16,6 @@ pub struct AwsClusterContext {
     // AWS SDK Clients
     pub ec2_client: Ec2Client,
     pub efs_client: EfsClient,
-    pub ssm_client: SsmClient,
     pub iam_client: IamClient,
 
     // Core cluster information for tagging and filtering
@@ -67,7 +65,6 @@ impl AwsClusterContext {
         cluster: &Cluster,
         ec2_client: Ec2Client,
         efs_client: EfsClient,
-        ssm_client: SsmClient,
         iam_client: IamClient,
     ) -> Self {
         let cluster_id = cluster.id.to_string();
@@ -86,7 +83,6 @@ impl AwsClusterContext {
             cluster_id_filter,
             ec2_client,
             efs_client,
-            ssm_client,
             iam_client,
 
             // Generate resource names
@@ -206,12 +202,6 @@ impl AwsInterface {
         Ok(IamClient::new(&config))
     }
 
-    /// Get an SSM client configured with the provided credentials and region.
-    pub async fn get_ssm_client(&self, region: &str) -> Result<SsmClient> {
-        let config = self.get_config(region).await?;
-        Ok(SsmClient::new(&config))
-    }
-
     /// Get a Pricing client configured with the provided credentials and region.
     pub async fn get_pricing_client(&self) -> Result<PricingClient> {
         let config = self.get_config("us-east-1").await?;
@@ -228,10 +218,9 @@ impl AwsInterface {
     pub async fn create_cluster_context(&self, cluster: &Cluster) -> Result<AwsClusterContext> {
         let ec2_client = self.get_ec2_client(&cluster.region).await?;
         let efs_client = self.get_efs_client(&cluster.region).await?;
-        let ssm_client = self.get_ssm_client(&cluster.region).await?;
         let iam_client = self.get_iam_client(&cluster.region).await?;
         Ok(AwsClusterContext::new(
-            cluster, ec2_client, efs_client, ssm_client, iam_client,
+            cluster, ec2_client, efs_client, iam_client,
         ))
     }
 }
