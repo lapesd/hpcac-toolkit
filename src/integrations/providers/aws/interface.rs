@@ -1,6 +1,6 @@
 use crate::database::models::{Cluster, ConfigVar, ConfigVarFinder};
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use aws_config::{BehaviorVersion, Region, SdkConfig};
 use aws_credential_types::{Credentials, provider::SharedCredentialsProvider};
 use aws_sdk_ec2::Client as Ec2Client;
@@ -153,74 +153,83 @@ pub struct AwsInterface {
 }
 
 impl AwsInterface {
-    /// Build an AWS SDK configuration from ConfigVars
-    pub fn get_config(&self, region: &str) -> Result<SdkConfig> {
+    /// Build an AWS SDK configuration from ConfigVars.
+    /// If AUTH_MODE=chain, uses the AWS default credential chain (env vars, ~/.aws/credentials, SSO, etc.).
+    /// Otherwise, uses manually stored ACCESS_KEY_ID / SECRET_ACCESS_KEY / SESSION_TOKEN.
+    pub async fn get_config(&self, region: &str) -> Result<SdkConfig> {
+        if self.config_vars.get_value("AUTH_MODE") == Some("chain") {
+            let config = aws_config::defaults(BehaviorVersion::v2025_01_17())
+                .region(Region::new(region.to_string()))
+                .load()
+                .await;
+            return Ok(config);
+        }
+
         let access_key_id = match self.config_vars.get_value("ACCESS_KEY_ID") {
             Some(value) => value.to_string(),
-            None => {
-                bail!("Key 'ACCESS_KEY_ID' not found in config_vars")
-            }
+            None => anyhow::bail!("Key 'ACCESS_KEY_ID' not found in config_vars"),
         };
         let secret_access_key = match self.config_vars.get_value("SECRET_ACCESS_KEY") {
             Some(value) => value.to_string(),
-            None => {
-                bail!("Key 'SECRET_ACCESS_KEY' not found in config_vars")
-            }
+            None => anyhow::bail!("Key 'SECRET_ACCESS_KEY' not found in config_vars"),
         };
-        let credentials =
-            Credentials::from_keys(access_key_id.clone(), secret_access_key.clone(), None);
+        let session_token = self
+            .config_vars
+            .get_value("SESSION_TOKEN")
+            .filter(|v| !v.is_empty())
+            .map(|v| v.to_string());
+        let credentials = Credentials::from_keys(access_key_id, secret_access_key, session_token);
         let static_provider = SharedCredentialsProvider::new(credentials);
-        let region_struct = Region::new(region.to_string());
         let config = SdkConfig::builder()
             .behavior_version(BehaviorVersion::v2025_01_17())
-            .region(region_struct)
+            .region(Region::new(region.to_string()))
             .credentials_provider(static_provider)
             .build();
         Ok(config)
     }
 
     /// Get an EC2 client configured with the provided credentials and region.
-    pub fn get_ec2_client(&self, region: &str) -> Result<Ec2Client> {
-        let config = self.get_config(region)?;
+    pub async fn get_ec2_client(&self, region: &str) -> Result<Ec2Client> {
+        let config = self.get_config(region).await?;
         Ok(Ec2Client::new(&config))
     }
 
     /// Get an EFS client configured with the provided credentials and region.
-    pub fn get_efs_client(&self, region: &str) -> Result<EfsClient> {
-        let config = self.get_config(region)?;
+    pub async fn get_efs_client(&self, region: &str) -> Result<EfsClient> {
+        let config = self.get_config(region).await?;
         Ok(EfsClient::new(&config))
     }
 
     /// Get an IAM client configured with the provided credentials and region.
-    pub fn get_iam_client(&self, region: &str) -> Result<IamClient> {
-        let config = self.get_config(region)?;
+    pub async fn get_iam_client(&self, region: &str) -> Result<IamClient> {
+        let config = self.get_config(region).await?;
         Ok(IamClient::new(&config))
     }
 
     /// Get an SSM client configured with the provided credentials and region.
-    pub fn get_ssm_client(&self, region: &str) -> Result<SsmClient> {
-        let config = self.get_config(region)?;
+    pub async fn get_ssm_client(&self, region: &str) -> Result<SsmClient> {
+        let config = self.get_config(region).await?;
         Ok(SsmClient::new(&config))
     }
 
     /// Get a Pricing client configured with the provided credentials and region.
-    pub fn get_pricing_client(&self) -> Result<PricingClient> {
-        let config = self.get_config("us-east-1")?;
+    pub async fn get_pricing_client(&self) -> Result<PricingClient> {
+        let config = self.get_config("us-east-1").await?;
         Ok(PricingClient::new(&config))
     }
 
-    /// Get an Service Quotas client configured with the provided credentials and region.
-    pub fn _get_service_quotas_client(&self, region: &str) -> Result<ServiceQuotasClient> {
-        let config = self.get_config(region)?;
+    /// Get a Service Quotas client configured with the provided credentials and region.
+    pub async fn _get_service_quotas_client(&self, region: &str) -> Result<ServiceQuotasClient> {
+        let config = self.get_config(region).await?;
         Ok(ServiceQuotasClient::new(&config))
     }
 
-    /// Create a ClusterContext for the given cluster
-    pub fn create_cluster_context(&self, cluster: &Cluster) -> Result<AwsClusterContext> {
-        let ec2_client = self.get_ec2_client(&cluster.region)?;
-        let efs_client = self.get_efs_client(&cluster.region)?;
-        let ssm_client = self.get_ssm_client(&cluster.region)?;
-        let iam_client = self.get_iam_client(&cluster.region)?;
+    /// Create a ClusterContext for the given cluster.
+    pub async fn create_cluster_context(&self, cluster: &Cluster) -> Result<AwsClusterContext> {
+        let ec2_client = self.get_ec2_client(&cluster.region).await?;
+        let efs_client = self.get_efs_client(&cluster.region).await?;
+        let ssm_client = self.get_ssm_client(&cluster.region).await?;
+        let iam_client = self.get_iam_client(&cluster.region).await?;
         Ok(AwsClusterContext::new(
             cluster, ec2_client, efs_client, ssm_client, iam_client,
         ))

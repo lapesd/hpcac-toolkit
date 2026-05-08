@@ -1,8 +1,7 @@
-use anyhow::{Result, bail};
+use anyhow::Result;
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqlitePool;
-use tracing::error;
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct MachineImage {
@@ -42,8 +41,8 @@ impl MachineImage {
         {
             Ok(result) => result,
             Err(e) => {
-                error!("SQLx Error: {}", e.to_string());
-                bail!("DB Operation Failure: {}", e);
+                tracing::error!("SQLx Error: {}", e.to_string());
+                anyhow::bail!("DB Operation Failure: {}", e);
             }
         };
 
@@ -79,8 +78,8 @@ impl MachineImage {
         {
             Ok(result) => result,
             Err(e) => {
-                error!("SQLx Error: {}", e.to_string());
-                bail!("DB Operation Failure: {}", e);
+                tracing::error!("SQLx Error: {}", e.to_string());
+                anyhow::bail!("DB Operation Failure: {}", e);
             }
         };
 
@@ -118,8 +117,8 @@ impl MachineImage {
         {
             Ok(_) => Ok(()),
             Err(e) => {
-                error!("Failed to insert machine image: {}", e.to_string());
-                bail!("DB Operation Failure: {}", e);
+                tracing::error!("Failed to insert machine image: {}", e.to_string());
+                anyhow::bail!("DB Operation Failure: {}", e);
             }
         }
     }

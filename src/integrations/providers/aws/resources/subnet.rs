@@ -1,7 +1,6 @@
 use crate::integrations::providers::aws::{AwsInterface, interface::AwsClusterContext};
 
-use anyhow::{Result, bail};
-use tracing::{error, info, warn};
+use anyhow::Result;
 
 impl AwsInterface {
     pub async fn ensure_subnet(&self, context: &AwsClusterContext) -> Result<String> {
@@ -14,20 +13,20 @@ impl AwsInterface {
         {
             Ok(response) => response,
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failure describing Subnet resources");
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failure describing Subnet resources: {}", e);
             }
         };
 
         let subnets = describe_subnets_response.subnets();
         if let Some(subnet) = subnets.first() {
             if let Some(subnet_id) = subnet.subnet_id() {
-                info!("Found existing Subnet: '{}'", subnet_id);
+                tracing::info!("Found existing Subnet: '{}'", subnet_id);
                 return Ok(subnet_id.to_string());
             }
         }
 
-        info!("No existing Subnet found, creating a new one...");
+        tracing::info!("No existing Subnet found, creating a new one...");
 
         let create_subnet_response = match context
             .ec2_client
@@ -52,8 +51,8 @@ impl AwsInterface {
         {
             Ok(response) => response,
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failure creating Subnet resource");
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failure creating Subnet resource: {}", e);
             }
         };
 
@@ -61,12 +60,12 @@ impl AwsInterface {
             .subnet()
             .and_then(|subnet| subnet.subnet_id())
         {
-            info!("Created new Subnet '{}'", subnet_id);
+            tracing::info!("Created new Subnet '{}'", subnet_id);
             return Ok(subnet_id.to_string());
         }
 
-        warn!("{:?}", create_subnet_response);
-        bail!("Failure finding the id of the created Subnet resource");
+        tracing::warn!("{:?}", create_subnet_response);
+        anyhow::bail!("Failure finding the id of the created Subnet resource");
     }
 
     pub async fn cleanup_subnet(&self, context: &AwsClusterContext) -> Result<()> {
@@ -79,16 +78,16 @@ impl AwsInterface {
         {
             Ok(response) => response,
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failure describing subnet resources");
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failure describing subnet resources: {}", e);
             }
         };
 
         let subnets = describe_subnets_response.subnets();
         if let Some(subnet) = subnets.first() {
             if let Some(subnet_id) = subnet.subnet_id() {
-                info!("Found existing Subnet to cleanup: '{}'", subnet_id);
-                info!("Deleting Subnet '{}'...", subnet_id);
+                tracing::info!("Found existing Subnet to cleanup: '{}'", subnet_id);
+                tracing::info!("Deleting Subnet '{}'...", subnet_id);
                 match context
                     .ec2_client
                     .delete_subnet()
@@ -97,18 +96,18 @@ impl AwsInterface {
                     .await
                 {
                     Ok(_) => {
-                        info!("Subnet '{}' deleted successfully", subnet_id);
+                        tracing::info!("Subnet '{}' deleted successfully", subnet_id);
                         return Ok(());
                     }
                     Err(e) => {
-                        error!("{:?}", e);
-                        bail!("Failure deleting Subnet resource");
+                        tracing::error!("{:?}", e);
+                        anyhow::bail!("Failure deleting Subnet resource: {}", e);
                     }
                 };
             }
         }
 
-        info!("No existing Subnet found");
+        tracing::info!("No existing Subnet found");
         Ok(())
     }
 }

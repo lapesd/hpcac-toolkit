@@ -2,9 +2,8 @@ use crate::database::models::{InstanceType, MachineImage};
 use crate::integrations::CloudInfoProvider;
 use crate::utils::ProgressTracker;
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use std::collections::HashMap;
-use tracing::{error, warn};
 
 use super::interface::VultrInterface;
 
@@ -15,7 +14,7 @@ impl CloudInfoProvider for VultrInterface {
         let regions = match json_response["regions"].as_array() {
             Some(regions) => regions,
             None => {
-                bail!("Missing 'regions' array from Vultr API response")
+                anyhow::bail!("Missing 'regions' array from Vultr API response")
             }
         };
 
@@ -33,8 +32,8 @@ impl CloudInfoProvider for VultrInterface {
         // We'll return the region itself as the only zone for now.
         let regions = self.fetch_regions(tracker).await?;
         if !regions.contains(&region.to_string()) {
-            error!("{:?}", regions);
-            bail!("Invalid Vultr region: {}", region)
+            tracing::error!("{:?}", regions);
+            anyhow::bail!("Invalid Vultr region: {}", region)
         }
 
         Ok(vec![region.to_string()])
@@ -67,8 +66,8 @@ impl CloudInfoProvider for VultrInterface {
         let plans = match json_response["plans"].as_array() {
             Some(plans) => plans,
             None => {
-                error!("{:?}", json_response);
-                bail!("Missing 'plans' array from Vultr API response");
+                tracing::error!("{:?}", json_response);
+                anyhow::bail!("Missing 'plans' array from Vultr API response");
             }
         };
 
@@ -87,14 +86,16 @@ impl CloudInfoProvider for VultrInterface {
             let name = match plan["id"].as_str() {
                 Some(id_str) => id_str.to_string(),
                 None => {
-                    warn!("Skipping unknown instance_type: failed fetching id information.");
+                    tracing::warn!(
+                        "Skipping unknown instance_type: failed fetching id information."
+                    );
                     continue;
                 }
             };
             let vcpus = match plan.get("vcpu_count").and_then(|v| v.as_i64()) {
                 Some(count) => count,
                 None => {
-                    warn!(
+                    tracing::warn!(
                         "Skipping instance_type '{}': failed fetching vcpus information.",
                         name
                     );
@@ -116,7 +117,7 @@ impl CloudInfoProvider for VultrInterface {
             let memory_in_mb = match plan.get("ram").and_then(|v| v.as_i64()) {
                 Some(ram) => ram,
                 None => {
-                    warn!(
+                    tracing::warn!(
                         "Skipping instance_type '{}': failed fetching memory information.",
                         name
                     );
@@ -159,8 +160,8 @@ impl CloudInfoProvider for VultrInterface {
         let plans = match json_response["plans_metal"].as_array() {
             Some(plans) => plans,
             None => {
-                error!("{:?}", json_response);
-                bail!("Missing 'plans_metal' array from Vultr API response")
+                tracing::error!("{:?}", json_response);
+                anyhow::bail!("Missing 'plans_metal' array from Vultr API response")
             }
         };
 
@@ -179,14 +180,16 @@ impl CloudInfoProvider for VultrInterface {
             let name = match plan["id"].as_str() {
                 Some(id_str) => id_str.to_string(),
                 None => {
-                    warn!("Skipping unknown instance_type: failed fetching id information.");
+                    tracing::warn!(
+                        "Skipping unknown instance_type: failed fetching id information."
+                    );
                     continue;
                 }
             };
             let vcpus = match plan.get("cpu_threads").and_then(|v| v.as_i64()) {
                 Some(count) => count,
                 None => {
-                    warn!(
+                    tracing::warn!(
                         "Skipping instance_type '{}': failed fetching vcpus information.",
                         name
                     );
@@ -210,7 +213,7 @@ impl CloudInfoProvider for VultrInterface {
             let memory_in_mb = match plan.get("ram").and_then(|v| v.as_i64()) {
                 Some(ram) => ram,
                 None => {
-                    warn!(
+                    tracing::warn!(
                         "Skipping instance_type '{}': failed fetching memory information.",
                         name
                     );
@@ -265,6 +268,6 @@ impl CloudInfoProvider for VultrInterface {
     }
 
     async fn fetch_machine_image(&self, _region: &str, _image_id: &str) -> Result<MachineImage> {
-        bail!("Not implemented")
+        anyhow::bail!("Not implemented")
     }
 }

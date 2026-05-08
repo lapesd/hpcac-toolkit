@@ -1,9 +1,8 @@
 use crate::integrations::providers::aws::{AwsInterface, interface::AwsClusterContext};
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use std::time::Duration;
 use tokio::time::sleep;
-use tracing::{error, info, warn};
 
 impl AwsInterface {
     pub async fn request_elastic_file_system_mount_target_creation(
@@ -24,22 +23,26 @@ impl AwsInterface {
                 for mount_target_info in response.mount_targets() {
                     let mount_target_id = mount_target_info.mount_target_id().to_string();
                     if subnet_id == mount_target_info.subnet_id() {
-                        info!(
+                        tracing::info!(
                             "Found existing EFS mount target (id='{}') for EFS device (id='{}') in Subnet (id='{}')",
-                            mount_target_id, efs_id, subnet_id
+                            mount_target_id,
+                            efs_id,
+                            subnet_id
                         );
                         return Ok(mount_target_id);
                     } else {
-                        warn!(
+                        tracing::warn!(
                             "There's an unexpected EFS mount target (id='{}') for EFS device (id='{}') in Subnet (id='{}')",
-                            mount_target_id, efs_id, subnet_id
+                            mount_target_id,
+                            efs_id,
+                            subnet_id
                         );
                     }
                 }
             }
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failure describing existing EFS mount targets");
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failure describing existing EFS mount targets: {}", e);
             }
         };
 
@@ -54,8 +57,8 @@ impl AwsInterface {
         {
             Ok(response) => response.mount_target_id().to_string(),
             Err(e) => {
-                error!("{:?}", e);
-                bail!(
+                tracing::error!("{:?}", e);
+                anyhow::bail!(
                     "Failure creating mount target in Subnet (id='{}') for EFS device (id='{}')",
                     subnet_id,
                     efs_id
@@ -71,7 +74,7 @@ impl AwsInterface {
         context: &AwsClusterContext,
     ) -> Result<()> {
         let efs_id = context.efs_device_id.clone().unwrap();
-        info!(
+        tracing::info!(
             "Waiting for EFS mount target (id='{}') to be ready...",
             efs_id
         );
@@ -87,8 +90,8 @@ impl AwsInterface {
                     efs_id,
                     max_wait_time.as_secs()
                 );
-                warn!(message);
-                bail!(message);
+                tracing::warn!(message);
+                anyhow::bail!(message);
             }
 
             let describe_efs_device_response = match context
@@ -100,25 +103,25 @@ impl AwsInterface {
             {
                 Ok(response) => response,
                 Err(e) => {
-                    error!("{:?}", e);
-                    bail!("Failure describing EFS devices");
+                    tracing::error!("{:?}", e);
+                    anyhow::bail!("Failure describing EFS devices: {}", e);
                 }
             };
 
             let efs_devices = describe_efs_device_response.file_systems();
             if efs_devices.is_empty() {
-                error!("{:?}", describe_efs_device_response);
-                bail!("Couldn't retrieve the existing EFS device id from AWS response");
+                tracing::error!("{:?}", describe_efs_device_response);
+                anyhow::bail!("Couldn't retrieve the existing EFS device id from AWS response");
             }
 
             let efs_device = &efs_devices[0];
             match efs_device.life_cycle_state() {
                 aws_sdk_efs::types::LifeCycleState::Available => {
-                    info!("EFS device (id='{}') is now available!", efs_id);
+                    tracing::info!("EFS device (id='{}') is now available!", efs_id);
                     return Ok(());
                 }
                 _ => {
-                    info!(
+                    tracing::info!(
                         "EFS device (id='{}') is not available yet, (state='{}')...",
                         efs_id,
                         efs_device.life_cycle_state()
@@ -143,27 +146,27 @@ impl AwsInterface {
         {
             Ok(response) => response,
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failure describing EFS devices");
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failure describing EFS devices: {}", e);
             }
         };
 
         let efs_devices = describe_efs_devices_response.file_systems();
         match efs_devices.len() {
             0 => {
-                info!("No existing EFS device found, skip deletion...");
+                tracing::info!("No existing EFS device found, skip deletion...");
                 return Ok(());
             }
             1 => {
                 let existing_efs_id = efs_devices[0].file_system_id().to_string();
-                info!(
+                tracing::info!(
                     "Existing EFS device (id='{}') found for deletion...",
                     existing_efs_id
                 );
             }
             _ => {
-                warn!("{:?}", describe_efs_devices_response);
-                info!("Multiple existing EFS devices found for deletion...");
+                tracing::warn!("{:?}", describe_efs_devices_response);
+                tracing::info!("Multiple existing EFS devices found for deletion...");
             }
         }
 
@@ -178,17 +181,18 @@ impl AwsInterface {
             {
                 Ok(response) => response,
                 Err(e) => {
-                    error!("{:?}", e);
-                    bail!(
-                        "Failure describing EFS mount targets for EFS device (id='{}')",
-                        efs_device_id
+                    tracing::error!("{:?}", e);
+                    anyhow::bail!(
+                        "Failure describing EFS mount targets for EFS device (id='{}'): {}",
+                        efs_device_id,
+                        e
                     );
                 }
             };
 
             for mount_target in describe_mount_targets_response.mount_targets() {
                 let mount_target_id = mount_target.mount_target_id();
-                info!(
+                tracing::info!(
                     "Found EFS mount target (id='{}') for deletion...",
                     mount_target_id
                 );
@@ -201,8 +205,8 @@ impl AwsInterface {
                 {
                     Ok(response) => response,
                     Err(e) => {
-                        error!("{:?}", e);
-                        bail!(
+                        tracing::error!("{:?}", e);
+                        anyhow::bail!(
                             "Failure deleting EFS mount target (id='{}')",
                             mount_target_id
                         );
@@ -218,7 +222,7 @@ impl AwsInterface {
         &self,
         context: &AwsClusterContext,
     ) -> Result<()> {
-        info!(
+        tracing::info!(
             "Waiting for EFS mount target deletion to complete for cluster (id='{}')...",
             context.cluster_id
         );
@@ -234,8 +238,8 @@ impl AwsInterface {
                     context.cluster_id,
                     max_wait_time.as_secs()
                 );
-                warn!(message);
-                bail!(message);
+                tracing::warn!(message);
+                anyhow::bail!(message);
             }
 
             let describe_efs_devices_response = match context
@@ -247,14 +251,14 @@ impl AwsInterface {
             {
                 Ok(response) => response,
                 Err(e) => {
-                    error!("{:?}", e);
-                    bail!("Failure describing EFS devices during deletion wait");
+                    tracing::error!("{:?}", e);
+                    anyhow::bail!("Failure describing EFS devices during deletion wait: {}", e);
                 }
             };
 
             let efs_devices = describe_efs_devices_response.file_systems();
             if efs_devices.is_empty() {
-                info!(
+                tracing::info!(
                     "No EFS devices found for cluster (id='{}') - deletion complete",
                     context.cluster_id
                 );
@@ -275,8 +279,8 @@ impl AwsInterface {
                 {
                     Ok(response) => response,
                     Err(e) => {
-                        error!("{:?}", e);
-                        bail!(
+                        tracing::error!("{:?}", e);
+                        anyhow::bail!(
                             "Failure describing EFS mount targets for EFS device (id='{}') during deletion wait",
                             efs_device_id
                         );
@@ -289,16 +293,17 @@ impl AwsInterface {
                     for mount_target in mount_targets {
                         let mount_target_id = mount_target.mount_target_id();
                         let state = mount_target.life_cycle_state();
-                        info!(
+                        tracing::info!(
                             "EFS mount target (id='{}') still exists with state '{}'",
-                            mount_target_id, state
+                            mount_target_id,
+                            state
                         );
                     }
                 }
             }
 
             if !any_mount_targets_remaining {
-                info!(
+                tracing::info!(
                     "All EFS mount targets have been successfully deleted for cluster (id='{}')",
                     context.cluster_id
                 );

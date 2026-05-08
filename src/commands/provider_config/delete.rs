@@ -1,9 +1,8 @@
 use crate::database::models::ProviderConfig;
 use crate::utils;
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use sqlx::sqlite::SqlitePool;
-use tracing::error;
 
 pub async fn delete(
     pool: &SqlitePool,
@@ -13,27 +12,30 @@ pub async fn delete(
     let id = match provider_config_id.parse::<i64>() {
         Ok(value) => value,
         Err(_) => {
-            bail!("Invalid Provider configuration ID, must be a valid integer");
+            anyhow::bail!("Invalid Provider configuration ID, must be a valid integer");
         }
     };
 
     let config = match ProviderConfig::fetch_by_id(pool, id).await {
         Ok(Some(config)) => config,
         Ok(None) => {
-            bail!("Provider configuration (id='{}') not found", id);
+            anyhow::bail!("Provider configuration (id='{}') not found", id);
         }
         Err(e) => {
-            error!("{}", e.to_string());
-            bail!("DB Operation Failure")
+            tracing::error!("{}", e.to_string());
+            anyhow::bail!("DB Operation Failure: {}", e)
         }
     };
 
-    println!(
-        "\n{:<35}: {}",
-        "Provider Configuration Name", config.display_name
+    tracing::info!(
+        "\n{:<35}: {}\n{:<35}: {}\n{:<35}: {}",
+        "Provider Configuration Name",
+        config.display_name,
+        "ID",
+        config.id,
+        "Provider",
+        config.provider_id
     );
-    println!("{:<35}: {}", "ID", config.id);
-    println!("{:<35}: {}", "Provider\n", config.provider_id);
 
     if !(utils::user_confirmation(
         skip_confirmation,
@@ -44,6 +46,6 @@ pub async fn delete(
 
     config.delete(pool).await?;
 
-    println!("Provider configuration and associated credentials deleted.");
+    tracing::info!("Provider configuration and associated credentials deleted.");
     Ok(())
 }

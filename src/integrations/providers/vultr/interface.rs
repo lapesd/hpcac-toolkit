@@ -1,9 +1,8 @@
 use crate::database::models::{ConfigVar, ConfigVarFinder};
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use reqwest::{Client as HttpClient, header};
 use serde_json::Value as JsonValue;
-use tracing::error;
 
 pub struct VultrInterface {
     pub config_vars: Vec<ConfigVar>,
@@ -16,7 +15,7 @@ impl VultrInterface {
         let api_key = match self.config_vars.get_value("API_KEY") {
             Some(value) => value.to_string(),
             None => {
-                bail!("Key 'API_KEY' not found in Vultr config_vars")
+                anyhow::bail!("Key 'API_KEY' not found in Vultr config_vars")
             }
         };
 
@@ -24,8 +23,8 @@ impl VultrInterface {
         let auth_header = match header::HeaderValue::from_str(&format!("Bearer {}", api_key)) {
             Ok(header) => header,
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failed to create Vultr authorization header")
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failed to create Vultr authorization header")
             }
         };
 
@@ -34,8 +33,8 @@ impl VultrInterface {
         match HttpClient::builder().default_headers(headers).build() {
             Ok(client) => Ok(client),
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failed building Vultr HTTP client")
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failed building Vultr HTTP client")
             }
         }
     }
@@ -48,8 +47,8 @@ impl VultrInterface {
         let response = match client.get(&url).send().await {
             Ok(result) => result,
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failed fetching Vultr API")
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failed fetching Vultr API")
             }
         };
 
@@ -58,23 +57,24 @@ impl VultrInterface {
             true => match response.json().await {
                 Ok(result) => result,
                 Err(e) => {
-                    error!("{:?}", e);
-                    bail!("Failed to parse Vultr API response")
+                    tracing::error!("{:?}", e);
+                    anyhow::bail!("Failed to parse Vultr API response")
                 }
             },
             false => {
                 let body = match response.text().await {
                     Ok(body) => body,
                     Err(e) => {
-                        error!("{:?}", e);
-                        bail!("Unable to read HTTP response body")
+                        tracing::error!("{:?}", e);
+                        anyhow::bail!("Unable to read HTTP response body")
                     }
                 };
-                error!(
+                tracing::error!(
                     "Vultr API returned error status {}: {}",
-                    response_status, body
+                    response_status,
+                    body
                 );
-                bail!("Vultr API returned an error")
+                anyhow::bail!("Vultr API returned an error")
             }
         };
 

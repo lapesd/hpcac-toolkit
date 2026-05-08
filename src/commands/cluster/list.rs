@@ -3,7 +3,6 @@ use crate::database::models::{Cluster, ProviderConfig};
 use anyhow::Result;
 use sqlx::sqlite::SqlitePool;
 use tabled::{Table, Tabled, settings::Style};
-use tracing::warn;
 
 #[derive(Tabled)]
 struct ClusterDisplay {
@@ -27,7 +26,7 @@ pub async fn list(pool: &SqlitePool) -> Result<()> {
     let clusters = Cluster::fetch_all(pool).await?;
 
     if clusters.is_empty() {
-        println!("\nNo Clusters found.");
+        tracing::info!("No Clusters found.");
         return Ok(());
     }
 
@@ -37,9 +36,10 @@ pub async fn list(pool: &SqlitePool) -> Result<()> {
             match ProviderConfig::fetch_by_id(pool, cluster.provider_config_id).await? {
                 Some(config) => config.display_name,
                 None => {
-                    warn!(
+                    tracing::warn!(
                         "Cluster '{}' is missing it's ProviderConfig (id='{}')",
-                        cluster.display_name, cluster.provider_config_id
+                        cluster.display_name,
+                        cluster.provider_config_id
                     );
                     "<< ERROR, CHECK LOGS >>".to_string()
                 }
@@ -48,7 +48,7 @@ pub async fn list(pool: &SqlitePool) -> Result<()> {
         let node_count = nodes.len();
         table_rows.push(ClusterDisplay {
             id: cluster.id,
-            created_at: cluster.created_at.to_string(),
+            created_at: cluster.created_at.format("%H:%M %d/%m/%Y").to_string(),
             provider: cluster.provider_id,
             credentials: provider_config_name,
             display_name: cluster.display_name,
@@ -59,7 +59,6 @@ pub async fn list(pool: &SqlitePool) -> Result<()> {
 
     let mut table = Table::new(table_rows);
     table.with(Style::rounded());
-    println!("\nClusters:");
-    println!("{}", table);
+    tracing::info!("\nClusters:\n{}", table);
     Ok(())
 }

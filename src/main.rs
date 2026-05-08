@@ -1,9 +1,9 @@
-use anyhow::{Result, bail};
+use anyhow::Result;
 use chrono::Utc;
 use clap::{Parser, Subcommand};
 use sqlx::sqlite::SqlitePool;
 use std::fs::OpenOptions;
-use tracing::{error, info};
+use tracing_subscriber::{Layer, layer::SubscriberExt, util::SubscriberInitExt};
 
 mod commands;
 mod constants;
@@ -98,6 +98,17 @@ enum ClusterCommands {
         /// Skip confirmation prompt
         #[arg(short = 'y', long = "yes")]
         yes: bool,
+    },
+
+    /// Watch a Cluster and automatically restore on node failure
+    Watch {
+        /// Cluster identifier
+        #[arg(long)]
+        cluster_id: String,
+
+        /// Health check interval in seconds (default: 30)
+        #[arg(long, default_value = "30")]
+        interval: u64,
     },
 }
 
@@ -197,7 +208,7 @@ async fn main() -> Result<()> {
 
     // Setup logger, file directory and tracing subscriber
     let logs_directory = std::env::var("LOGS_DIRECTORY").unwrap_or_else(|_| {
-        println!("LOGS_DIRECTORY environment variable not set, using default.");
+        eprintln!("LOGS_DIRECTORY environment variable not set, using default.");
         "./logs".to_string()
     });
 
@@ -211,9 +222,20 @@ async fn main() -> Result<()> {
         ))
         .expect("Failed to open log file");
 
-    tracing_subscriber::fmt()
-        .with_writer(log_file)
-        .with_ansi(false)
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(std::io::stdout)
+                .without_time()
+                .with_level(false)
+                .with_target(false)
+                .with_filter(tracing_subscriber::filter::LevelFilter::INFO),
+        )
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(log_file)
+                .with_ansi(false),
+        )
         .init();
 
     let cli = Cli::parse();
@@ -221,7 +243,7 @@ async fn main() -> Result<()> {
     // Read SQLite connection data from environment variables.
     // If DATABASE_URL is not set, default to a local SQLite database.
     let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        println!("DATABASE_URL environment variable not set, using default.");
+        tracing::warn!("DATABASE_URL environment variable not set, using default.");
         "sqlite://db.sqlite".to_string()
     });
 
@@ -229,13 +251,13 @@ async fn main() -> Result<()> {
     let sqlite_pool = match SqlitePool::connect(&db_url).await {
         Ok(result) => result,
         Err(e) => {
-            error!("{:?}", e);
-            bail!("Couldn't connect to SQLite database");
+            tracing::error!("{:?}", e);
+            anyhow::bail!("Couldn't connect to SQLite database");
         }
     };
 
     // Match clap commands and pass the SQLite pool to the command handlers
-    info!("Invoked command: {:?}", cli.command);
+    tracing::debug!("Invoked command: {:?}", cli.command);
     match &cli.command {
         Commands::Cluster { command } => match command {
             ClusterCommands::Create {
@@ -263,6 +285,12 @@ async fn main() -> Result<()> {
             } => {
                 commands::cluster::test_failure(&sqlite_pool, cluster_id, node_private_ip, *yes)
                     .await?;
+            }
+            ClusterCommands::Watch {
+                cluster_id,
+                interval,
+            } => {
+                commands::cluster::watch(&sqlite_pool, cluster_id, *interval).await?;
             }
         },
         Commands::InstanceType { command } => match command {

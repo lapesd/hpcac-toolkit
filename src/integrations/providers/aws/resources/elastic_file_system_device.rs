@@ -1,9 +1,8 @@
 use crate::integrations::providers::aws::{AwsInterface, interface::AwsClusterContext};
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use std::time::Duration;
 use tokio::time::sleep;
-use tracing::{error, info, warn};
 
 impl AwsInterface {
     pub async fn request_elastic_file_system_device_creation(
@@ -19,31 +18,31 @@ impl AwsInterface {
         {
             Ok(response) => response,
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failure describing EFS devices");
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failure describing EFS devices: {}", e);
             }
         };
 
         let efs_devices = describe_efs_devices_response.file_systems();
         match efs_devices.len() {
             0 => {
-                info!("No existing EFS device found, continue with creation...")
+                tracing::info!("No existing EFS device found, continue with creation...")
             }
             1 => {
                 let existing_efs_id = efs_devices[0].file_system_id().to_string();
-                info!("Existing EFS device '{}' found", existing_efs_id);
+                tracing::info!("Existing EFS device '{}' found", existing_efs_id);
                 return Ok(existing_efs_id);
             }
             _ => {
-                error!("{:?}", describe_efs_devices_response);
-                bail!(
+                tracing::error!("{:?}", describe_efs_devices_response);
+                anyhow::bail!(
                     "Unexpected multiple EFS devices found in AWS for cluster '{}'",
                     context.cluster_id
                 );
             }
         }
 
-        info!("Requesting creation of a new EFS device...");
+        tracing::info!("Requesting creation of a new EFS device...");
         let create_efs_device_response = match context
             .efs_client
             .create_file_system()
@@ -71,23 +70,23 @@ impl AwsInterface {
         {
             Ok(response) => response,
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failure creating a new EFS device");
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failure creating a new EFS device: {}", e);
             }
         };
 
         let new_efs_device_id = create_efs_device_response.file_system_id().to_string();
         if new_efs_device_id.is_empty() {
-            error!("{:?}", create_efs_device_response);
-            bail!("Couldn't retrieve the existing EFS device id from AWS response");
+            tracing::error!("{:?}", create_efs_device_response);
+            anyhow::bail!("Couldn't retrieve the existing EFS device id from AWS response");
         } else {
-            info!(
+            tracing::info!(
                 "Successfully requested creation of a new EFS device (id='{}')",
                 new_efs_device_id
             );
         }
 
-        info!(
+        tracing::info!(
             "Disabling automatic backups for EFS device (id='{}')...",
             new_efs_device_id
         );
@@ -106,14 +105,14 @@ impl AwsInterface {
             .await
         {
             Ok(_) => {
-                info!(
+                tracing::info!(
                     "Successfully disabled automatic backups for EFS device (id='{}')",
                     new_efs_device_id
                 );
             }
             Err(e) => {
-                error!("{:?}", e);
-                warn!(
+                tracing::error!("{:?}", e);
+                tracing::warn!(
                     "Failure disabling automatic backups for EFS device (id='{}')",
                     new_efs_device_id
                 );
@@ -128,7 +127,7 @@ impl AwsInterface {
         context: &AwsClusterContext,
     ) -> Result<()> {
         let efs_id = context.efs_device_id.clone().unwrap();
-        info!("Waiting for EFS device (id='{}') to be ready...", efs_id);
+        tracing::info!("Waiting for EFS device (id='{}') to be ready...", efs_id);
 
         let max_wait_time = Duration::from_secs(300);
         let poll_interval = Duration::from_secs(10);
@@ -141,8 +140,8 @@ impl AwsInterface {
                     efs_id,
                     max_wait_time.as_secs()
                 );
-                warn!(message);
-                bail!(message);
+                tracing::warn!(message);
+                anyhow::bail!(message);
             }
 
             let describe_efs_device_response = match context
@@ -154,25 +153,25 @@ impl AwsInterface {
             {
                 Ok(response) => response,
                 Err(e) => {
-                    error!("{:?}", e);
-                    bail!("Failure describing EFS devices");
+                    tracing::error!("{:?}", e);
+                    anyhow::bail!("Failure describing EFS devices: {}", e);
                 }
             };
 
             let efs_devices = describe_efs_device_response.file_systems();
             if efs_devices.is_empty() {
-                error!("{:?}", describe_efs_device_response);
-                bail!("Couldn't retrieve the existing EFS device id from AWS response");
+                tracing::error!("{:?}", describe_efs_device_response);
+                anyhow::bail!("Couldn't retrieve the existing EFS device id from AWS response");
             }
 
             let efs_device = &efs_devices[0];
             match efs_device.life_cycle_state() {
                 aws_sdk_efs::types::LifeCycleState::Available => {
-                    info!("EFS device (id='{}') is now available!", efs_id);
+                    tracing::info!("EFS device (id='{}') is now available!", efs_id);
                     return Ok(());
                 }
                 _ => {
-                    info!(
+                    tracing::info!(
                         "EFS device (id='{}') is not available yet, (state='{}')...",
                         efs_id,
                         efs_device.life_cycle_state()
@@ -197,15 +196,15 @@ impl AwsInterface {
         {
             Ok(response) => response,
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failure describing EFS devices");
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failure describing EFS devices: {}", e);
             }
         };
 
         let file_systems = describe_file_system_response.file_systems();
         for file_system_description in file_systems {
             let efs_id = file_system_description.file_system_id().to_string();
-            info!("Found EFS device to be deleted (id='{}')...", efs_id);
+            tracing::info!("Found EFS device to be deleted (id='{}')...", efs_id);
             match context
                 .efs_client
                 .delete_file_system()
@@ -214,16 +213,17 @@ impl AwsInterface {
                 .await
             {
                 Ok(_) => {
-                    info!(
+                    tracing::info!(
                         "Successfully requested deletion of Elastic File System (EFS) '{}'",
                         efs_id
                     );
                 }
                 Err(e) => {
-                    error!("{:?}", e);
-                    bail!(
-                        "Failure deleting Elastic File System (EFS) '{}' resource",
-                        efs_id
+                    tracing::error!("{:?}", e);
+                    anyhow::bail!(
+                        "Failure deleting Elastic File System (EFS) '{}' resource: {}",
+                        efs_id,
+                        e
                     );
                 }
             }
@@ -245,19 +245,19 @@ impl AwsInterface {
         {
             Ok(response) => response,
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failure describing EFS devices");
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failure describing EFS devices: {}", e);
             }
         };
 
         let efs_devices = describe_efs_devices_response.file_systems();
         if efs_devices.is_empty() {
-            info!("No existing EFS device found, skip waiting for deletion...");
+            tracing::info!("No existing EFS device found, skip waiting for deletion...");
             return Ok(());
         }
 
         let efs_device_id = efs_devices[0].file_system_id();
-        info!(
+        tracing::info!(
             "Waiting for EFS devices (id='{}') to be deleted...",
             efs_device_id
         );
@@ -273,8 +273,8 @@ impl AwsInterface {
                     efs_device_id,
                     max_wait_time.as_secs()
                 );
-                warn!(message);
-                bail!(message);
+                tracing::warn!(message);
+                anyhow::bail!(message);
             }
 
             let describe_efs_device_response = match context
@@ -286,25 +286,29 @@ impl AwsInterface {
             {
                 Ok(response) => response,
                 Err(e) => {
-                    error!("{:?}", e);
-                    bail!("Failure describing EFS device (id='{}')", efs_device_id);
+                    tracing::error!("{:?}", e);
+                    anyhow::bail!(
+                        "Failure describing EFS device (id='{}'): {}",
+                        efs_device_id,
+                        e
+                    );
                 }
             };
 
             let efs_devices = describe_efs_device_response.file_systems();
             if efs_devices.is_empty() {
-                error!("{:?}", describe_efs_device_response);
-                bail!("Couldn't retrieve the existing EFS device id from AWS response");
+                tracing::error!("{:?}", describe_efs_device_response);
+                anyhow::bail!("Couldn't retrieve the existing EFS device id from AWS response");
             }
 
             let efs_device = &efs_devices[0];
             match efs_device.life_cycle_state() {
                 aws_sdk_efs::types::LifeCycleState::Deleted => {
-                    info!("EFS device (id='{}') is now deleted", efs_device_id);
+                    tracing::info!("EFS device (id='{}') is now deleted", efs_device_id);
                     return Ok(());
                 }
                 _ => {
-                    info!(
+                    tracing::info!(
                         "EFS device (id='{}') is not deleted yet, (state='{}')...",
                         efs_device_id,
                         efs_device.life_cycle_state()

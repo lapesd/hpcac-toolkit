@@ -1,6 +1,5 @@
-use anyhow::{Result, bail};
+use anyhow::Result;
 use inquire::Confirm;
-use tracing::error;
 
 pub fn user_confirmation(skip_confirmation: bool, action_description: &str) -> Result<bool> {
     if !skip_confirmation {
@@ -10,20 +9,20 @@ pub fn user_confirmation(skip_confirmation: bool, action_description: &str) -> R
 
         match confirm {
             Ok(true) => {
-                println!("Confirmed! Proceeding...");
+                tracing::info!("Confirmed! Proceeding...");
                 Ok(true)
             }
             Ok(false) => {
-                println!("Operation cancelled by user");
+                tracing::info!("Operation cancelled by user");
                 Ok(false)
             }
             Err(e) => {
-                error!("{}", e.to_string());
-                bail!("Failure processing user response")
+                tracing::error!("{}", e.to_string());
+                anyhow::bail!("Failure processing user response")
             }
         }
     } else {
-        println!("Automatic confirmation with -y flag. Proceeding...");
+        tracing::info!("Automatic confirmation with -y flag. Proceeding...");
         Ok(true)
     }
 }

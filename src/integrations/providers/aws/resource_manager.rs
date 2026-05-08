@@ -6,10 +6,9 @@ use crate::utils;
 
 use std::collections::HashMap;
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use sqlx::sqlite::SqlitePool;
 use tokio::time::{Duration, sleep};
-use tracing::info;
 
 impl CloudResourceManager for AwsInterface {
     async fn spawn_cluster(
@@ -18,7 +17,7 @@ impl CloudResourceManager for AwsInterface {
         cluster: Cluster,
         nodes: Vec<Node>,
     ) -> Result<()> {
-        let mut context = self.create_cluster_context(&cluster)?;
+        let mut context = self.create_cluster_context(&cluster).await?;
         let mut steps = 9 + (6 * nodes.len());
         if cluster.use_node_affinity {
             steps += 1;
@@ -30,7 +29,7 @@ impl CloudResourceManager for AwsInterface {
         }
 
         let spawning_message = format!("Spawning Cluster '{}'...", cluster.display_name);
-        info!(spawning_message);
+        tracing::info!(spawning_message);
 
         let new_state = match cluster.state {
             ClusterState::Running => ClusterState::Restoring,
@@ -264,7 +263,7 @@ impl CloudResourceManager for AwsInterface {
                 operation_spinner.update_message(&op_msg);
                 match nodes[node_index].was_efs_configured {
                     true => {
-                        info!(
+                        tracing::info!(
                             "Skipping Node {} of {} (already configured for EFS)...",
                             node_index + 1,
                             nodes.len()
@@ -350,7 +349,7 @@ echo "EFS mount and setup complete!"
         let private_key_content = match std::fs::read_to_string(&cluster.private_ssh_key_path) {
             Ok(content) => content,
             Err(e) => {
-                bail!(
+                anyhow::bail!(
                     "Failed to read private SSH key file '{}': {}",
                     cluster.private_ssh_key_path,
                     e
@@ -411,9 +410,9 @@ ls -la ~/.ssh/id_rsa"#,
             "Cluster '{}' spawned successfully!",
             cluster.display_name
         ));
-        println!("\nCluster spawn completed successfully. You can access your nodes using:");
+        tracing::info!("Cluster spawn completed successfully. You can access your nodes using:");
         for (node_index, ip_address) in context.elastic_ips.iter() {
-            println!(
+            tracing::info!(
                 "Node '10.0.0.{}': ssh ec2-user@{}",
                 node_index + 10,
                 ip_address
@@ -428,7 +427,7 @@ ls -la ~/.ssh/id_rsa"#,
         cluster: Cluster,
         nodes: Vec<Node>,
     ) -> Result<()> {
-        let context = self.create_cluster_context(&cluster)?;
+        let context = self.create_cluster_context(&cluster).await?;
         let mut steps = 10;
         steps += 2 * nodes.len();
         if cluster.use_node_affinity {
@@ -439,7 +438,7 @@ ls -la ~/.ssh/id_rsa"#,
         }
 
         let terminating_message = format!("Terminating Cluster '{}'...", cluster.display_name);
-        info!(terminating_message);
+        tracing::info!(terminating_message);
 
         cluster
             .update_state(pool, ClusterState::Terminating)
@@ -604,7 +603,7 @@ ls -la ~/.ssh/id_rsa"#,
             "Cluster '{}' terminated successfully!",
             cluster.display_name
         ));
-        println!("Cluster termination completed successfully!");
+        tracing::info!("Cluster termination completed successfully!");
         Ok(())
     }
 
@@ -614,20 +613,21 @@ ls -la ~/.ssh/id_rsa"#,
         cluster: Cluster,
         node_private_ip: &str,
     ) -> Result<()> {
-        let context = self.create_cluster_context(&cluster)?;
+        let context = self.create_cluster_context(&cluster).await?;
         match self
             .find_elastic_compute_instance_by_private_ip(&context, node_private_ip)
             .await?
         {
             Some(id) => {
-                println!("Terminating instance with IP: '{}'", node_private_ip);
+                tracing::info!("Terminating instance with IP: '{}'", node_private_ip);
                 self.terminate_elastic_compute_instance(&context, &id)
                     .await?;
             }
             None => {
-                println!(
+                tracing::warn!(
                     "Private IP: '{}' not found in Cluster '{}'",
-                    node_private_ip, cluster.display_name
+                    node_private_ip,
+                    cluster.display_name
                 );
                 return Ok(());
             }
@@ -636,13 +636,13 @@ ls -la ~/.ssh/id_rsa"#,
         match Node::fetch_by_private_ip(pool, node_private_ip).await? {
             Some(failed_node) => {
                 failed_node.set_efs_configuration_state(pool, false).await?;
-                println!(
+                tracing::info!(
                     "Requested termination for Instance '{}' (failure simulation)",
                     failed_node.id
                 );
             }
             None => {
-                println!(
+                tracing::warn!(
                     "Couldn't find Node record (private_ip='{}') in the database",
                     node_private_ip
                 );
@@ -650,5 +650,51 @@ ls -la ~/.ssh/id_rsa"#,
         }
 
         Ok(())
+    }
+
+    async fn check_cluster_health(
+        &self,
+        _pool: &SqlitePool,
+        cluster: &Cluster,
+    ) -> Result<Vec<String>> {
+        let context = self.create_cluster_context(cluster).await?;
+
+        let response = match context
+            .ec2_client
+            .describe_instances()
+            .filters(context.cluster_id_filter.clone())
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => anyhow::bail!("Failed to describe instances for health check: {}", e),
+        };
+
+        let mut failed_ips = Vec::new();
+        for reservation in response.reservations() {
+            for instance in reservation.instances() {
+                let state = instance.state().and_then(|s| s.name());
+                match state {
+                    Some(
+                        aws_sdk_ec2::types::InstanceStateName::Terminated
+                        | aws_sdk_ec2::types::InstanceStateName::ShuttingDown
+                        | aws_sdk_ec2::types::InstanceStateName::Stopped
+                        | aws_sdk_ec2::types::InstanceStateName::Stopping,
+                    ) => {
+                        if let Some(ip) = instance.private_ip_address() {
+                            tracing::info!(
+                                "Instance (private_ip='{}') is in failed state '{:?}'",
+                                ip,
+                                state
+                            );
+                            failed_ips.push(ip.to_string());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        Ok(failed_ips)
     }
 }

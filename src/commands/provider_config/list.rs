@@ -21,7 +21,7 @@ pub async fn list(pool: &SqlitePool) -> Result<()> {
     let total = configs.len();
 
     if configs.is_empty() {
-        println!("\nNo Provider Configurations found");
+        tracing::info!("No Provider Configurations found");
     } else {
         let mut table_rows: Vec<ProviderConfigDisplay> = vec![];
         for config in configs {
@@ -42,9 +42,11 @@ pub async fn list(pool: &SqlitePool) -> Result<()> {
 
         let mut table = Table::new(table_rows);
         table.with(Style::rounded());
-        println!("\nProviderConfigs:");
-        println!("{}", table);
-        println!("Found {} Provider Configurations", total);
+        tracing::info!(
+            "\nProviderConfigs:\n{}\nFound {} Provider Configurations",
+            table,
+            total
+        );
     }
 
     Ok(())

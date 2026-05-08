@@ -1,9 +1,8 @@
-use anyhow::{Result, bail};
+use anyhow::Result;
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use sqlx::Transaction;
 use sqlx::sqlite::SqlitePool;
-use tracing::error;
 
 #[derive(Deserialize, Serialize, Debug)]
 pub struct ShellCommand {
@@ -44,8 +43,8 @@ impl ShellCommand {
         {
             Ok(result) => result,
             Err(e) => {
-                error!("SQLx Error: {}", e.to_string());
-                bail!("DB Operation Failure");
+                tracing::error!("SQLx Error: {}", e.to_string());
+                anyhow::bail!("DB Operation Failure: {}", e);
             }
         };
 
@@ -73,8 +72,8 @@ impl ShellCommand {
         {
             Ok(_) => {}
             Err(e) => {
-                error!("SQLx Error: {}", e.to_string());
-                bail!("DB Operation Failure");
+                tracing::error!("SQLx Error: {}", e.to_string());
+                anyhow::bail!("DB Operation Failure: {}", e);
             }
         };
 

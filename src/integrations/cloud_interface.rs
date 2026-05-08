@@ -54,6 +54,11 @@ pub trait CloudResourceManager {
         cluster: Cluster,
         node_private_ip: &str,
     ) -> Result<(), Error>;
+    async fn check_cluster_health(
+        &self,
+        pool: &SqlitePool,
+        cluster: &Cluster,
+    ) -> Result<Vec<String>, Error>;
 }
 
 pub enum CloudProvider {
@@ -158,6 +163,17 @@ impl CloudResourceManager for CloudProvider {
                     .simulate_cluster_failure(pool, cluster, node_private_ip)
                     .await
             }
+        }
+    }
+
+    async fn check_cluster_health(
+        &self,
+        pool: &SqlitePool,
+        cluster: &Cluster,
+    ) -> Result<Vec<String>, Error> {
+        match self {
+            CloudProvider::Aws(aws) => aws.check_cluster_health(pool, cluster).await,
+            CloudProvider::Vultr(vultr) => vultr.check_cluster_health(pool, cluster).await,
         }
     }
 }

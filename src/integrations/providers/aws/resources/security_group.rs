@@ -1,7 +1,6 @@
 use crate::integrations::providers::aws::{AwsInterface, interface::AwsClusterContext};
 
-use anyhow::{Result, bail};
-use tracing::{error, info, warn};
+use anyhow::Result;
 
 impl AwsInterface {
     pub async fn ensure_security_group(&self, context: &AwsClusterContext) -> Result<Vec<String>> {
@@ -16,8 +15,8 @@ impl AwsInterface {
         {
             Ok(response) => response,
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failure describing Security Group resources");
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failure describing Security Group resources: {}", e);
             }
         };
 
@@ -26,16 +25,18 @@ impl AwsInterface {
             let mut security_group_ids = Vec::new();
             for sg in security_groups {
                 if let Some(sg_id) = sg.group_id() {
-                    info!("Found existing Security Group: '{}'", sg_id);
+                    tracing::info!("Found existing Security Group: '{}'", sg_id);
 
                     // Verify it's in the correct VPC
                     if let Some(vpc_id) = sg.vpc_id() {
                         if vpc_id == context_vpc_id {
                             security_group_ids.push(sg_id.to_string());
                         } else {
-                            warn!(
+                            tracing::warn!(
                                 "Security Group '{}' is in different VPC '{}', expected '{}'",
-                                sg_id, vpc_id, context_vpc_id
+                                sg_id,
+                                vpc_id,
+                                context_vpc_id
                             );
                         }
                     }
@@ -43,12 +44,12 @@ impl AwsInterface {
             }
 
             if !security_group_ids.is_empty() {
-                info!("Using existing Security Groups: {:?}", security_group_ids);
+                tracing::info!("Using existing Security Groups: {:?}", security_group_ids);
                 return Ok(security_group_ids);
             }
         }
 
-        info!("No existing Security Groups found, creating a new one...");
+        tracing::info!("No existing Security Groups found, creating a new one...");
 
         let create_security_group_response = match context
             .ec2_client
@@ -73,16 +74,16 @@ impl AwsInterface {
         {
             Ok(response) => response,
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failure creating Security Group resource");
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failure creating Security Group resource: {}", e);
             }
         };
 
         if let Some(security_group_id) = create_security_group_response.group_id() {
-            info!("Created new Security Group '{}'", security_group_id);
+            tracing::info!("Created new Security Group '{}'", security_group_id);
 
             // Add self-referential ingress rule (allow all traffic within the security group)
-            info!(
+            tracing::info!(
                 "Adding self-referential ingress rule to Security Group '{}'...",
                 security_group_id
             );
@@ -106,22 +107,23 @@ impl AwsInterface {
                 .await
             {
                 Ok(_) => {
-                    info!(
+                    tracing::info!(
                         "Successfully added self-referential ingress rule to Security Group '{}'",
                         security_group_id
                     );
                 }
                 Err(e) => {
-                    error!("{:?}", e);
-                    bail!(
-                        "Failure adding self-referential ingress rule to Security Group '{}'",
-                        security_group_id
+                    tracing::error!("{:?}", e);
+                    anyhow::bail!(
+                        "Failure adding self-referential ingress rule to Security Group '{}': {}",
+                        security_group_id,
+                        e
                     );
                 }
             }
 
             // Add SSH ingress rule for external access
-            info!(
+            tracing::info!(
                 "Adding SSH ingress rule to security group '{}'...",
                 security_group_id
             );
@@ -145,23 +147,24 @@ impl AwsInterface {
                 .await
             {
                 Ok(_) => {
-                    info!(
+                    tracing::info!(
                         "Successfully added SSH ingress rule to Security Group '{}'",
                         security_group_id
                     );
                     Ok(vec![security_group_id.to_string()])
                 }
                 Err(e) => {
-                    error!("{:?}", e);
-                    bail!(
-                        "Failure adding SSH ingress rule to Security Group '{}'",
-                        security_group_id
+                    tracing::error!("{:?}", e);
+                    anyhow::bail!(
+                        "Failure adding SSH ingress rule to Security Group '{}': {}",
+                        security_group_id,
+                        e
                     );
                 }
             }
         } else {
-            warn!("{:?}", create_security_group_response);
-            bail!("Failure finding id of the created Security Group resource");
+            tracing::warn!("{:?}", create_security_group_response);
+            anyhow::bail!("Failure finding id of the created Security Group resource");
         }
     }
 
@@ -175,21 +178,21 @@ impl AwsInterface {
         {
             Ok(response) => response,
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failure describing Security Group resources");
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failure describing Security Group resources: {}", e);
             }
         };
 
         let security_groups = describe_security_groups_response.security_groups();
         if security_groups.is_empty() {
-            info!("No existing Security Groups found");
+            tracing::info!("No existing Security Groups found");
             return Ok(());
         }
 
         for sg in security_groups {
             if let Some(sg_id) = sg.group_id() {
-                info!("Found Security Group to cleanup: '{}'", sg_id);
-                info!("Deleting Security Group '{}'...", sg_id);
+                tracing::info!("Found Security Group to cleanup: '{}'", sg_id);
+                tracing::info!("Deleting Security Group '{}'...", sg_id);
                 match context
                     .ec2_client
                     .delete_security_group()
@@ -198,11 +201,11 @@ impl AwsInterface {
                     .await
                 {
                     Ok(_) => {
-                        info!("Security Group '{}' deleted successfully", sg_id);
+                        tracing::info!("Security Group '{}' deleted successfully", sg_id);
                     }
                     Err(e) => {
-                        error!("{:?}", e);
-                        error!("Failed to delete Security Group '{}'", sg_id);
+                        tracing::error!("{:?}", e);
+                        tracing::error!("Failed to delete Security Group '{}'", sg_id);
                     }
                 }
             }

@@ -1,9 +1,8 @@
 use crate::integrations::providers::aws::{AwsInterface, interface::AwsClusterContext};
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use aws_sdk_iam::error::SdkError;
 use aws_sdk_iam::operation::get_role::GetRoleError;
-use tracing::{error, info};
 
 impl AwsInterface {
     pub async fn ensure_iam_role_and_trust_policies(
@@ -22,7 +21,7 @@ impl AwsInterface {
             Ok(response) => {
                 if let Some(role) = response.role() {
                     let iam_role_id = role.role_id();
-                    info!(
+                    tracing::info!(
                         "Found existing IAM Role (id='{}'), skipping creation...",
                         iam_role_id
                     );
@@ -31,19 +30,19 @@ impl AwsInterface {
             }
             Err(SdkError::ServiceError(service_err)) => match service_err.err() {
                 GetRoleError::NoSuchEntityException(_) => {
-                    info!(
+                    tracing::info!(
                         "IAM Role (name='{}') does not exist, will create it",
                         role_name
                     );
                 }
                 _ => {
-                    error!("{:?}", service_err);
-                    bail!("Failure describing IAM Role (name='{}')", role_name);
+                    tracing::error!("{:?}", service_err);
+                    anyhow::bail!("Failure describing IAM Role (name='{}')", role_name);
                 }
             },
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failure describing IAM Role (name='{}')", role_name);
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failure describing IAM Role (name='{}')", role_name);
             }
         };
 
@@ -87,12 +86,12 @@ impl AwsInterface {
             .await
         {
             Ok(response) => {
-                info!("Created IAM role (name='{}')", role_name);
+                tracing::info!("Created IAM role (name='{}')", role_name);
                 response
             }
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failed to create IAM role (name='{}')", role_name);
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failed to create IAM role (name='{}')", role_name);
             }
         };
 
@@ -105,11 +104,11 @@ impl AwsInterface {
             .await
         {
             Ok(_) => {
-                info!("Attached SSM Policy to IAM Role '{}'", role_name);
+                tracing::info!("Attached SSM Policy to IAM Role '{}'", role_name);
             }
             Err(e) => {
-                error!("{:?}", e);
-                bail!(
+                tracing::error!("{:?}", e);
+                anyhow::bail!(
                     "Failed to attach SSM Policy to IAM Role (name='{}')",
                     role_name
                 );
@@ -130,7 +129,7 @@ impl AwsInterface {
         context: &AwsClusterContext,
     ) -> Result<()> {
         let role_name = context.iam_role_name.clone();
-        info!("Cleaning up IAM Role (name='{}')...", role_name);
+        tracing::info!("Cleaning up IAM Role (name='{}')...", role_name);
 
         match context
             .iam_client
@@ -142,12 +141,12 @@ impl AwsInterface {
             Ok(response) => {
                 if let Some(role) = response.role() {
                     let iam_role_id = role.role_id();
-                    info!(
+                    tracing::info!(
                         "Found existing IAM Role (id='{}'), proceeding with deletion...",
                         iam_role_id
                     );
                 } else {
-                    info!(
+                    tracing::info!(
                         "IAM Role (name='{}') does not exist, skipping deletion...",
                         role_name
                     );
@@ -156,20 +155,20 @@ impl AwsInterface {
             }
             Err(SdkError::ServiceError(service_err)) => match service_err.err() {
                 GetRoleError::NoSuchEntityException(_) => {
-                    info!(
+                    tracing::info!(
                         "IAM Role (name='{}') does not exist, skipping deletion...",
                         role_name
                     );
                     return Ok(());
                 }
                 _ => {
-                    error!("{:?}", service_err);
-                    bail!("Failure describing IAM Role '{}'", role_name);
+                    tracing::error!("{:?}", service_err);
+                    anyhow::bail!("Failure describing IAM Role '{}'", role_name);
                 }
             },
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failure describing IAM Role '{}'", role_name);
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failure describing IAM Role '{}'", role_name);
             }
         }
 
@@ -182,15 +181,15 @@ impl AwsInterface {
             .await
         {
             Ok(response) => {
-                info!(
+                tracing::info!(
                     "Detached SSM Trust Policy from IAM Role (name='{}')",
                     role_name
                 );
                 response
             }
             Err(e) => {
-                error!("{:?}", e);
-                bail!(
+                tracing::error!("{:?}", e);
+                anyhow::bail!(
                     "Failure detaching SSM Trust Policy from IAM Role (name='{}')",
                     role_name
                 );
@@ -205,12 +204,12 @@ impl AwsInterface {
             .await
         {
             Ok(response) => {
-                info!("Successfully deleted IAM Role (name='{}')", role_name);
+                tracing::info!("Successfully deleted IAM Role (name='{}')", role_name);
                 response
             }
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failed to delete IAM Role (name='{}')", role_name);
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failed to delete IAM Role (name='{}')", role_name);
             }
         };
 

@@ -1,10 +1,9 @@
 use std::fmt;
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use sqlx::sqlite::{SqlitePool, SqliteRow};
-use tracing::error;
 
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
 pub struct ConfigVar {
@@ -70,8 +69,8 @@ impl ProviderConfig {
         {
             Ok(result) => result,
             Err(e) => {
-                error!("SQLx Error: {}", e.to_string());
-                bail!("DB Operation Failure");
+                tracing::error!("SQLx Error: {}", e.to_string());
+                anyhow::bail!("DB Operation Failure: {}", e);
             }
         };
 
@@ -99,8 +98,8 @@ impl ProviderConfig {
         {
             Ok(result) => result,
             Err(e) => {
-                error!("SQLx Error: {}", e.to_string());
-                bail!("DB Operation Failure");
+                tracing::error!("SQLx Error: {}", e.to_string());
+                anyhow::bail!("DB Operation Failure: {}", e);
             }
         };
 
@@ -123,8 +122,8 @@ impl ProviderConfig {
         {
             Ok(result) => result,
             Err(e) => {
-                error!("SQLx Error: {}", e.to_string());
-                bail!("DB Operation Failure");
+                tracing::error!("SQLx Error: {}", e.to_string());
+                anyhow::bail!("DB Operation Failure: {}", e);
             }
         };
 
@@ -140,8 +139,8 @@ impl ProviderConfig {
         let mut tx = match pool.begin().await {
             Ok(result) => result,
             Err(e) => {
-                error!("SQLx Error: {}", e.to_string());
-                bail!("DB Operation Failure");
+                tracing::error!("SQLx Error: {}", e.to_string());
+                anyhow::bail!("DB Operation Failure: {}", e);
             }
         };
         let inserted_config = match sqlx::query(
@@ -162,9 +161,15 @@ impl ProviderConfig {
         .await
         {
             Ok(result) => result,
+            Err(sqlx::Error::Database(db_err)) if db_err.is_unique_violation() => {
+                anyhow::bail!(
+                    "A provider configuration with the name '{}' already exists. Please choose a different name.",
+                    display_name
+                );
+            }
             Err(e) => {
-                error!("SQLx Error: {}", e.to_string());
-                bail!("DB Operation Failure");
+                tracing::error!("SQLx Error: {}", e.to_string());
+                anyhow::bail!("DB Operation Failure: {}", e);
             }
         };
 
@@ -182,8 +187,8 @@ impl ProviderConfig {
             let _ = match stmt.execute(&mut *tx).await {
                 Ok(result) => result,
                 Err(e) => {
-                    error!("SQLx Error: {}", e.to_string());
-                    bail!("DB Operation Failure");
+                    tracing::error!("SQLx Error: {}", e.to_string());
+                    anyhow::bail!("DB Operation Failure: {}", e);
                 }
             };
         }
@@ -206,8 +211,8 @@ impl ProviderConfig {
         {
             Ok(result) => result,
             Err(e) => {
-                error!("SQLx Error: {}", e.to_string());
-                bail!("DB Operation Failure");
+                tracing::error!("SQLx Error: {}", e.to_string());
+                anyhow::bail!("DB Operation Failure: {}", e);
             }
         };
 
@@ -218,8 +223,8 @@ impl ProviderConfig {
         let mut tx = match pool.begin().await {
             Ok(result) => result,
             Err(e) => {
-                error!("SQLx Error: {}", e.to_string());
-                bail!("DB Operation Failure");
+                tracing::error!("SQLx Error: {}", e.to_string());
+                anyhow::bail!("DB Operation Failure: {}", e);
             }
         };
 
@@ -236,8 +241,8 @@ impl ProviderConfig {
         {
             Ok(result) => result,
             Err(e) => {
-                error!("SQLx Error: {}", e.to_string());
-                bail!("DB Operation Failure");
+                tracing::error!("SQLx Error: {}", e.to_string());
+                anyhow::bail!("DB Operation Failure: {}", e);
             }
         };
 
@@ -254,8 +259,8 @@ impl ProviderConfig {
         {
             Ok(result) => result,
             Err(e) => {
-                error!("SQLx Error: {}", e.to_string());
-                bail!("DB Operation Failure");
+                tracing::error!("SQLx Error: {}", e.to_string());
+                anyhow::bail!("DB Operation Failure: {}", e);
             }
         };
 

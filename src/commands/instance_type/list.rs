@@ -43,7 +43,7 @@ pub async fn list(pool: &SqlitePool, filters: InstanceTypeFilters) -> Result<()>
     let total = instance_types.len();
 
     if instance_types.is_empty() {
-        println!("\nNo Instance Types found");
+        tracing::info!("No Instance Types found");
     } else {
         let mut table_rows: Vec<InstanceTypeDisplay> = vec![];
         for instance_type in instance_types {
@@ -92,9 +92,11 @@ pub async fn list(pool: &SqlitePool, filters: InstanceTypeFilters) -> Result<()>
 
         let mut table = Table::new(table_rows);
         table.with(Style::rounded());
-        println!("\nInstance Types:");
-        println!("{}", table);
-        println!("Found {} Instance Types", total);
+        tracing::info!(
+            "\nInstance Types:\n{}\nFound {} Instance Types",
+            table,
+            total
+        );
     }
 
     Ok(())

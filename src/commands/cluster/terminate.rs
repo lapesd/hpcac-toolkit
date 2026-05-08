@@ -2,26 +2,25 @@ use crate::database::models::{Cluster, ClusterState, ProviderConfig};
 use crate::integrations::{cloud_interface::CloudResourceManager, providers::aws::AwsInterface};
 use crate::utils;
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use sqlx::sqlite::SqlitePool;
-use tracing::{error, info};
 
 pub async fn terminate(pool: &SqlitePool, cluster_id: &str, skip_confirmation: bool) -> Result<()> {
     let cluster = match Cluster::fetch_by_id(pool, cluster_id).await? {
         Some(cluster) => cluster,
         None => {
-            println!("Cluster (id='{}') not found", cluster_id);
+            tracing::warn!("Cluster (id='{}') not found", cluster_id);
             return Ok(());
         }
     };
 
     match cluster.state {
         ClusterState::Terminated => {
-            println!("Cluster '{}' is already terminated.", cluster.display_name);
+            tracing::info!("Cluster '{}' is already terminated.", cluster.display_name);
             return Ok(());
         }
         _ => {
-            info!("Terminating Cluster '{}'...", cluster.display_name)
+            tracing::info!("Terminating Cluster '{}'...", cluster.display_name)
         }
     }
 
@@ -30,8 +29,8 @@ pub async fn terminate(pool: &SqlitePool, cluster_id: &str, skip_confirmation: b
         match ProviderConfig::fetch_by_id(pool, cluster.provider_config_id).await? {
             Some(config) => config,
             None => {
-                error!("Missing ProviderConfig '{}'", cluster.provider_config_id);
-                bail!("Data Consistency Failure");
+                tracing::error!("Missing ProviderConfig '{}'", cluster.provider_config_id);
+                anyhow::bail!("Data Consistency Failure");
             }
         };
 
@@ -40,7 +39,7 @@ pub async fn terminate(pool: &SqlitePool, cluster_id: &str, skip_confirmation: b
     let cloud_interface = match provider_id.as_str() {
         "aws" => AwsInterface { config_vars },
         _ => {
-            bail!("Provider '{}' is currently not supported.", &provider_id)
+            anyhow::bail!("Provider '{}' is currently not supported.", &provider_id)
         }
     };
 

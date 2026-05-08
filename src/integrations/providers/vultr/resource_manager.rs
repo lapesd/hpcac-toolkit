@@ -1,7 +1,7 @@
 use crate::database::models::{Cluster, Node};
 use crate::integrations::CloudResourceManager;
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use sqlx::sqlite::SqlitePool;
 
 use super::interface::VultrInterface;
@@ -13,7 +13,7 @@ impl CloudResourceManager for VultrInterface {
         _cluster: Cluster,
         _nodes: Vec<Node>,
     ) -> Result<()> {
-        bail!("Not implemented")
+        anyhow::bail!("Not implemented")
     }
 
     async fn terminate_cluster(
@@ -22,7 +22,7 @@ impl CloudResourceManager for VultrInterface {
         _cluster: Cluster,
         _nodes: Vec<Node>,
     ) -> Result<()> {
-        bail!("Not implemented")
+        anyhow::bail!("Not implemented")
     }
 
     async fn simulate_cluster_failure(
@@ -31,6 +31,14 @@ impl CloudResourceManager for VultrInterface {
         _cluster: Cluster,
         _node_private_ip: &str,
     ) -> Result<()> {
-        bail!("Not implemented")
+        anyhow::bail!("Not implemented")
+    }
+
+    async fn check_cluster_health(
+        &self,
+        _pool: &SqlitePool,
+        _cluster: &Cluster,
+    ) -> Result<Vec<String>> {
+        anyhow::bail!("Not implemented")
     }
 }

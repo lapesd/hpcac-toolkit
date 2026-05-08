@@ -1,14 +1,13 @@
 use crate::database::models::{Cluster, ClusterState};
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use sqlx::sqlite::SqlitePool;
-use tracing::info;
 
 pub async fn delete(pool: &SqlitePool, cluster_id: &str) -> Result<()> {
     let cluster = match Cluster::fetch_by_id(pool, cluster_id).await? {
         Some(cluster) => cluster,
         None => {
-            println!("Cluster (id='{}') not found", cluster_id);
+            tracing::warn!("Cluster (id='{}') not found", cluster_id);
             return Ok(());
         }
     };
@@ -18,10 +17,10 @@ pub async fn delete(pool: &SqlitePool, cluster_id: &str) -> Result<()> {
         | ClusterState::Terminated
         | ClusterState::Failed
         | ClusterState::Restoring => {
-            info!("Deleting Cluster '{}'...", cluster.display_name)
+            tracing::info!("Deleting Cluster '{}'...", cluster.display_name)
         }
         _ => {
-            bail!(
+            anyhow::bail!(
                 "Cannot delete Cluster '{}' in state '{}' from the DB",
                 cluster.display_name,
                 cluster.state
@@ -30,9 +29,10 @@ pub async fn delete(pool: &SqlitePool, cluster_id: &str) -> Result<()> {
     }
 
     Cluster::delete(pool, cluster_id).await?;
-    println!(
-        "\nCluster '{}' (id='{}') is now deleted.",
-        cluster.display_name, cluster.id
+    tracing::info!(
+        "Cluster '{}' (id='{}') is now deleted.",
+        cluster.display_name,
+        cluster.id
     );
     Ok(())
 }

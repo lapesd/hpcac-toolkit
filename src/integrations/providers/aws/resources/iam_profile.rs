@@ -1,9 +1,9 @@
 use crate::integrations::providers::aws::{AwsInterface, interface::AwsClusterContext};
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use aws_sdk_iam::error::SdkError;
 use aws_sdk_iam::operation::get_instance_profile::GetInstanceProfileError;
-use tracing::{error, info};
+use tokio::time::{Duration, sleep};
 
 impl AwsInterface {
     pub async fn ensure_iam_profile(&self, context: &AwsClusterContext) -> Result<String> {
@@ -20,7 +20,7 @@ impl AwsInterface {
             Ok(response) => {
                 if let Some(profile) = response.instance_profile() {
                     let iam_profile_id = profile.instance_profile_id();
-                    info!(
+                    tracing::info!(
                         "Found existing IAM Profile (id='{}'), skipping creation...",
                         iam_profile_id
                     );
@@ -29,19 +29,19 @@ impl AwsInterface {
             }
             Err(SdkError::ServiceError(service_err)) => match service_err.err() {
                 GetInstanceProfileError::NoSuchEntityException(_) => {
-                    info!(
+                    tracing::info!(
                         "IAM Profile (name='{}') does not exist, will create it",
                         profile_name
                     );
                 }
                 _ => {
-                    error!("{:?}", service_err);
-                    bail!("Failure describing IAM Profile (name='{}')", profile_name);
+                    tracing::error!("{:?}", service_err);
+                    anyhow::bail!("Failure describing IAM Profile (name='{}')", profile_name);
                 }
             },
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failure describing IAM Profile (name='{}')", profile_name);
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failure describing IAM Profile (name='{}')", profile_name);
             }
         };
 
@@ -67,12 +67,12 @@ impl AwsInterface {
             .await
         {
             Ok(response) => {
-                info!("Created IAM Profile (name='{}')", profile_name);
+                tracing::info!("Created IAM Profile (name='{}')", profile_name);
                 response
             }
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failed to create IAM Profile (name='{}')", profile_name);
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failed to create IAM Profile (name='{}')", profile_name);
             }
         };
 
@@ -85,20 +85,26 @@ impl AwsInterface {
             .await
         {
             Ok(_) => {
-                info!(
+                tracing::info!(
                     "Successfully assumed IAM Role (name='{}') in IAM Profile (name='{}')",
-                    role_name, profile_name
+                    role_name,
+                    profile_name
                 );
             }
             Err(e) => {
-                error!("{:?}", e);
-                bail!(
+                tracing::error!("{:?}", e);
+                anyhow::bail!(
                     "Failed to assume IAM Role (name='{}') in IAM Profile (name='{}')",
                     role_name,
                     profile_name,
                 );
             }
         }
+
+        // IAM profile propagation delay: AWS eventual consistency requires a wait after
+        // attaching a role to a new profile before EC2/SSM can use the permissions.
+        tracing::info!("Waiting 30s for IAM profile permissions to propagate...");
+        sleep(Duration::from_secs(30)).await;
 
         let iam_profile_id = create_iam_profile_response
             .instance_profile()
@@ -111,7 +117,7 @@ impl AwsInterface {
 
     pub async fn cleanup_iam_profile(&self, context: &AwsClusterContext) -> Result<()> {
         let profile_name = context.iam_profile_name.clone();
-        info!("Cleaning up IAM Profile (name='{}')...", profile_name);
+        tracing::info!("Cleaning up IAM Profile (name='{}')...", profile_name);
 
         match context
             .iam_client
@@ -123,7 +129,7 @@ impl AwsInterface {
             Ok(response) => {
                 if let Some(instance_profile) = response.instance_profile() {
                     let iam_profile_id = instance_profile.instance_profile_id();
-                    info!(
+                    tracing::info!(
                         "Found existing IAM Profile (id='{}'), proceeding with deletion...",
                         iam_profile_id
                     );
@@ -139,15 +145,16 @@ impl AwsInterface {
                             .await
                         {
                             Ok(response) => {
-                                info!(
+                                tracing::info!(
                                     "Removed IAM Role (name='{}') from IAM Profile (name='{}')",
-                                    role_name, profile_name
+                                    role_name,
+                                    profile_name
                                 );
                                 response
                             }
                             Err(e) => {
-                                error!("{:?}", e);
-                                bail!(
+                                tracing::error!("{:?}", e);
+                                anyhow::bail!(
                                     "Failure removing IAM Role (name='{}') from IAM Profile (name='{}')",
                                     role_name,
                                     profile_name
@@ -156,7 +163,7 @@ impl AwsInterface {
                         };
                     }
                 } else {
-                    info!(
+                    tracing::info!(
                         "IAM Profile (name='{}') does not exist, skipping deletion...",
                         profile_name
                     );
@@ -165,20 +172,20 @@ impl AwsInterface {
             }
             Err(SdkError::ServiceError(service_err)) => match service_err.err() {
                 GetInstanceProfileError::NoSuchEntityException(_) => {
-                    info!(
+                    tracing::info!(
                         "IAM Profile (name='{}') does not exist, skipping deletion...",
                         profile_name
                     );
                     return Ok(());
                 }
                 _ => {
-                    error!("{:?}", service_err);
-                    bail!("Failure describing IAM Profile '{}'", profile_name);
+                    tracing::error!("{:?}", service_err);
+                    anyhow::bail!("Failure describing IAM Profile '{}'", profile_name);
                 }
             },
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failure describing IAM Profile '{}'", profile_name);
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failure describing IAM Profile '{}'", profile_name);
             }
         }
 
@@ -190,12 +197,12 @@ impl AwsInterface {
             .await
         {
             Ok(response) => {
-                info!("Successfully deleted IAM Profile (name='{}')", profile_name);
+                tracing::info!("Successfully deleted IAM Profile (name='{}')", profile_name);
                 response
             }
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failed to delete IAM Profile (name='{}')", profile_name);
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failed to delete IAM Profile (name='{}')", profile_name);
             }
         };
 

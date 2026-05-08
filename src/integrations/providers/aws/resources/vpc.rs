@@ -1,7 +1,6 @@
 use crate::integrations::providers::aws::{AwsInterface, interface::AwsClusterContext};
 
-use anyhow::{Result, bail};
-use tracing::{error, info, warn};
+use anyhow::Result;
 
 impl AwsInterface {
     pub async fn ensure_vpc(&self, context: &AwsClusterContext) -> Result<String> {
@@ -14,20 +13,20 @@ impl AwsInterface {
         {
             Ok(response) => response,
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failure describing VPC resources");
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failure describing VPC resources: {}", e);
             }
         };
 
         let vpcs = describe_vpcs_response.vpcs();
         if let Some(vpc) = vpcs.first() {
             if let Some(vpc_id) = vpc.vpc_id() {
-                info!("Found existing VPC: '{}'", vpc_id);
+                tracing::info!("Found existing VPC: '{}'", vpc_id);
                 return Ok(vpc_id.to_string());
             }
         }
 
-        info!("No existing VPC found, creating a new one...");
+        tracing::info!("No existing VPC found, creating a new one...");
 
         let create_vpc_response = match context
             .ec2_client
@@ -53,13 +52,13 @@ impl AwsInterface {
         {
             Ok(response) => response,
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failure creating VPC resource");
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failure creating VPC resource: {}", e);
             }
         };
 
         if let Some(vpc_id) = create_vpc_response.vpc().and_then(|vpc| vpc.vpc_id()) {
-            info!("Created new VPC '{}'", vpc_id);
+            tracing::info!("Created new VPC '{}'", vpc_id);
             match context
                 .ec2_client
                 .modify_vpc_attribute()
@@ -73,11 +72,15 @@ impl AwsInterface {
                 .await
             {
                 Ok(_) => {
-                    info!("Enabled DNS hostnames for VPC (id='{}')", vpc_id);
+                    tracing::info!("Enabled DNS hostnames for VPC (id='{}')", vpc_id);
                 }
                 Err(e) => {
-                    error!("{:?}", e);
-                    bail!("Failure enabling DNS hostnames for VPC (id='{}')", vpc_id);
+                    tracing::error!("{:?}", e);
+                    anyhow::bail!(
+                        "Failure enabling DNS hostnames for VPC (id='{}'): {}",
+                        vpc_id,
+                        e
+                    );
                 }
             };
 
@@ -94,19 +97,23 @@ impl AwsInterface {
                 .await
             {
                 Ok(_) => {
-                    info!("Enabled DNS support for VPC (id='{}')", vpc_id);
+                    tracing::info!("Enabled DNS support for VPC (id='{}')", vpc_id);
                 }
                 Err(e) => {
-                    error!("{:?}", e);
-                    bail!("Failure enabling DNS support for VPC (id='{}')", vpc_id);
+                    tracing::error!("{:?}", e);
+                    anyhow::bail!(
+                        "Failure enabling DNS support for VPC (id='{}'): {}",
+                        vpc_id,
+                        e
+                    );
                 }
             }
 
             return Ok(vpc_id.to_string());
         }
 
-        warn!("{:?}", create_vpc_response);
-        bail!("Failure finding the id of the created VPC resource");
+        tracing::warn!("{:?}", create_vpc_response);
+        anyhow::bail!("Failure finding the id of the created VPC resource");
     }
 
     pub async fn cleanup_vpc(&self, context: &AwsClusterContext) -> Result<()> {
@@ -119,30 +126,30 @@ impl AwsInterface {
         {
             Ok(response) => response,
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failure describing VPC resources");
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failure describing VPC resources: {}", e);
             }
         };
 
         let vpcs = describe_vpcs_response.vpcs();
         if let Some(vpc) = vpcs.first() {
             if let Some(vpc_id) = vpc.vpc_id() {
-                info!("Found existing VPC to cleanup: '{}'", vpc_id);
-                info!("Deleting VPC '{}'...", vpc_id);
+                tracing::info!("Found existing VPC to cleanup: '{}'", vpc_id);
+                tracing::info!("Deleting VPC '{}'...", vpc_id);
                 match context.ec2_client.delete_vpc().vpc_id(vpc_id).send().await {
                     Ok(_) => {
-                        info!("VPC '{}' deleted successfully", vpc_id);
+                        tracing::info!("VPC '{}' deleted successfully", vpc_id);
                         return Ok(());
                     }
                     Err(e) => {
-                        error!("{:?}", e);
-                        bail!("Failure deleting VPC resource");
+                        tracing::error!("{:?}", e);
+                        anyhow::bail!("Failure deleting VPC resource: {}", e);
                     }
                 };
             }
         }
 
-        info!("No existing VPC found");
+        tracing::info!("No existing VPC found");
         Ok(())
     }
 }

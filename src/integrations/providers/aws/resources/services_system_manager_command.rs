@@ -2,13 +2,12 @@ use crate::integrations::providers::aws::{AwsInterface, interface::AwsClusterCon
 
 use std::collections::HashMap;
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use aws_sdk_ssm::error::SdkError;
 use aws_sdk_ssm::types::{
     CommandInvocationStatus, InstanceInformationFilter, InstanceInformationFilterKey, PingStatus,
 };
 use tokio::time::{Duration, sleep};
-use tracing::{error, info, warn};
 
 impl AwsInterface {
     pub async fn wait_for_ssm_agent_ready(
@@ -21,7 +20,7 @@ impl AwsInterface {
 
         loop {
             if start_time.elapsed() > max_wait_time {
-                bail!(
+                anyhow::bail!(
                     "SSM agent readiness check timed out for instance '{}'",
                     instance_id
                 );
@@ -43,12 +42,23 @@ impl AwsInterface {
             if !response.instance_information_list().is_empty() {
                 let instance_info = &response.instance_information_list()[0];
                 if instance_info.ping_status() == Some(&PingStatus::Online) {
-                    info!("SSM agent is ready for instance '{}'", instance_id);
+                    tracing::info!("SSM agent is ready for instance '{}'", instance_id);
+                    // Wait for IAM role credentials to propagate to the SSM execution APIs.
+                    // PingStatus::Online only confirms the agent can heartbeat; the first
+                    // command execution requires ssm:GetDocument and related calls which
+                    // need additional time after the agent registers.
+                    // When the IAM role is brand new, 30s is often not enough — 90s is
+                    // more reliable in practice.
+                    tracing::info!(
+                        "Waiting 90s for SSM execution permissions to propagate for instance '{}'...",
+                        instance_id
+                    );
+                    sleep(Duration::from_secs(90)).await;
                     return Ok(());
                 }
             }
 
-            info!(
+            tracing::info!(
                 "Waiting for SSM agent to be ready for instance '{}'...",
                 instance_id
             );
@@ -62,7 +72,7 @@ impl AwsInterface {
         ec2_instance_id: &str,
         command: String,
     ) -> Result<String> {
-        info!(
+        tracing::info!(
             "Creating SSM Command for EC2 instance (id='{}')...",
             ec2_instance_id,
         );
@@ -77,7 +87,7 @@ EOF"#,
             command
         );
 
-        info!("SSM Command: `{}`", wrapped_command);
+        tracing::info!("SSM Command: `{}`", wrapped_command);
 
         let mut parameters = HashMap::new();
         parameters.insert("commands".to_string(), vec![wrapped_command]);
@@ -86,9 +96,10 @@ EOF"#,
         let base_delay = Duration::from_secs(30);
 
         for attempt in 1..=max_retries {
-            info!(
+            tracing::info!(
                 "SSM command creation attempt {} of {}",
-                attempt, max_retries
+                attempt,
+                max_retries
             );
 
             let result = context
@@ -106,28 +117,30 @@ EOF"#,
                         Some(cmd) => match cmd.command_id() {
                             Some(id) => id,
                             None => {
-                                error!("AWS SDK client response: '{:?}'", response);
-                                bail!(
+                                tracing::error!("AWS SDK client response: '{:?}'", response);
+                                anyhow::bail!(
                                     "Unexpected response from AWS when sending SSM Command to EC2 Instance (id='{}')",
                                     ec2_instance_id
                                 );
                             }
                         },
                         None => {
-                            error!("AWS SDK client response: '{:?}'", response);
-                            bail!(
+                            tracing::error!("AWS SDK client response: '{:?}'", response);
+                            anyhow::bail!(
                                 "Unexpected response from AWS when sending SSM Command to EC2 Instance (id='{}')",
                                 ec2_instance_id
                             );
                         }
                     };
 
-                    info!(
+                    tracing::info!(
                         "Successfully created SSM Command (id='{}') for EC2 Instance (id='{}') on attempt {}",
-                        ssm_command_id, ec2_instance_id, attempt
+                        ssm_command_id,
+                        ec2_instance_id,
+                        attempt
                     );
 
-                    info!("Waiting for command invocation to become available...");
+                    tracing::info!("Waiting for command invocation to become available...");
                     sleep(Duration::from_secs(5)).await;
 
                     return Ok(ssm_command_id.to_string());
@@ -137,19 +150,21 @@ EOF"#,
 
                     if should_retry && attempt < max_retries {
                         let delay = base_delay * attempt as u32;
-                        warn!(
+                        tracing::warn!(
                             "SSM command creation failed on attempt {}. Retrying in {:?}...",
-                            attempt, delay
+                            attempt,
+                            delay
                         );
-                        warn!("Error details: {:?}", aws_error);
+                        tracing::warn!("Error details: {:?}", aws_error);
                         sleep(delay).await;
                         continue;
                     } else {
-                        error!(
+                        tracing::error!(
                             "SSM command creation failed after {} attempts: {:?}",
-                            attempt, aws_error
+                            attempt,
+                            aws_error
                         );
-                        bail!(
+                        anyhow::bail!(
                             "Failed to create SSM Command for EC2 Instance (id='{}') after {} attempts",
                             ec2_instance_id,
                             attempt
@@ -159,7 +174,7 @@ EOF"#,
             }
         }
 
-        bail!(
+        anyhow::bail!(
             "Failed to create SSM Command for EC2 Instance (id='{}') after {} attempts",
             ec2_instance_id,
             max_retries
@@ -180,7 +195,7 @@ EOF"#,
             .send()
             .await?;
 
-        info!("AWS get command invocation response: {:?}", response);
+        tracing::info!("AWS get command invocation response: {:?}", response);
 
         let stdout = response.standard_output_content().unwrap_or("").to_string();
         let stderr = response.standard_error_content().unwrap_or("").to_string();
@@ -188,7 +203,7 @@ EOF"#,
         match response.status() {
             Some(status) => Ok((status.clone(), stdout, stderr)),
             None => {
-                bail!("SSM command '{}' has no status", command_id);
+                anyhow::bail!("SSM command '{}' has no status", command_id);
             }
         }
     }
@@ -205,7 +220,7 @@ EOF"#,
 
         loop {
             if start_time.elapsed() > max_wait_time {
-                bail!(
+                anyhow::bail!(
                     "SSM command '{}' timed out after {:?}",
                     command_id,
                     max_wait_time
@@ -221,9 +236,10 @@ EOF"#,
                 Err(e) => {
                     let error_string = e.to_string();
                     if error_string.contains("InvocationDoesNotExist") {
-                        warn!(
+                        tracing::warn!(
                             "Command invocation '{}' not yet available for instance '{}', continuing to poll...",
-                            command_id, instance_id
+                            command_id,
+                            instance_id
                         );
                         (
                             CommandInvocationStatus::Pending,
@@ -231,47 +247,49 @@ EOF"#,
                             String::new(),
                         )
                     } else {
-                        bail!("Unhandled error with SSM command: {:?}", e);
+                        anyhow::bail!("Unhandled error with SSM command: {:?}", e);
                     }
                 }
             };
 
             match status {
                 CommandInvocationStatus::Success => {
-                    info!("SSM command '{}' completed successfully", command_id);
+                    tracing::info!("SSM command '{}' completed successfully", command_id);
                     return Ok(stdout);
                 }
                 CommandInvocationStatus::InProgress | CommandInvocationStatus::Pending => {
-                    info!("SSM command '{}' is still running...", command_id);
+                    tracing::info!("SSM command '{}' is still running...", command_id);
                 }
                 CommandInvocationStatus::Failed
                 | CommandInvocationStatus::Cancelled
                 | CommandInvocationStatus::TimedOut
                 | CommandInvocationStatus::Cancelling => {
-                    println!(
+                    tracing::error!(
                         "SSM Command '{}' failed with status: {:?}",
-                        command_id, status
+                        command_id,
+                        status
                     );
                     if !stdout.trim().is_empty() {
-                        println!("SSM Output: {}", stdout);
+                        tracing::error!("SSM Output: {}", stdout);
                     }
                     if !stderr.trim().is_empty() {
-                        println!("SSM Error: {}", stderr);
+                        tracing::error!("SSM Error: {}", stderr);
                     }
-                    bail!("SSM command failed with status: {:?}", status);
+                    anyhow::bail!("SSM command failed with status: {:?}", status);
                 }
                 _ => {
-                    println!(
+                    tracing::warn!(
                         "SSM Command '{}' has unexpected status: {:?}",
-                        command_id, status
+                        command_id,
+                        status
                     );
                     if !stdout.trim().is_empty() {
-                        println!("SSM Output: {}", stdout);
+                        tracing::warn!("SSM Output: {}", stdout);
                     }
                     if !stderr.trim().is_empty() {
-                        println!("SSM Error: {}", stderr);
+                        tracing::warn!("SSM Error: {}", stderr);
                     }
-                    bail!("SSM command has unexpected status: {:?}", status);
+                    anyhow::bail!("SSM command has unexpected status: {:?}", status);
                 }
             }
 

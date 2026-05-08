@@ -1,10 +1,9 @@
 use crate::database::models::{InstanceType, Node, ProviderConfig, ShellCommand};
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use sqlx::{Type, sqlite::SqlitePool};
-use tracing::{error, info, warn};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, Default)]
 #[sqlx(type_name = "TEXT")]
@@ -82,33 +81,34 @@ impl Cluster {
             match ProviderConfig::fetch_by_id(pool, self.provider_config_id).await? {
                 Some(config) => config,
                 None => {
-                    error!("Missing ProviderConfig '{}'", self.provider_config_id);
-                    bail!("Data Consistency Failure");
+                    tracing::error!("Missing ProviderConfig '{}'", self.provider_config_id);
+                    anyhow::bail!("Data Consistency Failure");
                 }
             };
 
         let nodes = self.get_nodes(pool).await?;
 
-        println!("\n{:<35}: {}", "Cluster Name", self.display_name);
-        println!("{:<35}: {}", "Provider", self.provider_id);
-        println!("{:<35}: {}", "Region", self.region);
-        println!("{:<35}: {}", "Availability Zone", self.availability_zone);
-        println!("{:<35}: {}", "Use Node Affinity", self.use_node_affinity);
-        println!(
-            "{:<35}: {}",
-            "Use Elastic Fabric Adapters (EFAs)", self.use_elastic_fabric_adapters
+        tracing::info!(
+            "\n{:<35}: {}\n{:<35}: {}\n{:<35}: {}\n{:<35}: {}\n{:<35}: {}\n{:<35}: {}\n{:<35}: {}\n{:<35}: {}\n{:<35}: {}\n\nNode Details:",
+            "Cluster Name",
+            self.display_name,
+            "Provider",
+            self.provider_id,
+            "Region",
+            self.region,
+            "Availability Zone",
+            self.availability_zone,
+            "Use Node Affinity",
+            self.use_node_affinity,
+            "Use Elastic Fabric Adapters (EFAs)",
+            self.use_elastic_fabric_adapters,
+            "Use Elastic File System (EFS)",
+            self.use_elastic_file_system,
+            "Provider Config",
+            provider_config.display_name,
+            "Node Count",
+            nodes.len()
         );
-        println!(
-            "{:<35}: {}",
-            "Use Elastic File System (EFS)", self.use_elastic_file_system
-        );
-        println!(
-            "{:<35}: {}",
-            "Provider Config", provider_config.display_name
-        );
-        println!("{:<35}: {}\n", "Node Count", nodes.len());
-
-        println!("Node Details:");
         for (i, node) in nodes.iter().enumerate() {
             let instance_type_name = &node.instance_type;
             let instance_details = match InstanceType::fetch_by_name_and_region(
@@ -120,8 +120,8 @@ impl Cluster {
             {
                 Some(instance_type) => instance_type,
                 None => {
-                    error!("Missing InstanceType '{}'", instance_type_name);
-                    bail!("Data Consistency Failure");
+                    tracing::error!("Missing InstanceType '{}'", instance_type_name);
+                    anyhow::bail!("Data Consistency Failure");
                 }
             };
 
@@ -147,18 +147,17 @@ impl Cluster {
                 None => "N/A".to_string(),
             };
 
-            println!("  Node {}:", i + 1);
-            println!("    Instance Type   : {}", node.instance_type);
-            println!("    Processor       : {}", processor_info);
-            println!("    vCPUs:          : {}", instance_details.vcpus);
-            println!("    GPUs:           : {}", gpu_info);
-            println!("    Image ID        : {}", node.image_id);
-            println!("    Allocation Mode : {}", node.allocation_mode);
-            println!(
-                "    Burstable Mode  : {}",
+            tracing::info!(
+                "  Node {}:\n    Instance Type   : {}\n    Processor       : {}\n    vCPUs:          : {}\n    GPUs:           : {}\n    Image ID        : {}\n    Allocation Mode : {}\n    Burstable Mode  : {}",
+                i + 1,
+                node.instance_type,
+                processor_info,
+                instance_details.vcpus,
+                gpu_info,
+                node.image_id,
+                node.allocation_mode,
                 node.burstable_mode.as_deref().unwrap_or("N/A")
             );
-            println!();
         }
 
         Ok(())
@@ -192,8 +191,8 @@ impl Cluster {
         {
             Ok(result) => result,
             Err(e) => {
-                error!("SQLx Error: {:?}", e);
-                bail!("DB Operation Failure");
+                tracing::error!("SQLx Error: {:?}", e);
+                anyhow::bail!("DB Operation Failure: {}", e);
             }
         };
 
@@ -228,8 +227,8 @@ impl Cluster {
         {
             Ok(result) => result,
             Err(e) => {
-                error!("SQLx Error: {:?}", e);
-                bail!("DB Operation Failure");
+                tracing::error!("SQLx Error: {:?}", e);
+                anyhow::bail!("DB Operation Failure: {}", e);
             }
         };
 
@@ -262,8 +261,8 @@ impl Cluster {
         {
             Ok(result) => result,
             Err(e) => {
-                error!("SQLx Error: {:?}", e);
-                bail!("DB Operation Failure");
+                tracing::error!("SQLx Error: {:?}", e);
+                anyhow::bail!("DB Operation Failure: {}", e);
             }
         };
 
@@ -276,7 +275,7 @@ impl Cluster {
         nodes: Vec<Node>,
         commands: Vec<ShellCommand>,
     ) -> Result<()> {
-        info!(
+        tracing::info!(
             "Starting cluster insertion transaction for cluster_id: {}",
             self.id
         );
@@ -284,12 +283,12 @@ impl Cluster {
         let mut tx = match pool.begin().await {
             Ok(result) => result,
             Err(e) => {
-                error!("SQLx Error: {:?}", e);
-                bail!("DB Operation Failure");
+                tracing::error!("SQLx Error: {:?}", e);
+                anyhow::bail!("DB Operation Failure: {}", e);
             }
         };
 
-        info!("Inserting Cluster (id='{}')", self.id);
+        tracing::info!("Inserting Cluster (id='{}')", self.id);
         match sqlx::query!(
             r#"
                 INSERT INTO clusters (
@@ -327,17 +326,17 @@ impl Cluster {
         .await
         {
             Ok(_) => {
-                info!("Successfully inserted cluster with id: {}", self.id);
+                tracing::info!("Successfully inserted cluster with id: {}", self.id);
             }
             Err(e) => {
-                error!("SQLx Error: {:?}", e);
-                bail!("DB Operation Failure");
+                tracing::error!("SQLx Error: {:?}", e);
+                anyhow::bail!("DB Operation Failure: {}", e);
             }
         };
 
-        info!("Inserting {} Nodes", nodes.len());
+        tracing::info!("Inserting {} Nodes", nodes.len());
         for (i, node) in nodes.iter().enumerate() {
-            info!(
+            tracing::info!(
                 "Inserting Node (id='{}') {} of {} for Cluster (id='{}')",
                 node.id,
                 i + 1,
@@ -346,19 +345,25 @@ impl Cluster {
             );
 
             if node.cluster_id != self.id {
-                error!(
+                tracing::error!(
                     "Node (id='{}') has cluster_id '{}' but we're inserting Cluster (id='{}')",
-                    node.id, node.cluster_id, self.id
+                    node.id,
+                    node.cluster_id,
+                    self.id
                 );
-                bail!("DB Operation Failure");
+                anyhow::bail!(
+                    "Node '{}' does not belong to cluster '{}'",
+                    node.id,
+                    self.id
+                );
             }
 
             node.insert(&mut tx).await?;
         }
 
-        info!("Inserting {} Commands", commands.len());
+        tracing::info!("Inserting {} Commands", commands.len());
         for (i, command) in commands.iter().enumerate() {
-            info!(
+            tracing::info!(
                 "Inserting Command {} of {} for Node: (id='{}')",
                 i + 1,
                 commands.len(),
@@ -366,24 +371,24 @@ impl Cluster {
             );
 
             if !nodes.iter().any(|n| n.id == command.node_id) {
-                error!(
+                tracing::error!(
                     "Command references Node (id='{}') which is not in our nodes list",
                     command.node_id
                 );
-                bail!("DB Operation Failure");
+                anyhow::bail!("Command references unknown node '{}'", command.node_id);
             }
 
             command.insert(&mut tx).await?;
         }
 
-        info!("Committing transaction");
+        tracing::info!("Committing transaction");
         match tx.commit().await {
             Ok(_) => {
-                info!("Transaction committed successfully");
+                tracing::info!("Transaction committed successfully");
             }
             Err(e) => {
-                error!("SQLx Error: {:?}", e);
-                bail!("DB Operation Failure");
+                tracing::error!("SQLx Error: {:?}", e);
+                anyhow::bail!("DB Operation Failure: {}", e);
             }
         };
 
@@ -391,18 +396,18 @@ impl Cluster {
     }
 
     pub async fn delete(pool: &SqlitePool, cluster_id: &str) -> Result<()> {
-        info!("Starting deletion of Cluster (id='{}')", cluster_id);
+        tracing::info!("Starting deletion of Cluster (id='{}')", cluster_id);
 
         let mut tx = match pool.begin().await {
             Ok(result) => result,
             Err(e) => {
-                error!("SQLx Error: {:?}", e);
-                bail!("DB Operation Failure");
+                tracing::error!("SQLx Error: {:?}", e);
+                anyhow::bail!("DB Operation Failure: {}", e);
             }
         };
 
         // First, delete all commands associated with nodes in this cluster
-        info!("Deleting commands for Cluster (id='{}')", cluster_id);
+        tracing::info!("Deleting commands for Cluster (id='{}')", cluster_id);
         match sqlx::query!(
             r#"
                 DELETE FROM shell_commands 
@@ -416,20 +421,20 @@ impl Cluster {
         .await
         {
             Ok(result) => {
-                info!(
+                tracing::info!(
                     "Deleted {} commands for Cluster (id='{}')",
                     result.rows_affected(),
                     cluster_id
                 );
             }
             Err(e) => {
-                error!("SQLx Error: {:?}", e);
-                bail!("DB Operation Failure");
+                tracing::error!("SQLx Error: {:?}", e);
+                anyhow::bail!("DB Operation Failure: {}", e);
             }
         };
 
         // Then, delete all nodes associated with this cluster
-        info!("Deleting nodes for Cluster (id='{}')", cluster_id);
+        tracing::info!("Deleting nodes for Cluster (id='{}')", cluster_id);
         match sqlx::query!(
             r#"
                 DELETE FROM nodes 
@@ -441,20 +446,20 @@ impl Cluster {
         .await
         {
             Ok(result) => {
-                info!(
+                tracing::info!(
                     "Deleted {} nodes for Cluster (id='{}')",
                     result.rows_affected(),
                     cluster_id
                 );
             }
             Err(e) => {
-                error!("SQLx Error: {:?}", e);
-                bail!("DB Operation Failure");
+                tracing::error!("SQLx Error: {:?}", e);
+                anyhow::bail!("DB Operation Failure: {}", e);
             }
         };
 
         // Finally, delete the cluster itself
-        info!("Deleting Cluster (id='{}')", cluster_id);
+        tracing::info!("Deleting Cluster (id='{}')", cluster_id);
         match sqlx::query!(
             r#"
                 DELETE FROM clusters 
@@ -467,32 +472,32 @@ impl Cluster {
         {
             Ok(result) => {
                 if result.rows_affected() == 0 {
-                    warn!("No cluster found with id '{}' for deletion", cluster_id);
-                    bail!("Cluster not found");
+                    tracing::warn!("No cluster found with id '{}' for deletion", cluster_id);
+                    anyhow::bail!("Cluster not found");
                 }
-                info!("Successfully deleted Cluster (id='{}')", cluster_id);
+                tracing::info!("Successfully deleted Cluster (id='{}')", cluster_id);
             }
             Err(e) => {
-                error!("SQLx Error: {:?}", e);
-                bail!("DB Operation Failure");
+                tracing::error!("SQLx Error: {:?}", e);
+                anyhow::bail!("DB Operation Failure: {}", e);
             }
         };
 
         // Commit the transaction
-        info!(
+        tracing::info!(
             "Committing deletion transaction for Cluster (id='{}')",
             cluster_id
         );
         match tx.commit().await {
             Ok(_) => {
-                info!(
+                tracing::info!(
                     "Successfully deleted Cluster (id='{}') and all associated data",
                     cluster_id
                 );
             }
             Err(e) => {
-                error!("SQLx Error: {:?}", e);
-                bail!("DB Operation Failure");
+                tracing::error!("SQLx Error: {:?}", e);
+                anyhow::bail!("DB Operation Failure: {}", e);
             }
         };
 
@@ -524,8 +529,8 @@ impl Cluster {
         {
             Ok(result) => result,
             Err(e) => {
-                error!("SQLx Error: {:?}", e);
-                bail!("DB Operation Failure");
+                tracing::error!("SQLx Error: {:?}", e);
+                anyhow::bail!("DB Operation Failure: {}", e);
             }
         };
 
@@ -533,9 +538,10 @@ impl Cluster {
     }
 
     pub async fn update_state(&self, pool: &SqlitePool, new_state: ClusterState) -> Result<()> {
-        info!(
+        tracing::info!(
             "Transitioning Cluster (id='{}') to state '{}'",
-            self.id, new_state
+            self.id,
+            new_state
         );
 
         match sqlx::query!(
@@ -552,21 +558,18 @@ impl Cluster {
         {
             Ok(result) => {
                 if result.rows_affected() == 0 {
-                    error!(
-                        "No cluster found with id '{}' for state transition",
-                        self.id
-                    );
-                    bail!("DB Operation Failure");
+                    anyhow::bail!("Cluster '{}' not found for state transition", self.id);
                 }
 
-                info!(
+                tracing::info!(
                     "Successfully transitioned Cluster (id='{}') to '{}'",
-                    self.id, new_state
+                    self.id,
+                    new_state
                 );
             }
             Err(e) => {
-                error!("SQLx Error: {:?}", e);
-                bail!("DB Operation Failure");
+                tracing::error!("SQLx Error: {:?}", e);
+                anyhow::bail!("DB Operation Failure: {}", e);
             }
         }
 

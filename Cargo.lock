@@ -1135,36 +1135,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fastcluster"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "aws-config",
- "aws-credential-types",
- "aws-sdk-ec2",
- "aws-sdk-efs",
- "aws-sdk-iam",
- "aws-sdk-pricing",
- "aws-sdk-servicequotas",
- "aws-sdk-ssm",
- "chrono",
- "clap",
- "dotenvy",
- "indicatif",
- "inquire",
- "rand 0.9.0",
- "reqwest",
- "serde",
- "serde_json",
- "serde_yaml",
- "sqlx",
- "tabled",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "fastrand"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1444,6 +1414,36 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "589533453244b0995c858700322199b2becb13b627df2851f64a2775d024abcf"
 dependencies = [
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "hpcac-toolkit"
+version = "2.0.0"
+dependencies = [
+ "anyhow",
+ "aws-config",
+ "aws-credential-types",
+ "aws-sdk-ec2",
+ "aws-sdk-efs",
+ "aws-sdk-iam",
+ "aws-sdk-pricing",
+ "aws-sdk-servicequotas",
+ "aws-sdk-ssm",
+ "chrono",
+ "clap",
+ "dotenvy",
+ "indicatif",
+ "inquire",
+ "rand 0.9.0",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sqlx",
+ "tabled",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

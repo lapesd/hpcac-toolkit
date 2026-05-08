@@ -1,7 +1,6 @@
 use crate::integrations::providers::aws::{AwsInterface, interface::AwsClusterContext};
 
-use anyhow::{Result, bail};
-use tracing::{error, info, warn};
+use anyhow::Result;
 
 impl AwsInterface {
     pub async fn ensure_route_table(&self, context: &AwsClusterContext) -> Result<String> {
@@ -18,21 +17,22 @@ impl AwsInterface {
         {
             Ok(response) => response,
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failure describing Route Table resources");
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failure describing Route Table resources: {}", e);
             }
         };
 
         let route_tables = describe_route_tables_response.route_tables();
         if let Some(route_table) = route_tables.first() {
             if let Some(route_table_id) = route_table.route_table_id() {
-                info!("Found existing Route Table: '{}'", route_table_id);
+                tracing::info!("Found existing Route Table: '{}'", route_table_id);
 
                 if let Some(vpc_id) = route_table.vpc_id() {
                     if vpc_id == context_vpc_id {
-                        info!(
+                        tracing::info!(
                             "Route Table '{}' is in the correct VPC '{}'",
-                            route_table_id, vpc_id
+                            route_table_id,
+                            vpc_id
                         );
 
                         let mut subnet_associated = false;
@@ -40,9 +40,10 @@ impl AwsInterface {
                             if let Some(assoc_subnet_id) = association.subnet_id() {
                                 if assoc_subnet_id == context_subnet_id {
                                     subnet_associated = true;
-                                    info!(
+                                    tracing::info!(
                                         "Route Table '{}' already is associated with Subnet '{}'",
-                                        route_table_id, assoc_subnet_id
+                                        route_table_id,
+                                        assoc_subnet_id
                                     );
                                     break;
                                 }
@@ -50,9 +51,10 @@ impl AwsInterface {
                         }
 
                         if !subnet_associated {
-                            info!(
+                            tracing::info!(
                                 "Associating Route Table '{}' with Subnet '{}'...",
-                                route_table_id, context_subnet_id
+                                route_table_id,
+                                context_subnet_id
                             );
                             match context
                                 .ec2_client
@@ -63,17 +65,19 @@ impl AwsInterface {
                                 .await
                             {
                                 Ok(_) => {
-                                    info!(
+                                    tracing::info!(
                                         "Successfully associated Route Table '{}' with Subnet '{}'",
-                                        route_table_id, context_subnet_id
+                                        route_table_id,
+                                        context_subnet_id
                                     );
                                 }
                                 Err(e) => {
-                                    error!("{:?}", e);
-                                    bail!(
-                                        "Failure associating Route Table '{}' with Subnet '{}'",
+                                    tracing::error!("{:?}", e);
+                                    anyhow::bail!(
+                                        "Failure associating Route Table '{}' with Subnet '{}': {}",
                                         route_table_id,
-                                        context_subnet_id
+                                        context_subnet_id,
+                                        e
                                     );
                                 }
                             }
@@ -86,9 +90,10 @@ impl AwsInterface {
                                     if let Some(gateway_id) = route.gateway_id() {
                                         if gateway_id == context_gateway_id {
                                             default_route_exists = true;
-                                            info!(
+                                            tracing::info!(
                                                 "Default route via Internet Gateway '{}' already exists in Route Table '{}'",
-                                                context_gateway_id, route_table_id
+                                                context_gateway_id,
+                                                route_table_id
                                             );
                                             break;
                                         }
@@ -98,9 +103,10 @@ impl AwsInterface {
                         }
 
                         if !default_route_exists {
-                            info!(
+                            tracing::info!(
                                 "Creating route via Internet Gateway '{}' in Route Table '{}'...",
-                                context_gateway_id, route_table_id
+                                context_gateway_id,
+                                route_table_id
                             );
                             match context
                                 .ec2_client
@@ -112,17 +118,19 @@ impl AwsInterface {
                                 .await
                             {
                                 Ok(_) => {
-                                    info!(
+                                    tracing::info!(
                                         "Successfully created route via Internet Gateway '{}' in Route Table '{}'",
-                                        context_gateway_id, route_table_id
+                                        context_gateway_id,
+                                        route_table_id
                                     );
                                 }
                                 Err(e) => {
-                                    error!("{:?}", e);
-                                    bail!(
-                                        "Failure creating route via Internet Gateway '{}' in Route Table '{}'",
+                                    tracing::error!("{:?}", e);
+                                    anyhow::bail!(
+                                        "Failure creating route via Internet Gateway '{}' in Route Table '{}': {}",
                                         context_gateway_id,
-                                        route_table_id
+                                        route_table_id,
+                                        e
                                     );
                                 }
                             }
@@ -130,17 +138,19 @@ impl AwsInterface {
 
                         return Ok(route_table_id.to_string());
                     } else {
-                        error!(
+                        tracing::error!(
                             "Route Table '{}' is in a different VPC '{}', expected '{}'",
-                            route_table_id, vpc_id, context_vpc_id
+                            route_table_id,
+                            vpc_id,
+                            context_vpc_id
                         );
-                        bail!("Route Table is in wrong VPC");
+                        anyhow::bail!("Route Table is in wrong VPC");
                     }
                 }
             }
         }
 
-        info!("No existing Route Table found, creating a new one...");
+        tracing::info!("No existing Route Table found, creating a new one...");
 
         let create_route_table_response = match context
             .ec2_client
@@ -163,8 +173,8 @@ impl AwsInterface {
         {
             Ok(response) => response,
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failure creating Route Table resource");
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failure creating Route Table resource: {}", e);
             }
         };
 
@@ -172,10 +182,11 @@ impl AwsInterface {
             .route_table()
             .and_then(|rt| rt.route_table_id())
         {
-            info!("Created new Route Table '{}'", route_table_id);
-            info!(
+            tracing::info!("Created new Route Table '{}'", route_table_id);
+            tracing::info!(
                 "Associating Route Table '{}' with Subnet '{}'...",
-                route_table_id, context_subnet_id
+                route_table_id,
+                context_subnet_id
             );
             match context
                 .ec2_client
@@ -186,24 +197,27 @@ impl AwsInterface {
                 .await
             {
                 Ok(_) => {
-                    info!(
+                    tracing::info!(
                         "Successfully associated Route Table '{}' with Subnet '{}'",
-                        route_table_id, context_subnet_id
-                    );
-                }
-                Err(e) => {
-                    error!("{:?}", e);
-                    bail!(
-                        "Failure associating Route Table '{}' with Subnet '{}'",
                         route_table_id,
                         context_subnet_id
                     );
                 }
+                Err(e) => {
+                    tracing::error!("{:?}", e);
+                    anyhow::bail!(
+                        "Failure associating Route Table '{}' with Subnet '{}': {}",
+                        route_table_id,
+                        context_subnet_id,
+                        e
+                    );
+                }
             }
 
-            info!(
+            tracing::info!(
                 "Creating route via Internet Gateway '{}' in Route Table '{}'...",
-                context_gateway_id, route_table_id,
+                context_gateway_id,
+                route_table_id,
             );
             match context
                 .ec2_client
@@ -215,17 +229,19 @@ impl AwsInterface {
                 .await
             {
                 Ok(_) => {
-                    info!(
+                    tracing::info!(
                         "Successfully created route via Internet Gateway '{}' in Route Table '{}'",
-                        context_gateway_id, route_table_id
+                        context_gateway_id,
+                        route_table_id
                     );
                 }
                 Err(e) => {
-                    error!("{:?}", e);
-                    bail!(
-                        "Failure creating route via Internet Gateway '{}' in Route Table '{}'",
+                    tracing::error!("{:?}", e);
+                    anyhow::bail!(
+                        "Failure creating route via Internet Gateway '{}' in Route Table '{}': {}",
                         context_gateway_id,
-                        route_table_id
+                        route_table_id,
+                        e
                     );
                 }
             }
@@ -233,8 +249,8 @@ impl AwsInterface {
             return Ok(route_table_id.to_string());
         }
 
-        warn!("{:?}", create_route_table_response);
-        bail!("Failure finding the id of the created Route Table resource");
+        tracing::warn!("{:?}", create_route_table_response);
+        anyhow::bail!("Failure finding the id of the created Route Table resource");
     }
 
     pub async fn cleanup_route_table(&self, context: &AwsClusterContext) -> Result<()> {
@@ -247,15 +263,15 @@ impl AwsInterface {
         {
             Ok(response) => response,
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failure describing Route Table resources");
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failure describing Route Table resources: {}", e);
             }
         };
 
         let route_tables = describe_route_tables_response.route_tables();
         if let Some(route_table) = route_tables.first() {
             if let Some(route_table_id) = route_table.route_table_id() {
-                info!(
+                tracing::info!(
                     "Found existing Route Table to cleanup: '{}'",
                     route_table_id
                 );
@@ -266,7 +282,7 @@ impl AwsInterface {
                     }
 
                     if let Some(association_id) = association.route_table_association_id() {
-                        info!("Deleting Route Table association '{}'...", association_id);
+                        tracing::info!("Deleting Route Table association '{}'...", association_id);
                         match context
                             .ec2_client
                             .disassociate_route_table()
@@ -275,20 +291,20 @@ impl AwsInterface {
                             .await
                         {
                             Ok(_) => {
-                                info!(
+                                tracing::info!(
                                     "Successfully disassociated Route Table association '{}'",
                                     association_id
                                 );
                             }
                             Err(e) => {
-                                error!("{:?}", e);
-                                bail!("Failure disassociating Route Table");
+                                tracing::error!("{:?}", e);
+                                anyhow::bail!("Failure disassociating Route Table: {}", e);
                             }
                         }
                     }
                 }
 
-                info!("Deleting Route Table '{}'...", route_table_id);
+                tracing::info!("Deleting Route Table '{}'...", route_table_id);
                 match context
                     .ec2_client
                     .delete_route_table()
@@ -297,18 +313,18 @@ impl AwsInterface {
                     .await
                 {
                     Ok(_) => {
-                        info!("Route Table '{}' deleted successfully", route_table_id);
+                        tracing::info!("Route Table '{}' deleted successfully", route_table_id);
                         return Ok(());
                     }
                     Err(e) => {
-                        error!("{:?}", e);
-                        bail!("Failure deleting Route Table resource");
+                        tracing::error!("{:?}", e);
+                        anyhow::bail!("Failure deleting Route Table resource: {}", e);
                     }
                 }
             }
         }
 
-        info!("No existing Route Table found to cleanup");
+        tracing::info!("No existing Route Table found to cleanup");
         Ok(())
     }
 }

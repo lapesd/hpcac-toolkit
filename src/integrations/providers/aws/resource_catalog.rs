@@ -2,9 +2,8 @@ use crate::database::models::{InstanceType, MachineImage};
 use crate::integrations::CloudInfoProvider;
 use crate::utils::ProgressTracker;
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use std::collections::HashMap;
-use tracing::{error, warn};
 
 use super::interface::AwsInterface;
 
@@ -12,7 +11,7 @@ impl CloudInfoProvider for AwsInterface {
     async fn fetch_regions(&self, _tracker: &ProgressTracker) -> Result<Vec<String>> {
         // Use a default region (here "us-east-1") to create the client,
         // as the describe_regions API call is global.
-        let client = self.get_ec2_client("us-east-1")?;
+        let client = self.get_ec2_client("us-east-1").await?;
 
         match client.describe_regions().send().await {
             Ok(response) => {
@@ -26,8 +25,8 @@ impl CloudInfoProvider for AwsInterface {
                 Ok(regions)
             }
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failed to fetch AWS regions")
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failed to fetch AWS regions")
             }
         }
     }
@@ -37,7 +36,7 @@ impl CloudInfoProvider for AwsInterface {
         region: &str,
         _tracker: &ProgressTracker,
     ) -> Result<Vec<String>, anyhow::Error> {
-        let client = self.get_ec2_client(region)?;
+        let client = self.get_ec2_client(region).await?;
         match client.describe_availability_zones().send().await {
             Ok(resp) => {
                 let zones: Vec<String> = resp
@@ -50,8 +49,8 @@ impl CloudInfoProvider for AwsInterface {
                 Ok(zones)
             }
             Err(e) => {
-                error!("{:?}", e);
-                bail!(
+                tracing::error!("{:?}", e);
+                anyhow::bail!(
                     "Failed to fetch AWS availability zones for region '{}'",
                     region
                 )
@@ -64,7 +63,7 @@ impl CloudInfoProvider for AwsInterface {
         region: &str,
         tracker: &ProgressTracker,
     ) -> Result<Vec<InstanceType>> {
-        let ec2_client = self.get_ec2_client(region)?;
+        let ec2_client = self.get_ec2_client(region).await?;
         let mut instance_types: Vec<InstanceType> = vec![];
         let mut next_token: Option<String> = None;
         let base_request = ec2_client.describe_instance_types();
@@ -78,8 +77,8 @@ impl CloudInfoProvider for AwsInterface {
             let response = match request.send().await {
                 Ok(response) => response,
                 Err(e) => {
-                    error!("{:?}", e);
-                    bail!("Failed to fetch AWS instance types for region '{}'", region)
+                    tracing::error!("{:?}", e);
+                    anyhow::bail!("Failed to fetch AWS instance types for region '{}'", region)
                 }
             };
 
@@ -94,7 +93,10 @@ impl CloudInfoProvider for AwsInterface {
                         Some(info) => {
                             let vcpus: i64 = info.default_v_cpus.unwrap_or(0).into();
                             if vcpus == 0 {
-                                warn!("Skipping instance '{}': missing vCPU information", name);
+                                tracing::warn!(
+                                    "Skipping instance '{}': missing vCPU information",
+                                    name
+                                );
                                 continue;
                             }
 
@@ -105,7 +107,10 @@ impl CloudInfoProvider for AwsInterface {
                             )
                         }
                         None => {
-                            warn!("Skipping instance '{}': missing vCPU information", name);
+                            tracing::warn!(
+                                "Skipping instance '{}': missing vCPU information",
+                                name
+                            );
                             continue;
                         }
                     };
@@ -177,13 +182,19 @@ impl CloudInfoProvider for AwsInterface {
                         Some(info) => {
                             let memory: i64 = info.size_in_mib.unwrap_or(0);
                             if memory == 0 {
-                                warn!("Skipping instance '{}': missing memory information", name);
+                                tracing::warn!(
+                                    "Skipping instance '{}': missing memory information",
+                                    name
+                                );
                                 continue;
                             }
                             memory
                         }
                         None => {
-                            warn!("Skipping instance '{}': missing memory information", name);
+                            tracing::warn!(
+                                "Skipping instance '{}': missing memory information",
+                                name
+                            );
                             continue;
                         }
                     };
@@ -273,7 +284,7 @@ impl CloudInfoProvider for AwsInterface {
         instance_type_names: &[String],
         tracker: &ProgressTracker,
     ) -> Result<HashMap<String, f64>> {
-        let client = self.get_pricing_client()?;
+        let client = self.get_pricing_client().await?;
 
         let mut price_map: HashMap<String, f64> = HashMap::new();
         let base_filters = vec![
@@ -466,12 +477,12 @@ impl CloudInfoProvider for AwsInterface {
     }
 
     async fn fetch_machine_image(&self, region: &str, image_id: &str) -> Result<MachineImage> {
-        let client = self.get_ec2_client(region)?;
+        let client = self.get_ec2_client(region).await?;
         let response = match client.describe_images().image_ids(image_id).send().await {
             Ok(response) => response,
             Err(e) => {
-                error!("{:?}", e);
-                bail!(
+                tracing::error!("{:?}", e);
+                anyhow::bail!(
                     "Failed to fetch image '{}' in region '{}'",
                     image_id,
                     region
@@ -484,7 +495,7 @@ impl CloudInfoProvider for AwsInterface {
         let aws_image = match images.first() {
             Some(image) => image,
             None => {
-                bail!(
+                anyhow::bail!(
                     "Image '{}' not found in region '{}'. The image may not exist, may not be accessible, or may be in a different region.",
                     image_id,
                     region

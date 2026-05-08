@@ -1,9 +1,8 @@
 use crate::database::models::ShellCommand;
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use sqlx::{Transaction, sqlite::SqlitePool};
-use tracing::error;
 
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Node {
@@ -49,8 +48,8 @@ impl Node {
         {
             Ok(_) => {}
             Err(e) => {
-                error!("SQLx Error: {}", e.to_string());
-                bail!("DB Operation Failure");
+                tracing::error!("SQLx Error: {}", e.to_string());
+                anyhow::bail!("DB Operation Failure: {}", e);
             }
         };
 
@@ -90,13 +89,11 @@ impl Node {
         {
             Ok(result) => {
                 if result.rows_affected() == 0 {
-                    error!("No node found with id '{}'", self.id);
-                    bail!("DB Operation Failure");
+                    anyhow::bail!("Node '{}' not found for EFS configuration update", self.id);
                 }
             }
             Err(e) => {
-                error!("SQLx Error: {:?}", e);
-                bail!("DB Operation Failure");
+                anyhow::bail!("DB Operation Failure: {}", e);
             }
         }
 
@@ -124,13 +121,11 @@ impl Node {
         {
             Ok(result) => {
                 if result.rows_affected() == 0 {
-                    error!("No node found with id '{}'", self.id);
-                    bail!("DB Operation Failure");
+                    anyhow::bail!("Node '{}' not found for IP update", self.id);
                 }
             }
             Err(e) => {
-                error!("SQLx Error: {:?}", e);
-                bail!("DB Operation Failure");
+                anyhow::bail!("DB Operation Failure: {}", e);
             }
         }
         Ok(())
@@ -161,8 +156,8 @@ impl Node {
         {
             Ok(node) => Ok(node),
             Err(e) => {
-                error!("SQLx Error: {:?}", e);
-                bail!("DB Operation Failure");
+                tracing::error!("SQLx Error: {:?}", e);
+                anyhow::bail!("DB Operation Failure: {}", e);
             }
         }
     }

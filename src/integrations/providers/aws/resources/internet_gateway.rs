@@ -1,7 +1,6 @@
 use crate::integrations::providers::aws::{AwsInterface, interface::AwsClusterContext};
 
-use anyhow::{Result, bail};
-use tracing::{error, info, warn};
+use anyhow::Result;
 
 impl AwsInterface {
     pub async fn ensure_internet_gateway(&self, context: &AwsClusterContext) -> Result<String> {
@@ -15,37 +14,41 @@ impl AwsInterface {
         {
             Ok(response) => response,
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failure describing Internet Gateway resources");
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failure describing Internet Gateway resources: {}", e);
             }
         };
 
         let gateways = describe_internet_gateways_response.internet_gateways();
         if let Some(gateway) = gateways.first() {
             if let Some(gateway_id) = gateway.internet_gateway_id() {
-                info!("Found existing Internet Gateway: '{}'", gateway_id);
+                tracing::info!("Found existing Internet Gateway: '{}'", gateway_id);
 
                 if let Some(attachment) = gateway.attachments().first() {
                     if let Some(attached_vpc_id) = attachment.vpc_id() {
                         if attached_vpc_id == context_vpc_id {
-                            info!(
+                            tracing::info!(
                                 "Internet Gateway '{}' is already attached to VPC '{}'",
-                                gateway_id, attached_vpc_id
+                                gateway_id,
+                                attached_vpc_id
                             );
                             return Ok(gateway_id.to_string());
                         } else {
-                            error!(
+                            tracing::error!(
                                 "Internet Gateway '{}' is attached to a different VPC '{}', expected '{}'",
-                                gateway_id, attached_vpc_id, context_vpc_id
+                                gateway_id,
+                                attached_vpc_id,
+                                context_vpc_id
                             );
-                            bail!("Failure attaching Internet Gateway to context VPC")
+                            anyhow::bail!("Failure attaching Internet Gateway to context VPC")
                         }
                     }
                 }
 
-                info!(
+                tracing::info!(
                     "Attaching existing Internet Gateway '{}' to VPC '{}'...",
-                    gateway_id, context_vpc_id
+                    gateway_id,
+                    context_vpc_id
                 );
                 match context
                     .ec2_client
@@ -56,21 +59,22 @@ impl AwsInterface {
                     .await
                 {
                     Ok(_) => {
-                        info!(
+                        tracing::info!(
                             "Successfully attached Internet Gateway '{}' to VPC '{}'",
-                            gateway_id, context_vpc_id
+                            gateway_id,
+                            context_vpc_id
                         );
                         return Ok(gateway_id.to_string());
                     }
                     Err(e) => {
-                        error!("{:?}", e);
-                        bail!("Failure attaching Internet Gateway to context VPC")
+                        tracing::error!("{:?}", e);
+                        anyhow::bail!("Failure attaching Internet Gateway to context VPC: {}", e)
                     }
                 }
             }
         }
 
-        info!("No existing Internet Gateway found, creating a new one...");
+        tracing::info!("No existing Internet Gateway found, creating a new one...");
 
         let create_internet_gateway_response = match context
             .ec2_client
@@ -92,8 +96,8 @@ impl AwsInterface {
         {
             Ok(response) => response,
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failure creating Internet Gateway resource");
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failure creating Internet Gateway resource: {}", e);
             }
         };
 
@@ -101,10 +105,11 @@ impl AwsInterface {
             .internet_gateway()
             .and_then(|gateway| gateway.internet_gateway_id())
         {
-            info!("Created new Internet Gateway '{}'", gateway_id);
-            info!(
+            tracing::info!("Created new Internet Gateway '{}'", gateway_id);
+            tracing::info!(
                 "Attaching existing Internet Gateway '{}' to VPC '{}'...",
-                gateway_id, context_vpc_id
+                gateway_id,
+                context_vpc_id
             );
             match context
                 .ec2_client
@@ -115,20 +120,21 @@ impl AwsInterface {
                 .await
             {
                 Ok(_) => {
-                    info!(
+                    tracing::info!(
                         "Successfully attached Internet Gateway '{}' to VPC '{}'",
-                        gateway_id, context_vpc_id
+                        gateway_id,
+                        context_vpc_id
                     );
                     Ok(gateway_id.to_string())
                 }
                 Err(e) => {
-                    error!("{:?}", e);
-                    bail!("Failure attaching Internet Gateway to context VPC")
+                    tracing::error!("{:?}", e);
+                    anyhow::bail!("Failure attaching Internet Gateway to context VPC: {}", e)
                 }
             }
         } else {
-            warn!("{:?}", create_internet_gateway_response);
-            bail!("Failure finding the id of the created Internet Gateway resource");
+            tracing::warn!("{:?}", create_internet_gateway_response);
+            anyhow::bail!("Failure finding the id of the created Internet Gateway resource");
         }
     }
 
@@ -142,24 +148,25 @@ impl AwsInterface {
         {
             Ok(response) => response,
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failure describing Internet Gateway resources");
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failure describing Internet Gateway resources: {}", e);
             }
         };
 
         let gateways = describe_gateways_response.internet_gateways();
         if let Some(gateway) = gateways.first() {
             if let Some(gateway_id) = gateway.internet_gateway_id() {
-                info!(
+                tracing::info!(
                     "Found existing Internet Gateway to cleanup: '{}'",
                     gateway_id
                 );
 
                 if let Some(attachment) = gateway.attachments().first() {
                     if let Some(attached_vpc_id) = attachment.vpc_id() {
-                        info!(
+                        tracing::info!(
                             "Detaching Internet Gateway '{}' from VPC '{}'...",
-                            gateway_id, attached_vpc_id
+                            gateway_id,
+                            attached_vpc_id
                         );
                         match context
                             .ec2_client
@@ -170,20 +177,21 @@ impl AwsInterface {
                             .await
                         {
                             Ok(_) => {
-                                info!(
+                                tracing::info!(
                                     "Successfully detached Internet Gateway '{}' from VPC '{}'",
-                                    gateway_id, attached_vpc_id
+                                    gateway_id,
+                                    attached_vpc_id
                                 );
                             }
                             Err(e) => {
-                                error!("{:?}", e);
-                                bail!("Failure detaching Internet Gateway from VPC");
+                                tracing::error!("{:?}", e);
+                                anyhow::bail!("Failure detaching Internet Gateway from VPC: {}", e);
                             }
                         }
                     }
                 }
 
-                info!("Deleting Internet Gateway '{}'...", gateway_id);
+                tracing::info!("Deleting Internet Gateway '{}'...", gateway_id);
                 match context
                     .ec2_client
                     .delete_internet_gateway()
@@ -192,18 +200,18 @@ impl AwsInterface {
                     .await
                 {
                     Ok(_) => {
-                        info!("Internet Gateway '{}' deleted successfully", gateway_id);
+                        tracing::info!("Internet Gateway '{}' deleted successfully", gateway_id);
                         return Ok(());
                     }
                     Err(e) => {
-                        error!("{:?}", e);
-                        bail!("Failure deleting Internet Gateway resource");
+                        tracing::error!("{:?}", e);
+                        anyhow::bail!("Failure deleting Internet Gateway resource: {}", e);
                     }
                 }
             }
         }
 
-        info!("No existing Internet Gateway found");
+        tracing::info!("No existing Internet Gateway found");
         Ok(())
     }
 }

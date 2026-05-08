@@ -1,9 +1,8 @@
 use crate::database::models::Node;
 use crate::integrations::providers::aws::{AwsInterface, interface::AwsClusterContext};
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use tokio::time::{Duration, sleep};
-use tracing::{error, info, warn};
 
 impl AwsInterface {
     pub async fn request_elastic_compute_instance_creation(
@@ -27,8 +26,8 @@ impl AwsInterface {
         {
             Ok(response) => response,
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failure describing EC2 instance resources");
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failure describing EC2 instance resources: {}", e);
             }
         };
 
@@ -40,26 +39,29 @@ impl AwsInterface {
                             match state_name {
                                 aws_sdk_ec2::types::InstanceStateName::Running
                                 | aws_sdk_ec2::types::InstanceStateName::Pending => {
-                                    info!(
+                                    tracing::info!(
                                         "Found existing EC2 Instance '{}' in state {:?}, skipping creation",
-                                        instance_id, state_name
+                                        instance_id,
+                                        state_name
                                     );
                                     return Ok(instance_id.to_string());
                                 }
                                 aws_sdk_ec2::types::InstanceStateName::Terminated
                                 | aws_sdk_ec2::types::InstanceStateName::ShuttingDown => {
-                                    info!(
+                                    tracing::info!(
                                         "Found existing EC2 Instance '{}' in state {:?}, will create new EC2 Instance",
-                                        instance_id, state_name
+                                        instance_id,
+                                        state_name
                                     );
                                     // Continue to create new instance
                                 }
                                 _ => {
-                                    warn!(
+                                    tracing::warn!(
                                         "Found existing EC2 Instance '{}' in unexpected state {:?}",
-                                        instance_id, state_name
+                                        instance_id,
+                                        state_name
                                     );
-                                    bail!(
+                                    anyhow::bail!(
                                         "Found existing EC2 Instance '{}' in unexpected state '{:?}'. Please check the AWS web panel.",
                                         instance_id,
                                         state_name
@@ -69,13 +71,13 @@ impl AwsInterface {
                         }
                     }
                 } else {
-                    info!(
+                    tracing::info!(
                         "EC2 Instance '{}' not found, requesting a new one...",
                         instance_name
                     );
                 }
             } else {
-                info!(
+                tracing::info!(
                     "EC2 Instance '{}' not found, requesting a new one...",
                     instance_name
                 );
@@ -85,11 +87,11 @@ impl AwsInterface {
         let eni_id = match context.elastic_network_interface_ids.get(&node_index) {
             Some(id) => id,
             None => {
-                warn!(
+                tracing::warn!(
                     "Elastic Network Interface ids: {:?}",
                     context.elastic_network_interface_ids
                 );
-                bail!(
+                anyhow::bail!(
                     "Missing expected Elastic Network Interface for Node '{}'",
                     node_index
                 );
@@ -165,23 +167,24 @@ impl AwsInterface {
         let run_instances_response = match run_instances_request.send().await {
             Ok(response) => response,
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failure creating EC2 Instance resource");
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failure creating EC2 Instance resource: {}", e);
             }
         };
 
         if let Some(instance) = run_instances_response.instances().first() {
             if let Some(instance_id) = instance.instance_id() {
-                info!(
+                tracing::info!(
                     "Requested new instance '{}' with ID '{}' and 30GB root volume",
-                    instance_name, instance_id
+                    instance_name,
+                    instance_id
                 );
                 return Ok(instance_id.to_string());
             }
         }
 
-        warn!("{:?}", run_instances_response);
-        bail!("Failure finding the id of the requested EC2 Instance");
+        tracing::warn!("{:?}", run_instances_response);
+        anyhow::bail!("Failure finding the id of the requested EC2 Instance");
     }
 
     pub async fn wait_for_all_elastic_compute_instances_to_be_available(
@@ -190,7 +193,7 @@ impl AwsInterface {
     ) -> Result<()> {
         let instance_ids: Vec<String> = context.ec2_instance_ids.values().cloned().collect();
         if instance_ids.is_empty() {
-            info!("No EC2 instances to wait for");
+            tracing::info!("No EC2 instances to wait for");
             return Ok(());
         }
         let max_wait_time = Duration::from_secs(600);
@@ -199,11 +202,11 @@ impl AwsInterface {
 
         loop {
             if start_time.elapsed() >= max_wait_time {
-                warn!(
+                tracing::warn!(
                     "Timeout waiting for EC2 Instances to reach Running state after {} seconds",
                     max_wait_time.as_secs()
                 );
-                bail!("Timeout waiting for EC2 Instances to reach Running state");
+                anyhow::bail!("Timeout waiting for EC2 Instances to reach Running state");
             }
 
             let mut describe_request = context.ec2_client.describe_instances();
@@ -214,8 +217,11 @@ impl AwsInterface {
             let describe_response = match describe_request.send().await {
                 Ok(response) => response,
                 Err(e) => {
-                    error!("{:?}", e);
-                    bail!("Failure checking EC2 Instance states during status wait");
+                    tracing::error!("{:?}", e);
+                    anyhow::bail!(
+                        "Failure checking EC2 Instance states during status wait: {}",
+                        e
+                    );
                 }
             };
 
@@ -238,7 +244,7 @@ impl AwsInterface {
                                                 instance_running = true;
                                             }
                                             aws_sdk_ec2::types::InstanceStateName::Pending => {
-                                                info!(
+                                                tracing::info!(
                                                     "Instance '{}' is still pending startup...",
                                                     instance_id
                                                 );
@@ -247,19 +253,21 @@ impl AwsInterface {
                                             aws_sdk_ec2::types::InstanceStateName::Terminated
                                             | aws_sdk_ec2::types::InstanceStateName::ShuttingDown =>
                                             {
-                                                error!(
+                                                tracing::error!(
                                                     "Instance '{}' unexpectedly terminated during startup (state: {:?})",
-                                                    instance_id, state_name
+                                                    instance_id,
+                                                    state_name
                                                 );
-                                                bail!(
+                                                anyhow::bail!(
                                                     "Instance '{}' terminated unexpectedly during startup",
                                                     instance_id
                                                 );
                                             }
                                             _ => {
-                                                info!(
+                                                tracing::info!(
                                                     "Instance '{}' is in state: {:?}, waiting for Running",
-                                                    instance_id, state_name
+                                                    instance_id,
+                                                    state_name
                                                 );
                                                 pending_instances.push(instance_id.clone());
                                             }
@@ -273,7 +281,7 @@ impl AwsInterface {
                 }
 
                 if !found_instance {
-                    bail!("Instance '{}' not found during status check", instance_id);
+                    anyhow::bail!("Instance '{}' not found during status check", instance_id);
                 }
 
                 if !instance_running {
@@ -282,7 +290,7 @@ impl AwsInterface {
             }
 
             if all_running {
-                info!(
+                tracing::info!(
                     "All {} instance(s) are now ready and running!",
                     context.ec2_instance_ids.len()
                 );
@@ -290,7 +298,7 @@ impl AwsInterface {
             }
 
             if !pending_instances.is_empty() {
-                info!(
+                tracing::info!(
                     "Still waiting for {} instance(s) to reach Running state: {:?}",
                     pending_instances.len(),
                     pending_instances
@@ -316,8 +324,8 @@ impl AwsInterface {
         {
             Ok(response) => response,
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failure describing EC2 Instance resources");
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failure describing EC2 Instance resources: {}", e);
             }
         };
 
@@ -332,23 +340,25 @@ impl AwsInterface {
                                 | aws_sdk_ec2::types::InstanceStateName::Pending
                                 | aws_sdk_ec2::types::InstanceStateName::Stopped
                                 | aws_sdk_ec2::types::InstanceStateName::Stopping => {
-                                    info!(
+                                    tracing::info!(
                                         "Found cluster instance to terminate: '{}' (state: {:?})",
-                                        instance_id, state_name
+                                        instance_id,
+                                        state_name
                                     );
                                     instances_to_terminate.push(instance_id.to_string());
                                 }
                                 aws_sdk_ec2::types::InstanceStateName::Terminated
                                 | aws_sdk_ec2::types::InstanceStateName::ShuttingDown => {
-                                    info!(
+                                    tracing::info!(
                                         "Instance '{}' is already terminated/terminating",
                                         instance_id
                                     );
                                 }
                                 _ => {
-                                    warn!(
+                                    tracing::warn!(
                                         "Instance '{}' is in unexpected state: {:?}",
-                                        instance_id, state_name
+                                        instance_id,
+                                        state_name
                                     );
                                 }
                             }
@@ -359,14 +369,14 @@ impl AwsInterface {
         }
 
         if instances_to_terminate.is_empty() {
-            info!(
+            tracing::info!(
                 "No EC2 instances found for cluster '{}'",
                 context.cluster_id
             );
             return Ok(());
         }
 
-        info!(
+        tracing::info!(
             "Requesting termination for {} EC2 instance(s) in cluster '{}'...",
             instances_to_terminate.len(),
             context.cluster_id
@@ -380,15 +390,15 @@ impl AwsInterface {
             .await
         {
             Ok(_) => {
-                info!(
+                tracing::info!(
                     "Successfully initiated termination of {} EC2 instance(s): {:?}",
                     instances_to_terminate.len(),
                     instances_to_terminate
                 );
             }
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failure terminating EC2 Instance resources");
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failure terminating EC2 Instance resources: {}", e);
             }
         }
 
@@ -399,7 +409,7 @@ impl AwsInterface {
         &self,
         context: &AwsClusterContext,
     ) -> Result<()> {
-        info!("Ensuring all cluster EC2 instances are terminated...");
+        tracing::info!("Ensuring all cluster EC2 instances are terminated...");
 
         let max_wait_time = Duration::from_secs(900);
         let poll_interval = Duration::from_secs(10);
@@ -407,12 +417,12 @@ impl AwsInterface {
 
         loop {
             if start_time.elapsed() >= max_wait_time {
-                warn!(
+                tracing::warn!(
                     "Timeout waiting for cluster '{}' EC2 instances to reach Terminated state after {} seconds",
                     context.cluster_id,
                     max_wait_time.as_secs()
                 );
-                bail!("Timeout waiting for EC2 instances to reach Terminated state");
+                anyhow::bail!("Timeout waiting for EC2 instances to reach Terminated state");
             }
 
             let describe_instances_response = match context
@@ -424,8 +434,11 @@ impl AwsInterface {
             {
                 Ok(response) => response,
                 Err(e) => {
-                    error!("{:?}", e);
-                    bail!("Failure describing EC2 instances during termination wait");
+                    tracing::error!("{:?}", e);
+                    anyhow::bail!(
+                        "Failure describing EC2 instances during termination wait: {}",
+                        e
+                    );
                 }
             };
 
@@ -445,7 +458,10 @@ impl AwsInterface {
                                         // Instance is terminated, nothing to do
                                     }
                                     aws_sdk_ec2::types::InstanceStateName::ShuttingDown => {
-                                        info!("EC2 instance '{}' is shutting down...", instance_id);
+                                        tracing::info!(
+                                            "EC2 instance '{}' is shutting down...",
+                                            instance_id
+                                        );
                                         pending_instances.push(instance_id.to_string());
                                         all_terminated = false;
                                     }
@@ -453,17 +469,19 @@ impl AwsInterface {
                                     | aws_sdk_ec2::types::InstanceStateName::Pending
                                     | aws_sdk_ec2::types::InstanceStateName::Stopped
                                     | aws_sdk_ec2::types::InstanceStateName::Stopping => {
-                                        warn!(
+                                        tracing::warn!(
                                             "EC2 instance '{}' is still in state: {:?}, expected to be terminating",
-                                            instance_id, state_name
+                                            instance_id,
+                                            state_name
                                         );
                                         pending_instances.push(instance_id.to_string());
                                         all_terminated = false;
                                     }
                                     _ => {
-                                        info!(
+                                        tracing::info!(
                                             "EC2 instance '{}' is in state: {:?}, waiting for Terminated",
-                                            instance_id, state_name
+                                            instance_id,
+                                            state_name
                                         );
                                         pending_instances.push(instance_id.to_string());
                                         all_terminated = false;
@@ -476,7 +494,7 @@ impl AwsInterface {
             }
 
             if total_instances == 0 {
-                info!(
+                tracing::info!(
                     "No EC2 instances found for cluster '{}'",
                     context.cluster_id
                 );
@@ -484,15 +502,16 @@ impl AwsInterface {
             }
 
             if all_terminated {
-                info!(
+                tracing::info!(
                     "All {} EC2 instance(s) for cluster '{}' are now terminated!",
-                    total_instances, context.cluster_id
+                    total_instances,
+                    context.cluster_id
                 );
                 break;
             }
 
             if !pending_instances.is_empty() {
-                info!(
+                tracing::info!(
                     "Still waiting for {} instance(s) to reach Terminated state: {:?}",
                     pending_instances.len(),
                     pending_instances
@@ -510,7 +529,7 @@ impl AwsInterface {
         context: &AwsClusterContext,
         private_ip: &str,
     ) -> Result<Option<String>> {
-        info!("Looking for instance with private IP: {}", private_ip);
+        tracing::info!("Looking for instance with private IP: {}", private_ip);
 
         let describe_instances_response = match context
             .ec2_client
@@ -527,10 +546,11 @@ impl AwsInterface {
         {
             Ok(response) => response,
             Err(e) => {
-                error!("{:?}", e);
-                bail!(
-                    "Failure describing EC2 instances by private IP '{}'",
-                    private_ip
+                tracing::error!("{:?}", e);
+                anyhow::bail!(
+                    "Failure describing EC2 instances by private IP '{}': {}",
+                    private_ip,
+                    e
                 );
             }
         };
@@ -543,24 +563,29 @@ impl AwsInterface {
                             match state_name {
                                 aws_sdk_ec2::types::InstanceStateName::Running
                                 | aws_sdk_ec2::types::InstanceStateName::Pending => {
-                                    info!(
+                                    tracing::info!(
                                         "Found running instance '{}' with private IP '{}'",
-                                        instance_id, private_ip
+                                        instance_id,
+                                        private_ip
                                     );
                                     return Ok(Some(instance_id.to_string()));
                                 }
                                 aws_sdk_ec2::types::InstanceStateName::Terminated
                                 | aws_sdk_ec2::types::InstanceStateName::ShuttingDown => {
-                                    info!(
+                                    tracing::info!(
                                         "Found instance '{}' with private IP '{}' but it's already terminated/terminating (state: {:?})",
-                                        instance_id, private_ip, state_name
+                                        instance_id,
+                                        private_ip,
+                                        state_name
                                     );
                                     return Ok(None);
                                 }
                                 _ => {
-                                    warn!(
+                                    tracing::warn!(
                                         "Found instance '{}' with private IP '{}' in unexpected state: {:?}",
-                                        instance_id, private_ip, state_name
+                                        instance_id,
+                                        private_ip,
+                                        state_name
                                     );
                                 }
                             }
@@ -570,7 +595,7 @@ impl AwsInterface {
             }
         }
 
-        info!("No instance found with private IP '{}'", private_ip);
+        tracing::info!("No instance found with private IP '{}'", private_ip);
         Ok(None)
     }
 
@@ -579,7 +604,7 @@ impl AwsInterface {
         context: &AwsClusterContext,
         instance_id: &str,
     ) -> Result<()> {
-        info!("Requesting termination of instance '{}'", instance_id);
+        tracing::info!("Requesting termination of instance '{}'", instance_id);
 
         match context
             .ec2_client
@@ -594,9 +619,10 @@ impl AwsInterface {
                     if let Some(id) = terminating_instance.instance_id() {
                         if let Some(current_state) = terminating_instance.current_state() {
                             if let Some(state_name) = current_state.name() {
-                                info!(
+                                tracing::info!(
                                     "Instance '{}' termination initiated, current state: {:?}",
-                                    id, state_name
+                                    id,
+                                    state_name
                                 );
                             }
                         }
@@ -604,8 +630,8 @@ impl AwsInterface {
                 }
             }
             Err(e) => {
-                error!("{:?}", e);
-                bail!("Failure terminating instance '{}'", instance_id);
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failure terminating instance '{}': {}", instance_id, e);
             }
         }
 

@@ -2,7 +2,6 @@ use crate::constants::SQLITE_BATCH_SIZE;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use sqlx::{Arguments, FromRow, SqlitePool};
-use tracing::error;
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct InstanceType {
@@ -81,7 +80,7 @@ impl InstanceType {
         .fetch_optional(pool)
         .await
         .map_err(|e| {
-            error!("SQLx Error: {}", e.to_string());
+            tracing::error!("SQLx Error: {}", e.to_string());
             anyhow::anyhow!("DB Operation Failure")
         })
     }
@@ -180,7 +179,7 @@ impl InstanceType {
             .fetch_all(pool)
             .await
             .map_err(|e| {
-                error!("SQLx Error: {}", e.to_string());
+                tracing::error!("SQLx Error: {}", e.to_string());
                 anyhow::anyhow!("DB Operation Failure")
             })
     }
@@ -188,7 +187,7 @@ impl InstanceType {
     pub async fn upsert_many(pool: &SqlitePool, instances: Vec<InstanceType>) -> Result<()> {
         for chunk in instances.chunks(SQLITE_BATCH_SIZE) {
             let mut tx = pool.begin().await.map_err(|e| {
-                error!("SQLx Error: {}", e.to_string());
+                tracing::error!("SQLx Error: {}", e.to_string());
                 anyhow::anyhow!("DB Operation Failure")
             })?;
 
@@ -262,13 +261,13 @@ impl InstanceType {
                 .execute(&mut *tx)
                 .await
                 .map_err(|e| {
-                    error!("SQLx Error: {}", e.to_string());
+                    tracing::error!("SQLx Error: {}", e.to_string());
                     anyhow::anyhow!("DB Operation Failure")
                 })?;
             }
 
             tx.commit().await.map_err(|e| {
-                error!("SQLx Error: {}", e.to_string());
+                tracing::error!("SQLx Error: {}", e.to_string());
                 anyhow::anyhow!("DB Operation Failure")
             })?;
         }

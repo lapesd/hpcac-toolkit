@@ -1,7 +1,6 @@
 use crate::integrations::providers::aws::{AwsInterface, interface::AwsClusterContext};
 
-use anyhow::{Result, bail};
-use tracing::{error, info, warn};
+use anyhow::Result;
 
 impl AwsInterface {
     async fn _check_if_amazon_machine_image_is_available(
@@ -18,8 +17,8 @@ impl AwsInterface {
         {
             Ok(response) => response,
             Err(e) => {
-                error!("{:?}", e);
-                bail!(
+                tracing::error!("{:?}", e);
+                anyhow::bail!(
                     "Failed to describe Amazon Machine Image (AMI) (id='{}')",
                     image_id,
                 )
@@ -29,23 +28,23 @@ impl AwsInterface {
         let image = &describe_machine_image_response.images()[0];
         match image.state() {
             Some(aws_sdk_ec2::types::ImageState::Available) => {
-                info!(
+                tracing::info!(
                     "Amazon Machine Image (AMI) (id='{}') is available",
                     image_id
                 );
                 Ok(())
             }
             Some(state) => {
-                warn!("AMI state: {:?}", state);
-                bail!(
+                tracing::warn!("AMI state: {:?}", state);
+                anyhow::bail!(
                     "Amazon Machine Image (AMI) (id='{}') is not in an available state (current state: {:?})",
                     image_id,
                     state
                 );
             }
             None => {
-                warn!("{:?}", image);
-                bail!(
+                tracing::warn!("{:?}", image);
+                anyhow::bail!(
                     "Amazon Machine Image (AMI) (id='{}') has unknown state",
                     image_id
                 );

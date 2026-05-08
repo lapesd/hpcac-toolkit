@@ -1,13 +1,13 @@
-use anyhow::{Result, bail};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqlitePool;
-use tracing::error;
 
 #[derive(Deserialize, Serialize, Debug)]
 pub struct Provider {
     pub id: String,
     pub display_name: String,
     pub required_variables: String,
+    pub optional_variables: String,
     pub supports_spot: bool,
 }
 
@@ -20,15 +20,24 @@ impl Provider {
             .collect()
     }
 
+    pub fn get_optional_config_vars(&self) -> Vec<String> {
+        self.optional_variables
+            .split(',')
+            .map(|key| key.trim().to_owned())
+            .filter(|key| !key.is_empty())
+            .collect()
+    }
+
     pub async fn fetch_by_id(pool: &SqlitePool, id: String) -> Result<Option<Provider>> {
         let provider = match sqlx::query_as!(
             Provider,
             r#"
-                SELECT 
-                    id as "id!", 
+                SELECT
+                    id as "id!",
                     display_name,
                     required_variables,
-                    supports_spot 
+                    optional_variables,
+                    supports_spot
                 FROM providers
                 WHERE id = ?
             "#,
@@ -39,8 +48,8 @@ impl Provider {
         {
             Ok(result) => result,
             Err(e) => {
-                error!("SQLx Error: {}", e.to_string());
-                bail!("DB Operation Failure");
+                tracing::error!("SQLx Error: {}", e.to_string());
+                anyhow::bail!("DB Operation Failure: {}", e);
             }
         };
         Ok(provider)
@@ -50,11 +59,12 @@ impl Provider {
         let providers = match sqlx::query_as!(
             Provider,
             r#"
-                SELECT 
-                    id as "id!", 
+                SELECT
+                    id as "id!",
                     display_name,
                     required_variables,
-                    supports_spot 
+                    optional_variables,
+                    supports_spot
                 FROM providers
             "#
         )
@@ -63,8 +73,8 @@ impl Provider {
         {
             Ok(result) => result,
             Err(e) => {
-                error!("SQLx Error: {}", e.to_string());
-                bail!("DB Operation Failure");
+                tracing::error!("SQLx Error: {}", e.to_string());
+                anyhow::bail!("DB Operation Failure: {}", e);
             }
         };
         Ok(providers)
