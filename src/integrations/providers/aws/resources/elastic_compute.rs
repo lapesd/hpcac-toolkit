@@ -98,17 +98,21 @@ impl AwsInterface {
             }
         };
 
-        // TODO: Verify if this is the best configuration for our purposes
+        let volume_type = aws_sdk_ec2::types::VolumeType::from(node.root_volume_type.as_str());
+        let mut ebs_builder = aws_sdk_ec2::types::EbsBlockDevice::builder()
+            .volume_size(node.root_volume_gb as i32)
+            .volume_type(volume_type.clone())
+            .delete_on_termination(true)
+            .encrypted(false);
+        if volume_type == aws_sdk_ec2::types::VolumeType::Gp3 {
+            ebs_builder = ebs_builder.throughput(500);
+        }
+        if let Some(iops) = node.root_volume_iops {
+            ebs_builder = ebs_builder.iops(iops as i32);
+        }
         let block_device_mapping = aws_sdk_ec2::types::BlockDeviceMapping::builder()
             .device_name("/dev/xvda")
-            .ebs(
-                aws_sdk_ec2::types::EbsBlockDevice::builder()
-                    .volume_size(30)
-                    .volume_type(aws_sdk_ec2::types::VolumeType::Gp3)
-                    .delete_on_termination(true)
-                    .encrypted(false)
-                    .build(),
-            )
+            .ebs(ebs_builder.build())
             .build();
 
         let mut run_instances_request = context
@@ -170,7 +174,7 @@ impl AwsInterface {
         if let Some(instance) = run_instances_response.instances().first() {
             if let Some(instance_id) = instance.instance_id() {
                 tracing::info!(
-                    "Requested new instance '{}' with ID '{}' and 30GB root volume",
+                    "Requested new instance '{}' with ID '{}' and 100GB root volume",
                     instance_name,
                     instance_id
                 );

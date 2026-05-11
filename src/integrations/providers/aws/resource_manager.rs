@@ -137,7 +137,8 @@ impl CloudResourceManager for AwsInterface {
             main_progress.inc(1);
         }
 
-        // 13. Create ENI devices, Elastic IPs, and associate them
+        // 13. Create ENI devices; allocate Elastic IP only for node 0 (head node).
+        // Worker nodes are reachable via the head node and do not need a public IP.
         for (node_index, node) in nodes.iter().enumerate() {
             // 13.1. Create ENI device
             operation_spinner.update_message(&format!(
@@ -151,33 +152,36 @@ impl CloudResourceManager for AwsInterface {
             context
                 .elastic_network_interface_ids
                 .insert(node_index, eni_id.clone());
-            main_progress.inc(1);
-
-            // 11.2. Create Elastic IP
-            operation_spinner.update_message(&format!(
-                "Allocating {} of {} Elastic IPs",
-                node_index + 1,
-                nodes.len()
-            ));
-            let eip_id = self.ensure_elastic_ip(&context, node_index).await?;
-            context.elastic_ip_ids.insert(node_index, eip_id.clone());
-            main_progress.inc(1);
-
-            // 11.3. Attach Elastic IP to ENI device
-            operation_spinner.update_message(&format!(
-                "Associating allocated Elastic IP {} with Elastic Network Interface (ENI) device {}...",
-                eip_id, eni_id
-            ));
-            let node_public_ip = self
-                .associate_elastic_ip_with_network_interface(&context, &eip_id, &eni_id)
-                .await?;
-            context
-                .elastic_ips
-                .insert(node_index, node_public_ip.clone());
             let node_private_ip = context.network_interface_private_ip(node_index);
-            node.set_ips(pool, &node_private_ip, &node_public_ip)
-                .await?;
             main_progress.inc(1);
+
+            if node_index == 0 {
+                // Head node: allocate and associate an Elastic IP for external SSH access.
+                operation_spinner.update_message("Allocating Elastic IP for head node...");
+                let eip_id = self.ensure_elastic_ip(&context, node_index).await?;
+                context.elastic_ip_ids.insert(node_index, eip_id.clone());
+                main_progress.inc(1);
+
+                operation_spinner.update_message(&format!(
+                    "Associating Elastic IP {} with head node ENI {}...",
+                    eip_id, eni_id
+                ));
+                let node_public_ip = self
+                    .associate_elastic_ip_with_network_interface(&context, &eip_id, &eni_id)
+                    .await?;
+                context.elastic_ips.insert(node_index, node_public_ip.clone());
+                node.set_ips(pool, &node_private_ip, &node_public_ip).await?;
+                main_progress.inc(1);
+            } else {
+                // Worker nodes: private IP only, accessed via head node jump host.
+                tracing::info!(
+                    "Node {} (private_ip='{}'): no public IP, will be accessed via head node",
+                    node_index,
+                    node_private_ip
+                );
+                node.set_ips(pool, &node_private_ip, "").await?;
+                main_progress.inc(2); // consume EIP + associate steps
+            }
         }
 
         // 12. Request EC2 Instances
@@ -221,20 +225,34 @@ impl CloudResourceManager for AwsInterface {
                 )
             })?;
 
-        // 17. Wait for SSH to be ready on all instances
+        let head_public_ip = context
+            .elastic_ips
+            .get(&0)
+            .cloned()
+            .unwrap_or_default();
+
+        // 17. Wait for SSH to be ready on all instances.
+        // Head node is polled directly; workers are reached via the head as a jump host.
         for (node_index, _node) in nodes.iter().enumerate() {
-            let public_ip = context
-                .elastic_ips
-                .get(&node_index)
-                .map(|s| s.as_str())
-                .unwrap_or_default();
-            let ssh = SshSession::for_aws(public_ip, &cluster.private_ssh_key_path);
-            operation_spinner.update_message(&format!(
-                "Waiting for SSH on Node {} of {} ({})...",
-                node_index + 1,
-                nodes.len(),
-                public_ip
-            ));
+            let ssh = if node_index == 0 {
+                operation_spinner.update_message(&format!(
+                    "Waiting for SSH on head node ({})...",
+                    head_public_ip
+                ));
+                SshSession::for_aws(&head_public_ip, &cluster.private_ssh_key_path)
+            } else {
+                let worker_private_ip = context.network_interface_private_ip(node_index);
+                operation_spinner.update_message(&format!(
+                    "Waiting for SSH on worker node {} ({})...",
+                    node_index,
+                    worker_private_ip
+                ));
+                SshSession::for_aws_worker(
+                    &worker_private_ip,
+                    &head_public_ip,
+                    &cluster.private_ssh_key_path,
+                )
+            };
             ssh.wait_until_ready(Duration::from_secs(300)).await?;
             main_progress.inc(1);
         }
@@ -259,27 +277,35 @@ impl CloudResourceManager for AwsInterface {
                         nodes.len()
                     );
                 } else {
-                    let public_ip = context
-                        .elastic_ips
-                        .get(&node_index)
-                        .map(|s| s.as_str())
-                        .unwrap_or_default();
-                    let ssh = SshSession::for_aws(public_ip, &cluster.private_ssh_key_path);
+                    let ssh = if node_index == 0 {
+                        SshSession::for_aws(&head_public_ip, &cluster.private_ssh_key_path)
+                    } else {
+                        let worker_private_ip = context.network_interface_private_ip(node_index);
+                        SshSession::for_aws_worker(
+                            &worker_private_ip,
+                            &head_public_ip,
+                            &cluster.private_ssh_key_path,
+                        )
+                    };
                     let efs_attach_script = format!(
                         r#"
-sudo yum install -y nfs-utils
+rpm -q nfs-utils &>/dev/null || sudo yum install -y nfs-utils
 sudo mkdir -p /shared
+MAX_RETRIES=18
 i=1
-while true; do
-    echo "EFS mount attempt $i..."
+while [ $i -le $MAX_RETRIES ]; do
+    echo "EFS mount attempt $i/$MAX_RETRIES..."
     if sudo mount -t nfs4 {efs_dns_name}:/ /shared; then
         echo "EFS mount successful!"
         break
-    else
-        echo "EFS mount failed, waiting 10 seconds for DNS propagation..."
-        sleep 10
-        i=$((i + 1))
     fi
+    if [ $i -eq $MAX_RETRIES ]; then
+        echo "EFS mount failed after $MAX_RETRIES attempts, giving up."
+        exit 1
+    fi
+    echo "EFS mount failed, retrying in 10 seconds..."
+    sleep 10
+    i=$((i + 1))
 done
 sudo chown ec2-user:ec2-user /shared
 echo "EFS mount and setup complete!"
@@ -296,22 +322,21 @@ echo "EFS mount and setup complete!"
 
         // 19. Dispatch EC2 Instance initialization commands via SSH
         for (node_index, node) in nodes.iter().enumerate() {
-            let node_init_commands = node.get_init_commands(pool).await?;
-            if node_init_commands.is_empty() {
-                main_progress.inc(1);
-                continue;
-            }
             operation_spinner.update_message(&format!(
-                "Running init commands on Node {} of {}...",
+                "Running base setup on Node {} of {}...",
                 node_index + 1,
                 nodes.len()
             ));
-            let public_ip = context
-                .elastic_ips
-                .get(&node_index)
-                .map(|s| s.as_str())
-                .unwrap_or_default();
-            let ssh = SshSession::for_aws(public_ip, &cluster.private_ssh_key_path);
+            let ssh = if node_index == 0 {
+                SshSession::for_aws(&head_public_ip, &cluster.private_ssh_key_path)
+            } else {
+                let worker_private_ip = context.network_interface_private_ip(node_index);
+                SshSession::for_aws_worker(
+                    &worker_private_ip,
+                    &head_public_ip,
+                    &cluster.private_ssh_key_path,
+                )
+            };
 
             // Install the private key so nodes can SSH to each other (needed for MPI)
             ssh.run_command("mkdir -p ~/.ssh && chmod 700 ~/.ssh")
@@ -320,8 +345,24 @@ echo "EFS mount and setup complete!"
                 .await?;
             ssh.run_command("chmod 600 ~/.ssh/id_rsa").await?;
 
-            let init_script = node_init_commands.join("\n");
-            ssh.run_command(&init_script).await?;
+            // Ensure tmux is available (required for cluster tasks)
+            ssh.run_command(
+                "command -v tmux &>/dev/null || { command -v dnf &>/dev/null \
+                && sudo dnf install -y tmux || sudo yum install -y tmux; }",
+            )
+            .await?;
+
+            let node_init_commands = node.get_init_commands(pool).await?;
+            if !node_init_commands.is_empty() {
+                tracing::info!(
+                    "Running {} init command(s) on Node {} of {}...",
+                    node_init_commands.len(),
+                    node_index + 1,
+                    nodes.len()
+                );
+                let init_script = format!("set -e\n{}", node_init_commands.join("\n"));
+                ssh.run_command_streaming(&init_script).await?;
+            }
             main_progress.inc(1);
         }
 
@@ -332,14 +373,10 @@ echo "EFS mount and setup complete!"
             "Cluster '{}' spawned successfully!",
             cluster.display_name
         ));
-        tracing::info!("Cluster spawn completed successfully. You can access your nodes using:");
-        for (node_index, ip_address) in context.elastic_ips.iter() {
-            tracing::info!(
-                "Node '10.0.0.{}': ssh ec2-user@{}",
-                node_index + 10,
-                ip_address
-            );
-        }
+        tracing::info!(
+            "Cluster spawn completed successfully. Head node: ssh ec2-user@{}",
+            head_public_ip
+        );
         Ok(())
     }
 
@@ -506,14 +543,20 @@ echo "EFS mount and setup complete!"
             main_progress.inc(1);
         }
 
-        cluster.update_state(pool, ClusterState::Terminated).await?;
+        for node in &nodes {
+            node.reset(pool).await?;
+        }
+        cluster.update_state(pool, ClusterState::Pending).await?;
 
         operation_spinner.finish_with_message("All Cloud operations completed");
         main_progress.finish_with_message(&format!(
             "Cluster '{}' terminated successfully!",
             cluster.display_name
         ));
-        tracing::info!("Cluster termination completed successfully!");
+        tracing::info!(
+            "Cluster '{}' is ready to spawn again.",
+            cluster.display_name
+        );
         Ok(())
     }
 

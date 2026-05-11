@@ -32,3 +32,7 @@ db.sqlite-wal
 # YAML files in root directory (except cluster.example.yaml)
 /*.yaml
 !cluster.example.yaml
+!tasks.example.yaml
+
+# Test files
+experiments/

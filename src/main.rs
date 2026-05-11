@@ -3,7 +3,7 @@ use chrono::Utc;
 use clap::{Parser, Subcommand};
 use sqlx::sqlite::SqlitePool;
 use std::fs::OpenOptions;
-use tracing_subscriber::{Layer, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{Layer, filter::LevelFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 /// Routes tracing stdout output through the active `MultiProgress` (if any),
 /// so progress bars and log lines don't corrupt each other.
@@ -70,6 +70,10 @@ enum ClusterCommands {
         /// Identifier of the Cluster to delete
         #[arg(long)]
         cluster_id: String,
+
+        /// Skip confirmation prompt
+        #[arg(short = 'y', long = "yes")]
+        yes: bool,
     },
 
     /// List existing Clusters
@@ -110,6 +114,13 @@ enum ClusterCommands {
         /// Skip confirmation prompt
         #[arg(short = 'y', long = "yes")]
         yes: bool,
+    },
+
+    /// Run tasks on a running Cluster using a tasks YAML file
+    Tasks {
+        /// Path to the tasks YAML file
+        #[arg(short = 'f', long = "file")]
+        yaml_file_path: String,
     },
 
     /// Watch a Cluster and automatically restore on node failure
@@ -241,12 +252,15 @@ async fn main() -> Result<()> {
                 .without_time()
                 .with_level(false)
                 .with_target(false)
-                .with_filter(tracing_subscriber::filter::LevelFilter::INFO),
+                .with_filter(tracing_subscriber::EnvFilter::new(
+                    "info,aws_config=warn,aws_credential_types=warn,aws_smithy_runtime=warn",
+                )),
         )
         .with(
             tracing_subscriber::fmt::layer()
                 .with_writer(log_file)
-                .with_ansi(false),
+                .with_ansi(false)
+                .with_filter(LevelFilter::INFO),
         )
         .init();
 
@@ -278,8 +292,8 @@ async fn main() -> Result<()> {
             } => {
                 commands::cluster::create(&sqlite_pool, yaml_file_path, *yes).await?;
             }
-            ClusterCommands::Delete { cluster_id } => {
-                commands::cluster::delete(&sqlite_pool, cluster_id).await?;
+            ClusterCommands::Delete { cluster_id, yes } => {
+                commands::cluster::delete(&sqlite_pool, cluster_id, *yes).await?;
             }
             ClusterCommands::List {} => {
                 commands::cluster::list(&sqlite_pool).await?;
@@ -297,6 +311,9 @@ async fn main() -> Result<()> {
             } => {
                 commands::cluster::test_failure(&sqlite_pool, cluster_id, node_private_ip, *yes)
                     .await?;
+            }
+            ClusterCommands::Tasks { yaml_file_path } => {
+                commands::cluster::tasks(&sqlite_pool, yaml_file_path).await?;
             }
             ClusterCommands::Watch {
                 cluster_id,

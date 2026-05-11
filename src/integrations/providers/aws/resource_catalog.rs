@@ -7,6 +7,11 @@ use std::collections::HashMap;
 
 use super::interface::AwsInterface;
 
+pub struct EbsPricing {
+    pub storage_per_gb_month: f64,
+    pub throughput_per_mbs_month: f64,
+}
+
 impl CloudInfoProvider for AwsInterface {
     async fn fetch_regions(&self, _tracker: &ProgressTracker) -> Result<Vec<String>> {
         // Use a default region (here "us-east-1") to create the client,
@@ -517,5 +522,148 @@ impl CloudInfoProvider for AwsInterface {
         };
 
         Ok(image)
+    }
+}
+
+impl AwsInterface {
+    /// Fetch EBS pricing for a given volume type and region from the AWS Pricing API.
+    /// Returns storage cost per GB-month and (for gp3) provisioned throughput cost per MB/s-month.
+    pub async fn fetch_ebs_pricing(&self, region: &str, volume_type: &str) -> Result<EbsPricing> {
+        let client = self.get_pricing_client().await?;
+
+        let make_filter = |field: &str, value: &str| {
+            aws_sdk_pricing::types::Filter::builder()
+                .r#type(aws_sdk_pricing::types::FilterType::TermMatch)
+                .field(field)
+                .value(value)
+                .build()
+        };
+
+        // Helper: extract USD on-demand price from a pricing JSON blob
+        let extract_price = |json: &serde_json::Value| -> Option<f64> {
+            json["terms"]["OnDemand"]
+                .as_object()?
+                .values()
+                .next()?
+                .get("priceDimensions")?
+                .as_object()?
+                .values()
+                .next()?
+                .get("pricePerUnit")?
+                .get("USD")?
+                .as_str()?
+                .parse::<f64>()
+                .ok()
+        };
+
+        // Fetch storage price ($/GB-month)
+        let storage_response = client
+            .get_products()
+            .service_code("AmazonEC2")
+            .format_version("aws_v1")
+            .filters(make_filter("productFamily", "Storage")?)
+            .filters(make_filter("volumeApiName", volume_type)?)
+            .filters(make_filter("regionCode", region)?)
+            .send()
+            .await?;
+
+        let storage_per_gb_month = storage_response
+            .price_list()
+            .iter()
+            .find_map(|item| {
+                let json: serde_json::Value = serde_json::from_str(item).ok()?;
+                extract_price(&json)
+            })
+            .unwrap_or_else(|| {
+                tracing::warn!("EBS storage price not found for {} in {}, using 0.08", volume_type, region);
+                0.08
+            });
+
+        // Fetch provisioned throughput price ($/MB/s-month) — only relevant for gp3
+        let throughput_per_mbs_month = if volume_type == "gp3" {
+            let throughput_response = client
+                .get_products()
+                .service_code("AmazonEC2")
+                .format_version("aws_v1")
+                .filters(make_filter("productFamily", "Provisioned Throughput")?)
+                .filters(make_filter("group", "EBS Throughput")?)
+                .filters(make_filter("volumeApiName", volume_type)?)
+                .filters(make_filter("regionCode", region)?)
+                .send()
+                .await?;
+
+            let price_list = throughput_response.price_list();
+            // AWS Pricing API returns gp3 throughput as $/GBps-month; divide by 1000 to get $/MBps-month.
+            let gbps_per_month = price_list
+                .iter()
+                .find_map(|item| {
+                    let json: serde_json::Value = serde_json::from_str(item).ok()?;
+                    extract_price(&json)
+                })
+                .unwrap_or_else(|| {
+                    tracing::warn!("EBS throughput price not found for gp3 in {}, using 40.96", region);
+                    40.96
+                });
+            gbps_per_month / 1000.0
+        } else {
+            0.0
+        };
+
+        Ok(EbsPricing {
+            storage_per_gb_month,
+            throughput_per_mbs_month,
+        })
+    }
+
+    /// Fetch current spot prices for the given instance types via EC2 describe_spot_price_history.
+    /// Returns a map of instance_type -> current spot price (USD/hour).
+    /// If availability_zone is empty, prices from any AZ in the region are accepted.
+    pub async fn fetch_spot_prices(
+        &self,
+        region: &str,
+        instance_type_names: &[String],
+        availability_zone: &str,
+    ) -> Result<HashMap<String, f64>> {
+        let client = self.get_ec2_client(region).await?;
+
+        let instance_types: Vec<aws_sdk_ec2::types::InstanceType> = instance_type_names
+            .iter()
+            .map(|s| aws_sdk_ec2::types::InstanceType::from(s.as_str()))
+            .collect();
+
+        let mut request = client
+            .describe_spot_price_history()
+            .set_instance_types(Some(instance_types))
+            .product_descriptions("Linux/UNIX")
+            .start_time(aws_sdk_ec2::primitives::DateTime::from_secs(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs() as i64,
+            ));
+
+        if !availability_zone.is_empty() {
+            request = request.availability_zone(availability_zone);
+        }
+
+        let response = request.send().await?;
+
+        let mut price_map: HashMap<String, f64> = HashMap::new();
+        for entry in response.spot_price_history() {
+            let it = match entry.instance_type() {
+                Some(t) => t.as_str().to_string(),
+                None => continue,
+            };
+            if price_map.contains_key(&it) {
+                continue; // already have the most recent entry for this type
+            }
+            if let Some(price_str) = entry.spot_price() {
+                if let Ok(price) = price_str.parse::<f64>() {
+                    price_map.insert(it, price);
+                }
+            }
+        }
+
+        Ok(price_map)
     }
 }

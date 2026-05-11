@@ -71,8 +71,13 @@ pub struct Cluster {
     pub use_node_affinity: bool,
     pub use_elastic_fabric_adapters: bool,
     pub use_elastic_file_system: bool,
+    pub efs_performance_mode: String,
+    pub efs_throughput_mode: String,
+    pub efs_provisioned_throughput_mbs: Option<f64>,
     pub created_at: NaiveDateTime,
     pub state: ClusterState,
+    pub cost_per_hour: f64,
+    pub cost_breakdown: String,
 }
 
 impl Cluster {
@@ -179,8 +184,13 @@ impl Cluster {
                     use_node_affinity,
                     use_elastic_fabric_adapters,
                     use_elastic_file_system,
+                    efs_performance_mode,
+                    efs_throughput_mode,
+                    efs_provisioned_throughput_mbs,
                     created_at,
-                    state as "state: ClusterState"
+                    state as "state: ClusterState",
+                    cost_per_hour,
+                    cost_breakdown
                 FROM clusters
                 WHERE id = ?
             "#,
@@ -215,8 +225,13 @@ impl Cluster {
                     use_node_affinity,
                     use_elastic_fabric_adapters,
                     use_elastic_file_system,
+                    efs_performance_mode,
+                    efs_throughput_mode,
+                    efs_provisioned_throughput_mbs,
                     created_at,
-                    state as "state: ClusterState"
+                    state as "state: ClusterState",
+                    cost_per_hour,
+                    cost_breakdown
                 FROM clusters
                 WHERE display_name = ?
             "#,
@@ -251,8 +266,13 @@ impl Cluster {
                     use_node_affinity,
                     use_elastic_fabric_adapters,
                     use_elastic_file_system,
+                    efs_performance_mode,
+                    efs_throughput_mode,
+                    efs_provisioned_throughput_mbs,
                     created_at,
-                    state as "state: ClusterState"
+                    state as "state: ClusterState",
+                    cost_per_hour,
+                    cost_breakdown
                 FROM clusters
             "#,
         )
@@ -303,10 +323,15 @@ impl Cluster {
                     use_node_affinity,
                     use_elastic_fabric_adapters,
                     use_elastic_file_system,
+                    efs_performance_mode,
+                    efs_throughput_mode,
+                    efs_provisioned_throughput_mbs,
                     created_at,
-                    state
+                    state,
+                    cost_per_hour,
+                    cost_breakdown
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
             self.id,
             self.display_name,
@@ -319,8 +344,13 @@ impl Cluster {
             self.use_node_affinity,
             self.use_elastic_fabric_adapters,
             self.use_elastic_file_system,
+            self.efs_performance_mode,
+            self.efs_throughput_mode,
+            self.efs_provisioned_throughput_mbs,
             self.created_at,
             self.state,
+            self.cost_per_hour,
+            self.cost_breakdown,
         )
         .execute(&mut *tx)
         .await
@@ -396,8 +426,6 @@ impl Cluster {
     }
 
     pub async fn delete(pool: &SqlitePool, cluster_id: &str) -> Result<()> {
-        tracing::info!("Starting deletion of Cluster (id='{}')", cluster_id);
-
         let mut tx = match pool.begin().await {
             Ok(result) => result,
             Err(e) => {
@@ -406,76 +434,28 @@ impl Cluster {
             }
         };
 
-        // First, delete all commands associated with nodes in this cluster
-        tracing::info!("Deleting commands for Cluster (id='{}')", cluster_id);
-        match sqlx::query!(
-            r#"
-                DELETE FROM shell_commands 
-                WHERE node_id IN (
-                    SELECT id FROM nodes WHERE cluster_id = ?
-                )
-            "#,
-            cluster_id
-        )
-        .execute(&mut *tx)
-        .await
-        {
-            Ok(result) => {
-                tracing::info!(
-                    "Deleted {} commands for Cluster (id='{}')",
-                    result.rows_affected(),
-                    cluster_id
-                );
+        for query in [
+            "DELETE FROM shell_commands WHERE node_id IN (SELECT id FROM nodes WHERE cluster_id = ?)",
+            "DELETE FROM task_runs WHERE cluster_id = ?",
+            "DELETE FROM nodes WHERE cluster_id = ?",
+        ] {
+            match sqlx::query(query).bind(cluster_id).execute(&mut *tx).await {
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::error!("SQLx Error: {:?}", e);
+                    anyhow::bail!("DB Operation Failure: {}", e);
+                }
             }
-            Err(e) => {
-                tracing::error!("SQLx Error: {:?}", e);
-                anyhow::bail!("DB Operation Failure: {}", e);
-            }
-        };
+        }
 
-        // Then, delete all nodes associated with this cluster
-        tracing::info!("Deleting nodes for Cluster (id='{}')", cluster_id);
-        match sqlx::query!(
-            r#"
-                DELETE FROM nodes 
-                WHERE cluster_id = ?
-            "#,
-            cluster_id
-        )
-        .execute(&mut *tx)
-        .await
-        {
-            Ok(result) => {
-                tracing::info!(
-                    "Deleted {} nodes for Cluster (id='{}')",
-                    result.rows_affected(),
-                    cluster_id
-                );
-            }
-            Err(e) => {
-                tracing::error!("SQLx Error: {:?}", e);
-                anyhow::bail!("DB Operation Failure: {}", e);
-            }
-        };
-
-        // Finally, delete the cluster itself
-        tracing::info!("Deleting Cluster (id='{}')", cluster_id);
-        match sqlx::query!(
-            r#"
-                DELETE FROM clusters 
-                WHERE id = ?
-            "#,
-            cluster_id
-        )
-        .execute(&mut *tx)
-        .await
+        match sqlx::query!("DELETE FROM clusters WHERE id = ?", cluster_id)
+            .execute(&mut *tx)
+            .await
         {
             Ok(result) => {
                 if result.rows_affected() == 0 {
-                    tracing::warn!("No cluster found with id '{}' for deletion", cluster_id);
-                    anyhow::bail!("Cluster not found");
+                    anyhow::bail!("Cluster '{}' not found", cluster_id);
                 }
-                tracing::info!("Successfully deleted Cluster (id='{}')", cluster_id);
             }
             Err(e) => {
                 tracing::error!("SQLx Error: {:?}", e);
@@ -483,18 +463,8 @@ impl Cluster {
             }
         };
 
-        // Commit the transaction
-        tracing::info!(
-            "Committing deletion transaction for Cluster (id='{}')",
-            cluster_id
-        );
         match tx.commit().await {
-            Ok(_) => {
-                tracing::info!(
-                    "Successfully deleted Cluster (id='{}') and all associated data",
-                    cluster_id
-                );
-            }
+            Ok(_) => {}
             Err(e) => {
                 tracing::error!("SQLx Error: {:?}", e);
                 anyhow::bail!("DB Operation Failure: {}", e);
@@ -514,7 +484,10 @@ impl Cluster {
                     instance_type, 
                     allocation_mode, 
                     burstable_mode, 
-                    image_id, 
+                    image_id,
+                    root_volume_gb,
+                    root_volume_type,
+                    root_volume_iops,
                     private_ip,
                     public_ip,
                     was_efs_configured,

@@ -12,6 +12,9 @@ pub struct Node {
     pub allocation_mode: String,
     pub burstable_mode: Option<String>,
     pub image_id: String,
+    pub root_volume_gb: i64,
+    pub root_volume_type: String,
+    pub root_volume_iops: Option<i64>,
     pub private_ip: Option<String>,
     pub public_ip: Option<String>,
     pub was_efs_configured: bool,
@@ -29,10 +32,13 @@ impl Node {
                     allocation_mode,
                     burstable_mode,
                     image_id,
+                    root_volume_gb,
+                    root_volume_type,
+                    root_volume_iops,
                     was_efs_configured,
                     was_ssh_configured
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
             self.id,
             self.cluster_id,
@@ -40,6 +46,9 @@ impl Node {
             self.allocation_mode,
             self.burstable_mode,
             self.image_id,
+            self.root_volume_gb,
+            self.root_volume_type,
+            self.root_volume_iops,
             self.was_efs_configured,
             self.was_ssh_configured,
         )
@@ -68,6 +77,24 @@ impl Node {
             .collect();
 
         Ok(scripts)
+    }
+
+    pub async fn reset(&self, pool: &SqlitePool) -> Result<()> {
+        match sqlx::query!(
+            r#"UPDATE nodes SET private_ip = '', public_ip = NULL, was_efs_configured = false WHERE id = ?"#,
+            self.id
+        )
+        .execute(pool)
+        .await
+        {
+            Ok(result) => {
+                if result.rows_affected() == 0 {
+                    anyhow::bail!("Node '{}' not found for reset", self.id);
+                }
+            }
+            Err(e) => anyhow::bail!("DB Operation Failure: {}", e),
+        }
+        Ok(())
     }
 
     pub async fn set_efs_configuration_state(
@@ -142,6 +169,9 @@ impl Node {
                 allocation_mode,
                 burstable_mode,
                 image_id,
+                root_volume_gb,
+                root_volume_type,
+                root_volume_iops,
                 private_ip,
                 public_ip,
                 was_efs_configured,

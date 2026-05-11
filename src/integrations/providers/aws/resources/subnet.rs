@@ -33,7 +33,11 @@ impl AwsInterface {
             .create_subnet()
             .vpc_id(context.vpc_id.as_ref().unwrap())
             .cidr_block(context.subnet_cidr_block.clone())
-            .availability_zone(context.availability_zone.clone())
+            .set_availability_zone(if context.availability_zone.is_empty() {
+                None
+            } else {
+                Some(context.availability_zone.clone())
+            })
             .tag_specifications(
                 aws_sdk_ec2::types::TagSpecification::builder()
                     .resource_type(aws_sdk_ec2::types::ResourceType::Subnet)

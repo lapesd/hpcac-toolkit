@@ -43,14 +43,30 @@ impl AwsInterface {
         }
 
         tracing::info!("Requesting creation of a new EFS device...");
-        let create_efs_device_response = match context
+        let performance_mode = match context.efs_performance_mode.as_str() {
+            "max_io" => aws_sdk_efs::types::PerformanceMode::MaxIo,
+            _ => aws_sdk_efs::types::PerformanceMode::GeneralPurpose,
+        };
+        let throughput_mode = match context.efs_throughput_mode.as_str() {
+            "provisioned" => aws_sdk_efs::types::ThroughputMode::Provisioned,
+            "elastic" => aws_sdk_efs::types::ThroughputMode::Elastic,
+            _ => aws_sdk_efs::types::ThroughputMode::Bursting,
+        };
+        let mut efs_builder = context
             .efs_client
             .create_file_system()
             .creation_token(context.cluster_id.as_str())
-            .availability_zone_name(context.availability_zone.clone())
-            // TODO: Evaluate optimal settings for EFS
-            .performance_mode(aws_sdk_efs::types::PerformanceMode::GeneralPurpose)
-            .throughput_mode(aws_sdk_efs::types::ThroughputMode::Bursting)
+            .set_availability_zone_name(if context.availability_zone.is_empty() {
+                None
+            } else {
+                Some(context.availability_zone.clone())
+            })
+            .performance_mode(performance_mode)
+            .throughput_mode(throughput_mode);
+        if let Some(mbs) = context.efs_provisioned_throughput_mbs {
+            efs_builder = efs_builder.provisioned_throughput_in_mibps(mbs);
+        }
+        let create_efs_device_response = match efs_builder
             .tags(
                 aws_sdk_efs::types::Tag::builder()
                     .key("Name")

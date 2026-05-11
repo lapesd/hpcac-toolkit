@@ -11,6 +11,33 @@ use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqlitePool;
 use std::fs;
 use std::path::Path;
+use serde_json;
+
+const GP3_THROUGHPUT_BASELINE_MBS: f64 = 125.0;
+const GP3_PROVISIONED_THROUGHPUT_MBS: f64 = 500.0;
+const GP3_IOPS_BASELINE: f64 = 3000.0;
+const GP3_IOPS_PER_MONTH: f64 = 0.005;
+const IO1_IO2_IOPS_PER_MONTH: f64 = 0.065;
+const PUBLIC_IPV4_PER_HOUR: f64 = 0.005;
+const HOURS_PER_MONTH: f64 = 730.0;
+
+#[derive(Serialize, Deserialize)]
+struct NodeCostBreakdown {
+    node_id: String,
+    instance_type: String,
+    allocation_mode: String,
+    instance_cost_per_hour: f64,
+    ebs_cost_per_hour: f64,
+    iops_cost_per_hour: f64,
+    public_ip_cost_per_hour: f64,
+    node_total_per_hour: f64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct CostBreakdown {
+    nodes: Vec<NodeCostBreakdown>,
+    total_per_hour: f64,
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 struct ClusterYaml {
@@ -25,6 +52,9 @@ struct ClusterYaml {
     use_node_affinity: bool,
     use_elastic_fabric_adapters: bool,
     use_elastic_file_system: bool,
+    efs_performance_mode: Option<String>,
+    efs_throughput_mode: Option<String>,
+    efs_provisioned_throughput_mbs: Option<f64>,
     nodes: Vec<NodeYaml>,
 }
 
@@ -34,6 +64,9 @@ pub struct NodeYaml {
     allocation_mode: Option<String>,
     burstable_mode: Option<String>,
     image_id: String,
+    root_volume_gb: Option<i64>,
+    root_volume_type: Option<String>,
+    root_volume_iops: Option<i64>,
     init_commands: Option<Vec<String>>,
 }
 
@@ -236,7 +269,11 @@ pub async fn create(
         )
     }
 
-    // Check availability_zone, if present
+    // Check availability_zone
+    let zone = cluster_yaml.availability_zone.clone();
+    if zone.is_empty() {
+        anyhow::bail!("availability_zone is required");
+    }
     let zones_tracker = utils::ProgressTracker::new(1, Some("zones discovery"));
     let zones = cloud_interface.fetch_zones(&region, &zones_tracker).await?;
     zones_tracker.finish_with_message(&format!(
@@ -244,13 +281,44 @@ pub async fn create(
         zones.len(),
         region
     ));
-    let zone = cluster_yaml.availability_zone.clone();
     if !zones.contains(&zone) {
         anyhow::bail!(
             "Availability Zone '{}' is not available. Possible options: {:?}",
             zone,
             zones
         )
+    }
+
+    // Validate EFS configuration
+    let efs_performance_mode = match &cluster_yaml.efs_performance_mode {
+        Some(mode) => match mode.to_lowercase().as_str() {
+            "general_purpose" | "generalpurpose" => "general_purpose".to_string(),
+            "max_io" | "maxio" => "max_io".to_string(),
+            invalid => anyhow::bail!(
+                "Invalid efs_performance_mode '{}'. Valid options: general_purpose, max_io",
+                invalid
+            ),
+        },
+        None => "general_purpose".to_string(),
+    };
+    let efs_throughput_mode = match &cluster_yaml.efs_throughput_mode {
+        Some(mode) => match mode.to_lowercase().as_str() {
+            "bursting" => "bursting".to_string(),
+            "provisioned" => "provisioned".to_string(),
+            "elastic" => "elastic".to_string(),
+            invalid => anyhow::bail!(
+                "Invalid efs_throughput_mode '{}'. Valid options: bursting, provisioned, elastic",
+                invalid
+            ),
+        },
+        None => "bursting".to_string(),
+    };
+    let efs_provisioned_throughput_mbs = cluster_yaml.efs_provisioned_throughput_mbs;
+    if efs_throughput_mode == "provisioned" && efs_provisioned_throughput_mbs.is_none() {
+        anyhow::bail!("efs_provisioned_throughput_mbs is required when efs_throughput_mode is 'provisioned'");
+    }
+    if efs_throughput_mode != "provisioned" && efs_provisioned_throughput_mbs.is_some() {
+        anyhow::bail!("efs_provisioned_throughput_mbs can only be set when efs_throughput_mode is 'provisioned'");
     }
 
     // Validate node data
@@ -368,6 +436,56 @@ pub async fn create(
             .fetch_machine_image(&region, &image_id)
             .await?;
 
+        // Validate root_volume_type
+        let root_volume_type = match &node_definition.root_volume_type {
+            Some(vt) => {
+                let valid_types = ["gp2", "gp3", "io1", "io2"];
+                if !valid_types.contains(&vt.to_lowercase().as_str()) {
+                    anyhow::bail!(
+                        "Invalid root_volume_type '{}' for node {}. Valid options: {}",
+                        vt,
+                        i + 1,
+                        valid_types.join(", ")
+                    )
+                }
+                vt.to_lowercase()
+            }
+            None => "gp3".to_string(),
+        };
+
+        // Validate root_volume_gb
+        let root_volume_gb = match node_definition.root_volume_gb {
+            Some(gb) if gb < 8 => {
+                anyhow::bail!(
+                    "root_volume_gb for node {} must be at least 8 GB, got {}",
+                    i + 1,
+                    gb
+                )
+            }
+            Some(gb) => gb,
+            None => 100,
+        };
+
+        // Validate root_volume_iops
+        let root_volume_iops = match (node_definition.root_volume_iops, root_volume_type.as_str()) {
+            (Some(iops), "gp3") if iops > 16000 => {
+                anyhow::bail!("root_volume_iops for node {} exceeds gp3 maximum of 16000", i + 1)
+            }
+            (Some(iops), "io1") if iops > 64000 => {
+                anyhow::bail!("root_volume_iops for node {} exceeds io1 maximum of 64000", i + 1)
+            }
+            (Some(iops), "io2") if iops > 256000 => {
+                anyhow::bail!("root_volume_iops for node {} exceeds io2 maximum of 256000", i + 1)
+            }
+            (Some(_), "gp2") => {
+                anyhow::bail!("root_volume_iops cannot be set for gp2 volumes (node {})", i + 1)
+            }
+            (Some(iops), _) if iops < 100 => {
+                anyhow::bail!("root_volume_iops for node {} must be at least 100", i + 1)
+            }
+            (iops, _) => iops,
+        };
+
         // Push shell commands to be inserted
         let new_node_id = utils::generate_id();
         if let Some(init_commands) = &node_definition.init_commands {
@@ -392,6 +510,9 @@ pub async fn create(
             allocation_mode,
             burstable_mode: burstable_mode.cloned(),
             image_id,
+            root_volume_gb,
+            root_volume_type,
+            root_volume_iops,
             private_ip: None,
             public_ip: None,
             was_efs_configured: false,
@@ -400,6 +521,89 @@ pub async fn create(
         nodes_tracker.inc(1);
     }
     nodes_tracker.finish_with_message(&format!("Validated {} nodes", node_count));
+
+    // Compute cost breakdown — fetch live prices from AWS Pricing API
+    let unique_instance_types: Vec<String> = nodes_to_insert
+        .iter()
+        .map(|n| n.instance_type.clone())
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    let instance_pricing_tracker = utils::ProgressTracker::new(
+        unique_instance_types.len() as u64,
+        Some("instance pricing"),
+    );
+    let live_instance_prices = cloud_interface
+        .fetch_prices(&region, &unique_instance_types, &instance_pricing_tracker)
+        .await?;
+    instance_pricing_tracker.finish_with_message("Instance pricing fetched");
+
+    let spot_instance_types: Vec<String> = nodes_to_insert
+        .iter()
+        .filter(|n| n.allocation_mode == "spot")
+        .map(|n| n.instance_type.clone())
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    let live_spot_prices = if !spot_instance_types.is_empty() {
+        cloud_interface.fetch_spot_prices(&region, &spot_instance_types, &zone).await?
+    } else {
+        std::collections::HashMap::new()
+    };
+
+    let unique_volume_types: std::collections::HashSet<String> =
+        nodes_to_insert.iter().map(|n| n.root_volume_type.clone()).collect();
+    let mut ebs_price_cache: std::collections::HashMap<String, crate::integrations::providers::aws::EbsPricing> =
+        std::collections::HashMap::new();
+    for vt in &unique_volume_types {
+        ebs_price_cache.insert(vt.clone(), cloud_interface.fetch_ebs_pricing(&region, vt).await?);
+    }
+
+    let mut cost_nodes: Vec<NodeCostBreakdown> = vec![];
+    for node in &nodes_to_insert {
+        let instance_cost_per_hour = if node.allocation_mode == "spot" {
+            *live_spot_prices.get(&node.instance_type).unwrap_or(
+                live_instance_prices.get(&node.instance_type).unwrap_or(&0.0),
+            )
+        } else {
+            *live_instance_prices.get(&node.instance_type).unwrap_or(&0.0)
+        };
+
+        let ebs_pricing = ebs_price_cache.get(&node.root_volume_type).unwrap();
+        let storage_cost = node.root_volume_gb as f64 * ebs_pricing.storage_per_gb_month / HOURS_PER_MONTH;
+        let extra_throughput = (GP3_PROVISIONED_THROUGHPUT_MBS - GP3_THROUGHPUT_BASELINE_MBS).max(0.0);
+        let throughput_cost = extra_throughput * ebs_pricing.throughput_per_mbs_month / HOURS_PER_MONTH;
+        let ebs_cost_per_hour = storage_cost + throughput_cost;
+
+        let iops_cost_per_hour = match (node.root_volume_iops, node.root_volume_type.as_str()) {
+            (Some(iops), "gp3") => {
+                let extra = (iops as f64 - GP3_IOPS_BASELINE).max(0.0);
+                extra * GP3_IOPS_PER_MONTH / HOURS_PER_MONTH
+            }
+            (Some(iops), "io1") | (Some(iops), "io2") => {
+                iops as f64 * IO1_IO2_IOPS_PER_MONTH / HOURS_PER_MONTH
+            }
+            _ => 0.0,
+        };
+
+        let node_total_per_hour = instance_cost_per_hour + ebs_cost_per_hour + iops_cost_per_hour + PUBLIC_IPV4_PER_HOUR;
+
+        cost_nodes.push(NodeCostBreakdown {
+            node_id: node.id.clone(),
+            instance_type: node.instance_type.clone(),
+            allocation_mode: node.allocation_mode.clone(),
+            instance_cost_per_hour,
+            ebs_cost_per_hour,
+            iops_cost_per_hour,
+            public_ip_cost_per_hour: PUBLIC_IPV4_PER_HOUR,
+            node_total_per_hour,
+        });
+    }
+    let total_per_hour = cost_nodes.iter().map(|n| n.node_total_per_hour).sum();
+    let cost_breakdown = serde_json::to_string(&CostBreakdown {
+        nodes: cost_nodes,
+        total_per_hour,
+    })?;
 
     // TODO: find a way to remove the code duplication here and in `database/models/cluster.rs`
     tracing::info!(
@@ -475,8 +679,13 @@ pub async fn create(
         use_node_affinity: cluster_yaml.use_node_affinity,
         use_elastic_fabric_adapters: cluster_yaml.use_elastic_fabric_adapters,
         use_elastic_file_system: cluster_yaml.use_elastic_file_system,
+        efs_performance_mode,
+        efs_throughput_mode,
+        efs_provisioned_throughput_mbs,
         created_at: Utc::now().naive_utc(),
         state: ClusterState::Pending,
+        cost_per_hour: total_per_hour,
+        cost_breakdown,
     };
     cluster
         .insert(pool, nodes_to_insert, commands_to_insert)

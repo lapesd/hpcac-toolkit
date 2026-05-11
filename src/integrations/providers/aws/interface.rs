@@ -53,6 +53,11 @@ pub struct AwsClusterContext {
     pub public_ssh_key_path: String,
     pub vpc_cidr_block: String,
     pub subnet_cidr_block: String,
+
+    // EFS configuration
+    pub efs_performance_mode: String,
+    pub efs_throughput_mode: String,
+    pub efs_provisioned_throughput_mbs: Option<f64>,
 }
 
 impl AwsClusterContext {
@@ -108,6 +113,10 @@ impl AwsClusterContext {
             // TODO: Evaluate if it's desired to make the CIDR blocks configurable
             vpc_cidr_block: "10.0.0.0/16".to_string(),
             subnet_cidr_block: "10.0.0.0/24".to_string(),
+
+            efs_performance_mode: cluster.efs_performance_mode.clone(),
+            efs_throughput_mode: cluster.efs_throughput_mode.clone(),
+            efs_provisioned_throughput_mbs: cluster.efs_provisioned_throughput_mbs,
         }
     }
 

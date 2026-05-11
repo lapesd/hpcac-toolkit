@@ -1,28 +1,46 @@
-id: MyClusterId  # Optional, must be unique
-display_name: ClusterToTestFailures  # Required, must be unique
+id: MyClusterId           # Optional. Must be unique. Auto-generated if omitted.
+display_name: MyCluster   # Required. Must be unique.
+
 public_ssh_key_path: ~/.ssh/id_ed25519.pub
 private_ssh_key_path: ~/.ssh/id_ed25519
-provider_id: aws
+
+provider_id: aws          # Use provider_config_id instead to pin a specific config.
 region: us-east-1
-availability_zone: us-east-1c
-use_node_affinity: false
-use_elastic_fabric_adapters: false
-use_elastic_file_system: true
+availability_zone: us-east-1c  # Required.
+
+use_node_affinity: false           # Place all nodes in the same placement group (low-latency networking).
+use_elastic_fabric_adapters: false # Enable EFA for high-throughput MPI workloads (instance must support it).
+use_elastic_file_system: false     # Mount a shared NFS filesystem at /shared on all nodes.
+                                   # Required if checkpoint data must survive spot termination across nodes.
+# efs_performance_mode: general_purpose  # Optional. general_purpose (default) | max_io.
+#                                        # max_io: higher aggregate IOPS for massively parallel workloads,
+#                                        # but higher per-operation latency. Only useful with 100+ nodes.
+# efs_throughput_mode: bursting          # Optional. bursting (default) | provisioned | elastic.
+#                                        # bursting:    scales with stored data (~100 MB/s per TB stored).
+#                                        # provisioned: fixed MB/s regardless of storage size (billed extra).
+#                                        # elastic:     AWS auto-scales throughput on demand (pay-per-use).
+# efs_provisioned_throughput_mbs: 256    # Required when efs_throughput_mode is 'provisioned'.
+
 nodes:
-  - instance_type: t3.2xlarge
-    allocation_mode: on-demand  # on-demand | spot
-    # burstable_mode: Standard  # Standard | Unlimited
-    image_id: ami-0150ccaf51ab55a51
+  # Minimal node — all optional fields use defaults.
+  - instance_type: c5.4xlarge
+    allocation_mode: on-demand  # on-demand (default) | spot.
+    image_id: ami-054a22e068102419a
 
+  # Node with custom root volume.
+  - instance_type: c5.4xlarge
+    allocation_mode: spot
+    image_id: ami-054a22e068102419a
+    # root_volume_gb: 100       # Optional. Root EBS size in GB. Default: 100.
+    # root_volume_type: gp3     # Optional. Boot-eligible types: gp2, gp3, io1, io2. Default: gp3.
+    #                           # gp3 is provisioned at 500 MB/s throughput (above the 125 MB/s baseline).
+    #                           # Use io1/io2 only if you need guaranteed high IOPS (e.g. databases on root).
+    # root_volume_iops: 6000    # Optional. Provisioned IOPS. Limits: gp3 ≤ 16000, io1 ≤ 64000, io2 ≤ 256000.
+    #                           # Not supported for gp2. gp3 baseline is 3000 (extra IOPS billed above that).
+    #                           # io1/io2: all provisioned IOPS are billed.
+
+  # Burstable instance (T-series only).
   - instance_type: t3.2xlarge
     allocation_mode: on-demand
-    image_id: ami-0150ccaf51ab55a51
-    init_commands:  # Completely optional
-      - ls
-      - ls -a
-
-  - instance_type: m5.2xlarge
-    allocation_mode: on-demand
-    image_id: ami-0150ccaf51ab55a51
-    init_commands:
-      - ls
+    burstable_mode: Standard         # Standard | Unlimited. Only valid for burstable (t3, t4g, ...) types.
+    image_id: ami-054a22e068102419a
