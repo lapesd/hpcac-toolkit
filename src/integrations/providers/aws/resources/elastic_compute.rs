@@ -167,7 +167,7 @@ impl AwsInterface {
             Ok(response) => response,
             Err(e) => {
                 tracing::error!("{:?}", e);
-                anyhow::bail!("Failure creating EC2 Instance resource: {}", e);
+                anyhow::bail!("Failure creating EC2 Instance resource: {:?}", e);
             }
         };
 

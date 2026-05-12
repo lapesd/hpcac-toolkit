@@ -8,7 +8,7 @@ use crate::utils;
 use anyhow::Result;
 use sqlx::sqlite::SqlitePool;
 
-pub async fn spawn(pool: &SqlitePool, cluster_id: &str, skip_confirmation: bool) -> Result<()> {
+pub async fn spawn(pool: &SqlitePool, cluster_id: &str, skip_confirmation: bool, retry: u32) -> Result<()> {
     let cluster = match Cluster::fetch_by_id(pool, cluster_id).await? {
         Some(cluster) => cluster,
         None => {
@@ -136,6 +136,29 @@ pub async fn spawn(pool: &SqlitePool, cluster_id: &str, skip_confirmation: bool)
         return Ok(());
     }
 
-    cloud_interface.spawn_cluster(pool, cluster, nodes).await?;
-    Ok(())
+    let mut attempt = 0u32;
+    loop {
+        // Re-fetch cluster and nodes each attempt: spawn_cluster takes ownership
+        // and the EFS/VPC/subnet creation is idempotent on retry.
+        let cluster = Cluster::fetch_by_id(pool, cluster_id).await?.unwrap();
+        let nodes = cluster.get_nodes(pool).await?;
+
+        match cloud_interface.spawn_cluster(pool, cluster, nodes).await {
+            Ok(_) => return Ok(()),
+            Err(e) => {
+                let msg = e.to_string();
+                if attempt < retry && msg.contains("InsufficientInstanceCapacity") {
+                    attempt += 1;
+                    tracing::warn!(
+                        "InsufficientInstanceCapacity — retrying in 60s (attempt {}/{})...",
+                        attempt,
+                        retry
+                    );
+                    tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+                } else {
+                    return Err(e);
+                }
+            }
+        }
+    }
 }

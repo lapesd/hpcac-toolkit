@@ -88,6 +88,10 @@ enum ClusterCommands {
         /// Skip confirmation prompt
         #[arg(short = 'y', long = "yes")]
         yes: bool,
+
+        /// Retry up to N times (60s apart) on InsufficientInstanceCapacity
+        #[arg(long, default_value_t = 0)]
+        retry: u32,
     },
 
     /// Terminates a new Cluster
@@ -298,8 +302,8 @@ async fn main() -> Result<()> {
             ClusterCommands::List {} => {
                 commands::cluster::list(&sqlite_pool).await?;
             }
-            ClusterCommands::Spawn { cluster_id, yes } => {
-                commands::cluster::spawn(&sqlite_pool, cluster_id, *yes).await?;
+            ClusterCommands::Spawn { cluster_id, yes, retry } => {
+                commands::cluster::spawn(&sqlite_pool, cluster_id, *yes, *retry).await?;
             }
             ClusterCommands::Terminate { cluster_id, yes } => {
                 commands::cluster::terminate(&sqlite_pool, cluster_id, *yes).await?;
