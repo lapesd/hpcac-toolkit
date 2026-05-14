@@ -4,6 +4,7 @@ pub mod machine_image;
 pub mod node;
 pub mod provider;
 pub mod provider_config;
+pub mod recovery_node;
 pub mod shell_command;
 pub mod task_run;
 
@@ -13,5 +14,6 @@ pub use machine_image::*;
 pub use node::*;
 pub use provider::*;
 pub use provider_config::*;
+pub use recovery_node::*;
 pub use shell_command::*;
 pub use task_run::*;

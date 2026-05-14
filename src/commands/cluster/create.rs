@@ -1,5 +1,5 @@
 use crate::database::models::{
-    Cluster, ClusterState, InstanceType, Node, Provider, ProviderConfig, ShellCommand,
+    Cluster, ClusterState, InstanceType, Node, Provider, ProviderConfig, RecoveryNode, ShellCommand,
 };
 use crate::integrations::{cloud_interface::CloudInfoProvider, providers::aws::AwsInterface};
 use crate::utils;
@@ -56,6 +56,7 @@ struct ClusterYaml {
     efs_throughput_mode: Option<String>,
     efs_provisioned_throughput_mbs: Option<f64>,
     nodes: Vec<NodeYaml>,
+    on_interruption: Option<InterruptionPolicyYaml>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -68,6 +69,22 @@ pub struct NodeYaml {
     root_volume_type: Option<String>,
     root_volume_iops: Option<i64>,
     init_commands: Option<Vec<String>>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct InterruptionPolicyYaml {
+    nodes: Vec<RecoveryNodeYaml>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct RecoveryNodeYaml {
+    preferred_instance_types: Vec<String>,
+    allocation_mode: Option<String>,
+    burstable_mode: Option<String>,
+    image_id: String,
+    root_volume_gb: Option<i64>,
+    root_volume_type: Option<String>,
+    root_volume_iops: Option<i64>,
 }
 
 pub async fn create(
@@ -660,6 +677,64 @@ pub async fn create(
         );
     }
 
+    // Validate and build recovery nodes if an on_interruption policy is present
+    let mut recovery_nodes_to_insert: Vec<RecoveryNode> = vec![];
+    if let Some(policy) = &cluster_yaml.on_interruption {
+        if policy.nodes.is_empty() {
+            anyhow::bail!("on_interruption.nodes must not be empty if on_interruption is defined");
+        }
+        for (i, rn) in policy.nodes.iter().enumerate() {
+            if rn.preferred_instance_types.is_empty() {
+                anyhow::bail!(
+                    "on_interruption.nodes[{}]: preferred_instance_types must not be empty",
+                    i
+                );
+            }
+            for type_name in &rn.preferred_instance_types {
+                match InstanceType::fetch_by_name_and_region(pool, type_name, &region).await? {
+                    Some(_) => {}
+                    None => anyhow::bail!(
+                        "on_interruption.nodes[{}]: instance type '{}' is unavailable in region '{}'",
+                        i, type_name, region
+                    ),
+                }
+            }
+            let allocation_mode = match rn.allocation_mode.as_deref() {
+                Some("spot") | Some("Spot") => "spot".to_string(),
+                Some("on-demand") | Some("on_demand") | None => "on-demand".to_string(),
+                Some(invalid) => anyhow::bail!(
+                    "on_interruption.nodes[{}]: invalid allocation_mode '{}'",
+                    i, invalid
+                ),
+            };
+            let root_volume_type = rn
+                .root_volume_type
+                .as_deref()
+                .unwrap_or("gp3")
+                .to_string();
+            let root_volume_gb = rn.root_volume_gb.unwrap_or(100);
+            cloud_interface
+                .fetch_machine_image(&region, &rn.image_id)
+                .await?;
+
+            recovery_nodes_to_insert.push(RecoveryNode {
+                id: utils::generate_id(),
+                cluster_id: new_cluster_id.clone(),
+                allocation_mode,
+                preferred_instance_types: serde_json::to_string(&rn.preferred_instance_types)?,
+                burstable_mode: rn.burstable_mode.clone(),
+                image_id: rn.image_id.clone(),
+                root_volume_gb,
+                root_volume_type,
+                root_volume_iops: rn.root_volume_iops,
+            });
+        }
+        tracing::info!(
+            "Recovery policy: {} node slot(s) defined",
+            recovery_nodes_to_insert.len()
+        );
+    }
+
     if !utils::user_confirmation(
         skip_confirmation,
         "Do you want to proceed creating this cluster?",
@@ -688,7 +763,7 @@ pub async fn create(
         cost_breakdown,
     };
     cluster
-        .insert(pool, nodes_to_insert, commands_to_insert)
+        .insert(pool, nodes_to_insert, commands_to_insert, recovery_nodes_to_insert)
         .await?;
 
     tracing::info!(

@@ -211,6 +211,70 @@ impl AwsInterface {
         Ok(())
     }
 
+    /// Delete any detached ENI whose private IP matches `private_ip`.
+    /// Used by the scale-down path to clean up the dead node's ENI before it
+    /// blocks security-group and subnet deletion on cluster termination.
+    pub async fn delete_detached_eni_by_private_ip(
+        &self,
+        region: &str,
+        private_ip: &str,
+    ) -> Result<()> {
+        let ec2_client = self.get_ec2_client(region).await?;
+
+        let response = match ec2_client
+            .describe_network_interfaces()
+            .filters(
+                aws_sdk_ec2::types::Filter::builder()
+                    .name("addresses.private-ip-address")
+                    .values(private_ip)
+                    .build(),
+            )
+            .filters(
+                aws_sdk_ec2::types::Filter::builder()
+                    .name("status")
+                    .values("available")
+                    .build(),
+            )
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(
+                    "Could not describe ENIs for private IP '{}': {}",
+                    private_ip,
+                    e
+                );
+                return Ok(());
+            }
+        };
+
+        for eni in response.network_interfaces() {
+            if let Some(eni_id) = eni.network_interface_id() {
+                match ec2_client
+                    .delete_network_interface()
+                    .network_interface_id(eni_id)
+                    .send()
+                    .await
+                {
+                    Ok(_) => tracing::info!(
+                        "Deleted orphaned ENI '{}' for private IP '{}'",
+                        eni_id,
+                        private_ip
+                    ),
+                    Err(e) => tracing::warn!(
+                        "Could not delete ENI '{}' for private IP '{}': {}",
+                        eni_id,
+                        private_ip,
+                        e
+                    ),
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     async fn wait_for_eni_status(
         &self,
         context: &AwsClusterContext,

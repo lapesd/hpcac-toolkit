@@ -136,6 +136,15 @@ enum ClusterCommands {
         /// Health check interval in seconds (default: 30)
         #[arg(long, default_value = "30")]
         interval: u64,
+
+        /// Path to a tasks YAML file to relaunch automatically after each restore
+        #[arg(long)]
+        tasks_yaml: Option<String>,
+
+        /// Scale-down mode: on failure, remove the failed node and relaunch on
+        /// remaining nodes instead of provisioning a replacement
+        #[arg(long, default_value_t = false)]
+        no_replace: bool,
     },
 }
 
@@ -322,8 +331,10 @@ async fn main() -> Result<()> {
             ClusterCommands::Watch {
                 cluster_id,
                 interval,
+                tasks_yaml,
+                no_replace,
             } => {
-                commands::cluster::watch(&sqlite_pool, cluster_id, *interval).await?;
+                commands::cluster::watch(&sqlite_pool, cluster_id, *interval, tasks_yaml.as_deref(), *no_replace).await?;
             }
         },
         Commands::InstanceType { command } => match command {

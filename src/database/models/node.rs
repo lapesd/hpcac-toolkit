@@ -158,6 +158,41 @@ impl Node {
         Ok(())
     }
 
+    /// Updates instance_type and allocation_mode in-place when recovery policy
+    /// specifies a different spec for this node slot.
+    pub async fn update_instance_spec(
+        &self,
+        pool: &SqlitePool,
+        instance_type: &str,
+        allocation_mode: &str,
+    ) -> Result<()> {
+        match sqlx::query!(
+            r#"UPDATE nodes SET instance_type = ?, allocation_mode = ? WHERE id = ?"#,
+            instance_type,
+            allocation_mode,
+            self.id,
+        )
+        .execute(pool)
+        .await
+        {
+            Ok(result) => {
+                if result.rows_affected() == 0 {
+                    anyhow::bail!("Node '{}' not found for instance spec update", self.id);
+                }
+            }
+            Err(e) => anyhow::bail!("DB Operation Failure: {}", e),
+        }
+        Ok(())
+    }
+
+    pub async fn delete_by_private_ip(pool: &SqlitePool, private_ip: &str) -> Result<()> {
+        sqlx::query!(r#"DELETE FROM nodes WHERE private_ip = ?"#, private_ip)
+            .execute(pool)
+            .await
+            .map_err(|e| anyhow::anyhow!("DB Operation Failure: {}", e))?;
+        Ok(())
+    }
+
     pub async fn fetch_by_private_ip(pool: &SqlitePool, private_ip: &str) -> Result<Option<Node>> {
         match sqlx::query_as!(
             Node,

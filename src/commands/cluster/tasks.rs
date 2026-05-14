@@ -121,7 +121,8 @@ pub async fn tasks(pool: &SqlitePool, yaml_file_path: &str) -> Result<()> {
         ) => r,
         _ = tokio::signal::ctrl_c() => {
             tracing::info!("Interrupted (Ctrl+C). Cleaning up...");
-            if let Some(session) = active_session.lock().unwrap().take() {
+            let session = active_session.lock().unwrap().take();
+            if let Some(session) = session {
                 tracing::info!("Killing remote tmux session '{}'...", session);
                 let _ = head_ssh
                     .run_command(&format!("tmux kill-session -t {} 2>/dev/null; true", session))

@@ -5,8 +5,10 @@ use aws_config::{BehaviorVersion, Region, SdkConfig};
 use aws_credential_types::{Credentials, provider::SharedCredentialsProvider};
 use aws_sdk_ec2::Client as Ec2Client;
 use aws_sdk_efs::Client as EfsClient;
+use aws_sdk_eventbridge::Client as EventBridgeClient;
 use aws_sdk_pricing::Client as PricingClient;
 use aws_sdk_servicequotas::Client as ServiceQuotasClient;
+use aws_sdk_sqs::Client as SqsClient;
 use std::collections::HashMap;
 
 /// Context struct containing all cluster-related information and resource identifiers
@@ -203,6 +205,18 @@ impl AwsInterface {
     pub async fn _get_service_quotas_client(&self, region: &str) -> Result<ServiceQuotasClient> {
         let config = self.get_config(region).await?;
         Ok(ServiceQuotasClient::new(&config))
+    }
+
+    /// Get an SQS client configured with the provided credentials and region.
+    pub async fn get_sqs_client(&self, region: &str) -> Result<SqsClient> {
+        let config = self.get_config(region).await?;
+        Ok(SqsClient::new(&config))
+    }
+
+    /// Get an EventBridge client configured with the provided credentials and region.
+    pub async fn get_eventbridge_client(&self, region: &str) -> Result<EventBridgeClient> {
+        let config = self.get_config(region).await?;
+        Ok(EventBridgeClient::new(&config))
     }
 
     /// Create a ClusterContext for the given cluster.

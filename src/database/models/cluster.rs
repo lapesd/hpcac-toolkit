@@ -1,4 +1,4 @@
-use crate::database::models::{InstanceType, Node, ProviderConfig, ShellCommand};
+use crate::database::models::{InstanceType, Node, ProviderConfig, RecoveryNode, ShellCommand};
 
 use anyhow::Result;
 use chrono::NaiveDateTime;
@@ -294,6 +294,7 @@ impl Cluster {
         pool: &SqlitePool,
         nodes: Vec<Node>,
         commands: Vec<ShellCommand>,
+        recovery_nodes: Vec<RecoveryNode>,
     ) -> Result<()> {
         tracing::info!(
             "Starting cluster insertion transaction for cluster_id: {}",
@@ -409,6 +410,13 @@ impl Cluster {
             }
 
             command.insert(&mut tx).await?;
+        }
+
+        if !recovery_nodes.is_empty() {
+            tracing::info!("Inserting {} Recovery Nodes", recovery_nodes.len());
+            for rn in &recovery_nodes {
+                rn.insert(&mut tx).await?;
+            }
         }
 
         tracing::info!("Committing transaction");

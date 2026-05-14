@@ -147,7 +147,7 @@ pub async fn spawn(pool: &SqlitePool, cluster_id: &str, skip_confirmation: bool,
             Ok(_) => return Ok(()),
             Err(e) => {
                 let msg = e.to_string();
-                if attempt < retry && msg.contains("InsufficientInstanceCapacity") {
+                if attempt < retry && (msg.contains("InsufficientInstanceCapacity") || msg.contains("InvalidNetworkInterface.InUse")) {
                     attempt += 1;
                     tracing::warn!(
                         "InsufficientInstanceCapacity — retrying in 60s (attempt {}/{})...",

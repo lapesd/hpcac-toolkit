@@ -30,9 +30,11 @@ impl CloudResourceManager for AwsInterface {
         let spawning_message = format!("Spawning Cluster '{}'...", cluster.display_name);
         tracing::info!(spawning_message);
 
-        let new_state = match cluster.state {
-            ClusterState::Running => ClusterState::Restoring,
-            _ => ClusterState::Spawning,
+        let is_restore = cluster.state == ClusterState::Running;
+        let new_state = if is_restore {
+            ClusterState::Restoring
+        } else {
+            ClusterState::Spawning
         };
         cluster.update_state(pool, new_state).await?;
 
@@ -377,6 +379,16 @@ echo "EFS mount and setup complete!"
             "Cluster spawn completed successfully. Head node: ssh ec2-user@{}",
             head_public_ip
         );
+
+        if !is_restore && nodes.iter().any(|n| n.allocation_mode == "spot") {
+            if let Err(e) = self
+                .ensure_spot_interruption_queue(&cluster.id, &cluster.region)
+                .await
+            {
+                tracing::warn!("Could not set up spot interruption queue: {}", e);
+            }
+        }
+
         Ok(())
     }
 
@@ -398,6 +410,21 @@ echo "EFS mount and setup complete!"
 
         let terminating_message = format!("Terminating Cluster '{}'...", cluster.display_name);
         tracing::info!(terminating_message);
+
+        let has_spot_nodes = nodes.iter().any(|n| n.allocation_mode == "spot");
+        if has_spot_nodes {
+            if let Ok(Some(queue_url)) = self
+                .get_spot_interruption_queue_url(&cluster.id, &cluster.region)
+                .await
+            {
+                if let Err(e) = self
+                    .cleanup_spot_interruption_queue(&cluster.id, &cluster.region, &queue_url)
+                    .await
+                {
+                    tracing::warn!("Could not clean up spot interruption queue: {}", e);
+                }
+            }
+        }
 
         cluster
             .update_state(pool, ClusterState::Terminating)
