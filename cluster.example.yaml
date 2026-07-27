@@ -44,3 +44,43 @@ nodes:
     allocation_mode: on-demand
     burstable_mode: Standard         # Standard | Unlimited. Only valid for burstable (t3, t4g, ...) types.
     image_id: ami-054a22e068102419a
+
+# ─────────────────────────────────────────────────────────────────────────────
+# on_interruption — optional recovery policy.
+#
+# If omitted, `hpcac cluster watch` re-spawns failed nodes with the SAME spec
+# (1:1 replacement of the original slot). Define this block to customize per-slot
+# recovery behavior: different instance types, spot→on-demand promotion, or
+# scale-up (replace one failed node with multiple new ones).
+#
+# The `nodes` list is indexed by slot (0, 1, 2, ...) matching the top-level
+# `nodes:` list above by insertion order. Each entry defines what to spawn if
+# that slot's node fails.
+# ─────────────────────────────────────────────────────────────────────────────
+# on_interruption:
+#   nodes:
+#     # Slot 0 — same-size replacement, same instance type, promoted to on-demand.
+#     # Use this when you want a spot instance to be replaced by an on-demand
+#     # one on interruption (trades cost for reliability).
+#     - preferred_instance_types: [c5.4xlarge]  # Ranked fallback list; first available in region wins.
+#       allocation_mode: on-demand
+#       image_id: ami-054a22e068102419a
+#       # root_volume_gb, root_volume_type, root_volume_iops, burstable_mode
+#       # all follow the same rules as top-level nodes[] and are optional.
+#
+#     # Slot 1 — scale-up: on failure, provision 4 replacements instead of 1.
+#     # Net cluster size grows by (count - 1) after this slot fails.
+#     # Useful for elastic HPC restarts on richer spot capacity.
+#     - preferred_instance_types: [c5.4xlarge, c6i.4xlarge, c7i.4xlarge]
+#       allocation_mode: spot
+#       image_id: ami-054a22e068102419a
+#       count: 4                                # Optional, default 1. Must be ≥ 1.
+#
+#     # Slot 2 — heterogeneous replacement: swap a CPU node for a GPU node
+#     # on interruption. The restarting job must be able to handle mixed hardware
+#     # (task-based runtimes like StarPU support this natively via device-aware
+#     # codelets; MPI+OpenMP applications typically do not).
+#     - preferred_instance_types: [g5.2xlarge, g6.2xlarge]
+#       allocation_mode: on-demand
+#       image_id: ami-054a22e068102419a         # Must be a compatible AMI for the target family.
+#       root_volume_gb: 100

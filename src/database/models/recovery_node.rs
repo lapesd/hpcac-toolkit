@@ -13,6 +13,11 @@ pub struct RecoveryNode {
     pub root_volume_gb: i64,
     pub root_volume_type: String,
     pub root_volume_iops: Option<i64>,
+    /// Number of nodes to provision for this slot on recovery.
+    /// Default 1 preserves same-size (1:1) replacement. `count > 1` enables scale-up:
+    /// the failed slot's original node is respawned with this spec, and
+    /// (count - 1) additional Node rows are created in the DB with the same spec.
+    pub count: i64,
 }
 
 impl RecoveryNode {
@@ -38,9 +43,10 @@ impl RecoveryNode {
                     image_id,
                     root_volume_gb,
                     root_volume_type,
-                    root_volume_iops
+                    root_volume_iops,
+                    count
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
             self.id,
             self.cluster_id,
@@ -51,6 +57,7 @@ impl RecoveryNode {
             self.root_volume_gb,
             self.root_volume_type,
             self.root_volume_iops,
+            self.count,
         )
         .execute(&mut **tx)
         .await
@@ -81,7 +88,8 @@ impl RecoveryNode {
                     image_id,
                     root_volume_gb,
                     root_volume_type,
-                    root_volume_iops
+                    root_volume_iops,
+                    count
                 FROM recovery_nodes
                 WHERE cluster_id = ?
             "#,

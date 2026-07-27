@@ -85,6 +85,9 @@ struct RecoveryNodeYaml {
     root_volume_gb: Option<i64>,
     root_volume_type: Option<String>,
     root_volume_iops: Option<i64>,
+    /// Number of nodes to provision for this slot on recovery. Default 1.
+    /// Values > 1 enable scale-up: the failed slot is replaced by `count` nodes.
+    count: Option<i64>,
 }
 
 pub async fn create(
@@ -717,6 +720,13 @@ pub async fn create(
                 .fetch_machine_image(&region, &rn.image_id)
                 .await?;
 
+            let count = rn.count.unwrap_or(1);
+            if count < 1 {
+                anyhow::bail!(
+                    "on_interruption.nodes[]: count must be >= 1 (got {})",
+                    count
+                );
+            }
             recovery_nodes_to_insert.push(RecoveryNode {
                 id: utils::generate_id(),
                 cluster_id: new_cluster_id.clone(),
@@ -727,6 +737,7 @@ pub async fn create(
                 root_volume_gb,
                 root_volume_type,
                 root_volume_iops: rn.root_volume_iops,
+                count,
             });
         }
         tracing::info!(

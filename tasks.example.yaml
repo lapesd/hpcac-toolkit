@@ -1,174 +1,124 @@
-cluster_id: 1_c5-4xlarge
+# ─────────────────────────────────────────────────────────────────────────────
+# tasks.example.yaml — template for `hpcac cluster tasks --file <path>`.
+#
+# A tasks YAML defines a sequence of shell scripts to run on a spawned cluster.
+# Tasks execute sequentially in the order listed. Each task can be repeated
+# N times (repeat: N) to gather statistics.
+#
+# Per-task environment variables set by hpcac:
+#   HPCAC_HOSTFILE     — path to an MPI hostfile on the head node (one line/host).
+#   HPCAC_RUN_INDEX    — the current repeat index (1..repeat). Use it to
+#                        namespace per-run output directories.
+#
+# Results:
+#   results_remote_dir — path on the head node where scripts should write output.
+#   results_local_dir  — local path where hpcac downloads results after each task.
+# ─────────────────────────────────────────────────────────────────────────────
+
+cluster_id: MyClusterId               # Must match a cluster created via `cluster create`.
 results_remote_dir: /home/ec2-user/results
-results_local_dir: ~/Code/hpcac-toolkit/experiments/results
+results_local_dir: ~/Code/hpcac-toolkit/experiments/my-experiment
+
+# Optional: files uploaded from local machine to every node's shared filesystem
+# BEFORE the first task runs. Skip if data is already staged (e.g., via S3).
+# uploads:
+#   - local: ~/Code/starfwi/.local_shared_volume/marmousi2/MODEL_P-WAVE_VELOCITY_1.25m.segy
+#     remote: /shared/marmousi2/MODEL_P-WAVE_VELOCITY_1.25m.segy
 
 tasks:
-  # Step 1: generate observed seismograms from the true velocity model.
-  # Must run once before any FWI tasks. repeat: 1 since outputs are deterministic.
-  - name: modeling-32shots
+
+  # ── Setup task: generate observed data once ───────────────────────────────
+  # repeat: 1 because outputs are deterministic.
+  - name: modeling
     mpi_slots_per_host: 1
     repeat: 1
     script: |
       set -e
       NP=$(wc -l < $HPCAC_HOSTFILE)
-      OBSERVED_DIR=/shared/observed/32shots
-      mkdir -p "$OBSERVED_DIR"
+      mkdir -p /shared/observed /home/ec2-user/results
 
       STARPU_WORKERS_GETBIND=0 mpirun --bind-to none \
         --hostfile $HPCAC_HOSTFILE \
         -np $NP \
         starfwi-modeling \
           --shots 32 \
-          --observed-dir "$OBSERVED_DIR" \
-          --wavefield-dir /tmp \
+          --observed-dir /shared/observed \
+          --wavefield-dir /home/ec2-user/wavefields \
           /shared/marmousi2/MODEL_P-WAVE_VELOCITY_1.25m.segy \
-        2>&1 | tee /home/ec2-user/results/modeling-32shots.log
+        2>&1 | tee /home/ec2-user/results/modeling.log
 
-  - name: checkpointing-overhead-32shots
+  # ── Baseline (no checkpointing) ────────────────────────────────────────────
+  # Single run to establish the reference for overhead measurements.
+  - name: baseline
     mpi_slots_per_host: 1
-    repeat: 5
+    repeat: 1
     script: |
       set -e
       NP=$(wc -l < $HPCAC_HOSTFILE)
-      OBSERVED_DIR=/shared/observed/32shots
-      RESULT_DIR=/home/ec2-user/results/run_${HPCAC_RUN_INDEX}
-      CHECKPOINT_DIR=/shared/checkpoints/32shots/run_${HPCAC_RUN_INDEX}
-      mkdir -p "$RESULT_DIR" "$CHECKPOINT_DIR"
+      RESULT_DIR=/home/ec2-user/results/baseline/run_${HPCAC_RUN_INDEX}
+      mkdir -p "$RESULT_DIR"
 
       STARPU_WORKERS_GETBIND=0 mpirun --bind-to none \
         --hostfile $HPCAC_HOSTFILE \
         -np $NP \
         starfwi-fwi \
           --shots 32 \
-          --observed-dir "$OBSERVED_DIR" \
-          --checkpoint-dir "$CHECKPOINT_DIR" \
-          --checkpoint-interval 8 \
-          --wavefield-dir /tmp \
+          --iterations 1 \
+          --observed-dir /shared/observed \
+          --wavefield-dir /home/ec2-user/wavefields \
           /shared/marmousi2/MODEL_P-WAVE_VELOCITY_1.25m.segy \
         2>&1 | tee "$RESULT_DIR/starfwi.log"
 
-  - name: modeling-64shots
-    mpi_slots_per_host: 1
-    repeat: 1
-    script: |
-      set -e
-      NP=$(wc -l < $HPCAC_HOSTFILE)
-      OBSERVED_DIR=/shared/observed/64shots
-      mkdir -p "$OBSERVED_DIR"
-
-      STARPU_WORKERS_GETBIND=0 mpirun --bind-to none \
-        --hostfile $HPCAC_HOSTFILE \
-        -np $NP \
-        starfwi-modeling \
-          --shots 64 \
-          --observed-dir "$OBSERVED_DIR" \
-          --wavefield-dir /tmp \
-          /shared/marmousi2/MODEL_P-WAVE_VELOCITY_1.25m.segy \
-        2>&1 | tee /home/ec2-user/results/modeling-64shots.log
-
-  - name: checkpointing-overhead-64shots
+  # ── Parameter sweep with repeats ───────────────────────────────────────────
+  # repeat: 5 runs the script five times, incrementing HPCAC_RUN_INDEX.
+  # Use it to namespace per-run outputs so results don't overwrite each other.
+  - name: checkpointing-overhead-k4
     mpi_slots_per_host: 1
     repeat: 5
     script: |
       set -e
       NP=$(wc -l < $HPCAC_HOSTFILE)
-      OBSERVED_DIR=/shared/observed/64shots
-      RESULT_DIR=/home/ec2-user/results/run_${HPCAC_RUN_INDEX}
-      CHECKPOINT_DIR=/shared/checkpoints/64shots/run_${HPCAC_RUN_INDEX}
-      mkdir -p "$RESULT_DIR" "$CHECKPOINT_DIR"
+      RESULT_DIR=/home/ec2-user/results/overhead-k4/run_${HPCAC_RUN_INDEX}
+      CP_DIR=/shared/checkpoints/overhead-k4/run_${HPCAC_RUN_INDEX}
+      mkdir -p "$RESULT_DIR" "$CP_DIR"
 
       STARPU_WORKERS_GETBIND=0 mpirun --bind-to none \
         --hostfile $HPCAC_HOSTFILE \
         -np $NP \
         starfwi-fwi \
-          --shots 64 \
-          --observed-dir "$OBSERVED_DIR" \
-          --checkpoint-dir "$CHECKPOINT_DIR" \
-          --checkpoint-interval 16 \
-          --wavefield-dir /tmp \
+          --shots 32 \
+          --iterations 1 \
+          --observed-dir /shared/observed \
+          --checkpoint-dir "$CP_DIR" \
+          --checkpoint-interval 4 \
+          --wavefield-dir /home/ec2-user/wavefields \
           /shared/marmousi2/MODEL_P-WAVE_VELOCITY_1.25m.segy \
         2>&1 | tee "$RESULT_DIR/starfwi.log"
 
-  - name: modeling-128shots
+  # ── Recovery-run task (for use with `cluster watch --tasks-yaml`) ──────────
+  # `watch` relaunches this task automatically after a successful restore.
+  # The script itself doesn't need to know it's a recovery run — StarFWI (or your
+  # MPI application) detects the existing checkpoint on shared storage and
+  # resumes from it.
+  - name: recovery-run
     mpi_slots_per_host: 1
     repeat: 1
     script: |
       set -e
       NP=$(wc -l < $HPCAC_HOSTFILE)
-      OBSERVED_DIR=/shared/observed/128shots
-      mkdir -p "$OBSERVED_DIR"
-
-      STARPU_WORKERS_GETBIND=0 mpirun --bind-to none \
-        --hostfile $HPCAC_HOSTFILE \
-        -np $NP \
-        starfwi-modeling \
-          --shots 128 \
-          --observed-dir "$OBSERVED_DIR" \
-          --wavefield-dir /tmp \
-          /shared/marmousi2/MODEL_P-WAVE_VELOCITY_1.25m.segy \
-        2>&1 | tee /home/ec2-user/results/modeling-128shots.log
-
-  - name: checkpointing-overhead-128shots
-    mpi_slots_per_host: 1
-    repeat: 5
-    script: |
-      set -e
-      NP=$(wc -l < $HPCAC_HOSTFILE)
-      OBSERVED_DIR=/shared/observed/128shots
-      RESULT_DIR=/home/ec2-user/results/run_${HPCAC_RUN_INDEX}
-      CHECKPOINT_DIR=/shared/checkpoints/128shots/run_${HPCAC_RUN_INDEX}
-      mkdir -p "$RESULT_DIR" "$CHECKPOINT_DIR"
+      RESULT_DIR=/home/ec2-user/results/recovery-run/run_${HPCAC_RUN_INDEX}
+      CP_DIR=/shared/checkpoints/recovery
+      mkdir -p "$RESULT_DIR"
 
       STARPU_WORKERS_GETBIND=0 mpirun --bind-to none \
         --hostfile $HPCAC_HOSTFILE \
         -np $NP \
         starfwi-fwi \
-          --shots 128 \
-          --observed-dir "$OBSERVED_DIR" \
-          --checkpoint-dir "$CHECKPOINT_DIR" \
-          --checkpoint-interval 32 \
-          --wavefield-dir /tmp \
-          /shared/marmousi2/MODEL_P-WAVE_VELOCITY_1.25m.segy \
-        2>&1 | tee "$RESULT_DIR/starfwi.log"
-
-  - name: modeling-256shots
-    mpi_slots_per_host: 1
-    repeat: 1
-    script: |
-      set -e
-      NP=$(wc -l < $HPCAC_HOSTFILE)
-      OBSERVED_DIR=/shared/observed/256shots
-      mkdir -p "$OBSERVED_DIR"
-
-      STARPU_WORKERS_GETBIND=0 mpirun --bind-to none \
-        --hostfile $HPCAC_HOSTFILE \
-        -np $NP \
-        starfwi-modeling \
-          --shots 256 \
-          --observed-dir "$OBSERVED_DIR" \
-          --wavefield-dir /tmp \
-          /shared/marmousi2/MODEL_P-WAVE_VELOCITY_1.25m.segy \
-        2>&1 | tee /home/ec2-user/results/modeling-256shots.log
-
-  - name: checkpointing-overhead-256shots
-    mpi_slots_per_host: 1
-    repeat: 5
-    script: |
-      set -e
-      NP=$(wc -l < $HPCAC_HOSTFILE)
-      OBSERVED_DIR=/shared/observed/256shots
-      RESULT_DIR=/home/ec2-user/results/run_${HPCAC_RUN_INDEX}
-      CHECKPOINT_DIR=/shared/checkpoints/256shots/run_${HPCAC_RUN_INDEX}
-      mkdir -p "$RESULT_DIR" "$CHECKPOINT_DIR"
-
-      STARPU_WORKERS_GETBIND=0 mpirun --bind-to none \
-        --hostfile $HPCAC_HOSTFILE \
-        -np $NP \
-        starfwi-fwi \
-          --shots 256 \
-          --observed-dir "$OBSERVED_DIR" \
-          --checkpoint-dir "$CHECKPOINT_DIR" \
-          --checkpoint-interval 64 \
-          --wavefield-dir /tmp \
+          --shots 32 \
+          --iterations 5 \
+          --observed-dir /shared/observed \
+          --checkpoint-dir "$CP_DIR" \
+          --checkpoint-interval 4 \
+          --wavefield-dir /home/ec2-user/wavefields \
           /shared/marmousi2/MODEL_P-WAVE_VELOCITY_1.25m.segy \
         2>&1 | tee "$RESULT_DIR/starfwi.log"

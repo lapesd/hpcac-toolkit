@@ -277,6 +277,12 @@ pub async fn watch(
 /// Nodes are sorted by private IP (consistent with tasks.rs) to establish stable
 /// slot indices. For each failed node, the corresponding recovery node slot (by
 /// index) is used to update the node's instance type and allocation mode in the DB.
+///
+/// If a recovery slot specifies `count > 1`, additional Node rows are inserted with
+/// the same replacement spec, expanding the cluster on restart (scale-up recovery).
+/// The additional rows are created with empty private_ip/public_ip; they will be
+/// assigned by spawn_cluster during ENI provisioning.
+///
 /// Returns the refreshed node list to pass to spawn_cluster.
 async fn apply_recovery_policy(
     pool: &SqlitePool,
@@ -291,7 +297,34 @@ async fn apply_recovery_policy(
 
     nodes.sort_by(|a, b| a.private_ip.cmp(&b.private_ip));
 
-    for (slot_index, node) in nodes.iter().enumerate() {
+    // Snapshot node identity we need across the loop (avoids borrow issues when we
+    // later start a transaction to insert additional Node rows).
+    #[derive(Clone)]
+    struct NodeSlot {
+        id: String,
+        cluster_id: String,
+        private_ip: Option<String>,
+    }
+    let node_slots: Vec<NodeSlot> = nodes
+        .iter()
+        .map(|n| NodeSlot {
+            id: n.id.clone(),
+            cluster_id: n.cluster_id.clone(),
+            private_ip: n.private_ip.clone(),
+        })
+        .collect();
+
+    // Fan-out entries deferred until after in-place updates so the read-only slot
+    // scan sees a stable node list.
+    struct FanOut<'a> {
+        slot_index: usize,
+        extra: i64, // number of ADDITIONAL nodes beyond the 1:1 replacement
+        recovery: &'a RecoveryNode,
+        instance_type: String,
+    }
+    let mut fanouts: Vec<FanOut> = Vec::new();
+
+    for (slot_index, node) in node_slots.iter().enumerate() {
         let ip = match node.private_ip.as_deref() {
             Some(ip) => ip,
             None => continue,
@@ -315,14 +348,72 @@ async fn apply_recovery_policy(
             continue;
         };
         tracing::info!(
-            "Applying recovery policy to slot {} (ip='{}'): {} / {}",
+            "Applying recovery policy to slot {} (ip='{}'): {} / {} (count={})",
             slot_index,
             ip,
             instance_type,
-            recovery.allocation_mode
+            recovery.allocation_mode,
+            recovery.count
         );
-        node.update_instance_spec(pool, &instance_type, &recovery.allocation_mode)
+
+        // In-place: update the failed slot's original Node row to the new spec.
+        // spawn_cluster respawns this node with the updated spec.
+        let target = nodes
+            .iter()
+            .find(|n| n.id == node.id)
+            .expect("slot id present in nodes");
+        target
+            .update_instance_spec(pool, &instance_type, &recovery.allocation_mode)
             .await?;
+
+        // Fan-out: queue (count - 1) additional Node rows for this slot.
+        if recovery.count > 1 {
+            fanouts.push(FanOut {
+                slot_index,
+                extra: recovery.count - 1,
+                recovery,
+                instance_type,
+            });
+        }
+    }
+
+    // Materialize scale-up rows in a single transaction so partial failures roll back.
+    if !fanouts.is_empty() {
+        let mut tx = pool.begin().await?;
+        let mut total_added = 0i64;
+        for fo in &fanouts {
+            for _ in 0..fo.extra {
+                let new_node = Node {
+                    id: utils::generate_id(),
+                    cluster_id: cluster.id.clone(),
+                    instance_type: fo.instance_type.clone(),
+                    allocation_mode: fo.recovery.allocation_mode.clone(),
+                    burstable_mode: fo.recovery.burstable_mode.clone(),
+                    image_id: fo.recovery.image_id.clone(),
+                    root_volume_gb: fo.recovery.root_volume_gb,
+                    root_volume_type: fo.recovery.root_volume_type.clone(),
+                    root_volume_iops: fo.recovery.root_volume_iops,
+                    private_ip: None,
+                    public_ip: None,
+                    was_efs_configured: false,
+                    was_ssh_configured: false,
+                };
+                new_node.insert(&mut tx).await?;
+                total_added += 1;
+            }
+            tracing::info!(
+                "Scale-up: slot {} expanded by {} extra node(s) → spec {} / {}",
+                fo.slot_index,
+                fo.extra,
+                fo.instance_type,
+                fo.recovery.allocation_mode
+            );
+        }
+        tx.commit().await?;
+        tracing::info!(
+            "Scale-up: inserted {} additional Node row(s) for spawn",
+            total_added
+        );
     }
 
     Ok(cluster.get_nodes(pool).await?)
