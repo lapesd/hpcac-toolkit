@@ -261,6 +261,12 @@ impl CloudResourceManager for AwsInterface {
 
         // 18. (conditional) Attach EC2 Instances to EFS mount target via SSH
         if cluster.use_elastic_file_system {
+            // Mount by IP address rather than DNS name to bypass systemd-resolved's
+            // NXDOMAIN negative-caching, which was causing mount failures during
+            // early boot even after the mount target reached the "available" state.
+            let efs_mount_ip = self
+                .get_elastic_file_system_mount_target_ip(&context)
+                .await?;
             let efs_dns_name = format!(
                 "{}.efs.{}.amazonaws.com",
                 context.efs_device_id.clone().unwrap(),
@@ -293,20 +299,30 @@ impl CloudResourceManager for AwsInterface {
                         r#"
 rpm -q nfs-utils &>/dev/null || sudo yum install -y nfs-utils
 sudo mkdir -p /shared
-MAX_RETRIES=18
+# Primary: mount by IP (bypasses DNS entirely — no NXDOMAIN caching problems).
+# Fallback: mount by DNS name (only used if the IP-based mount fails, which
+# would indicate an infrastructure change — e.g., mount target replaced).
+MAX_RETRIES=6
 i=1
 while [ $i -le $MAX_RETRIES ]; do
-    echo "EFS mount attempt $i/$MAX_RETRIES..."
-    if sudo mount -t nfs4 {efs_dns_name}:/ /shared; then
-        echo "EFS mount successful!"
+    echo "EFS mount attempt $i/$MAX_RETRIES (IP={efs_mount_ip})..."
+    if sudo mount -t nfs4 -o retry=0,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport {efs_mount_ip}:/ /shared; then
+        echo "EFS mount successful (via IP)!"
         break
     fi
     if [ $i -eq $MAX_RETRIES ]; then
-        echo "EFS mount failed after $MAX_RETRIES attempts, giving up."
+        echo "EFS IP mount failed after $MAX_RETRIES attempts — falling back to DNS..."
+        # DNS fallback with cache flush and fast NFS retry.
+        sudo systemctl restart systemd-resolved 2>/dev/null || sudo nscd -i hosts 2>/dev/null || true
+        if sudo mount -t nfs4 -o retry=0,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport {efs_dns_name}:/ /shared; then
+            echo "EFS mount successful (via DNS fallback)!"
+            break
+        fi
+        echo "EFS mount failed via both IP and DNS, giving up."
         exit 1
     fi
-    echo "EFS mount failed, retrying in 10 seconds..."
-    sleep 10
+    echo "EFS mount failed, retrying in 5 seconds..."
+    sleep 5
     i=$((i + 1))
 done
 sudo chown ec2-user:ec2-user /shared

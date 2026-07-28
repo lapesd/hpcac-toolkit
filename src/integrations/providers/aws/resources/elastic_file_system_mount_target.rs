@@ -46,12 +46,16 @@ impl AwsInterface {
             }
         };
 
+        // Pin the mount target to a high IP outside the node-IP range (10.0.0.10+).
+        // AWS's DHCP for EFS mount targets is non-deterministic and can grab low IPs
+        // that collide with node ENIs (see interface.rs:network_interface_private_ip).
         let new_mount_target_id = match context
             .efs_client
             .create_mount_target()
             .file_system_id(efs_id.clone())
             .subnet_id(subnet_id.clone())
             .security_groups(&context.security_group_ids[0])
+            .ip_address("10.0.0.250")
             .send()
             .await
         {
@@ -131,6 +135,61 @@ impl AwsInterface {
 
             sleep(poll_interval).await;
         }
+    }
+
+    /// Fetches the IP address of the EFS mount target in the cluster's subnet.
+    /// Used to mount the EFS by IP instead of DNS name, sidestepping systemd-resolved's
+    /// NXDOMAIN negative-caching behavior that has caused mount failures during
+    /// early instance boot (see resource_manager.rs EFS attach script).
+    ///
+    /// Must be called after the mount target reaches the "available" state (i.e.,
+    /// after `wait_for_elastic_file_system_mount_target_to_be_ready`).
+    pub async fn get_elastic_file_system_mount_target_ip(
+        &self,
+        context: &AwsClusterContext,
+    ) -> Result<String> {
+        let efs_id = context.efs_device_id.clone().unwrap();
+        let subnet_id = context.subnet_id.clone().unwrap();
+
+        let response = match context
+            .efs_client
+            .describe_mount_targets()
+            .file_system_id(&efs_id)
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!("{:?}", e);
+                anyhow::bail!("Failure describing mount targets for EFS (id='{}')", efs_id);
+            }
+        };
+
+        for mount_target_info in response.mount_targets() {
+            if subnet_id == mount_target_info.subnet_id() {
+                if let Some(ip) = mount_target_info.ip_address() {
+                    tracing::info!(
+                        "Mount target (id='{}') for EFS (id='{}') has IP '{}'",
+                        mount_target_info.mount_target_id(),
+                        efs_id,
+                        ip
+                    );
+                    return Ok(ip.to_string());
+                } else {
+                    anyhow::bail!(
+                        "Mount target (id='{}') in Subnet (id='{}') has no IP address (not yet provisioned)",
+                        mount_target_info.mount_target_id(),
+                        subnet_id
+                    );
+                }
+            }
+        }
+
+        anyhow::bail!(
+            "No mount target found for EFS (id='{}') in Subnet (id='{}')",
+            efs_id,
+            subnet_id
+        );
     }
 
     pub async fn request_elastic_file_system_mount_target_deletion(
