@@ -18,6 +18,13 @@ pub struct RecoveryNode {
     /// the failed slot's original node is respawned with this spec, and
     /// (count - 1) additional Node rows are created in the DB with the same spec.
     pub count: i64,
+    /// Init commands for the replacement, as a JSON array. NULL means "inherit":
+    /// an in-place replacement keeps whatever is already attached to its node row,
+    /// and scale-up nodes copy the slot they fan out from. Set this when the
+    /// replacement needs different preparation from the node it replaces — a GPU
+    /// stand-in for a CPU node has a local NVMe store to mount that the original
+    /// never had.
+    pub init_commands: Option<String>,
 }
 
 impl RecoveryNode {
@@ -29,6 +36,25 @@ impl RecoveryNode {
     /// Returns the highest-priority instance type.
     pub fn primary_instance_type(&self) -> Option<String> {
         self.instance_types().into_iter().next()
+    }
+
+    /// Init commands declared for this slot, in order. `None` means the slot
+    /// declares none and the inherit behaviour applies; `Some(vec![])` means an
+    /// explicitly empty list, which clears the replacement's commands.
+    pub fn declared_init_commands(&self) -> Option<Vec<String>> {
+        let raw = self.init_commands.as_deref()?;
+        match serde_json::from_str::<Vec<String>>(raw) {
+            Ok(commands) => Some(commands),
+            Err(e) => {
+                tracing::warn!(
+                    "Recovery node '{}' has unparseable init_commands ({}), ignoring: {}",
+                    self.id,
+                    e,
+                    raw
+                );
+                None
+            }
+        }
     }
 
     pub async fn insert(&self, tx: &mut Transaction<'_, sqlx::Sqlite>) -> Result<()> {
@@ -44,9 +70,10 @@ impl RecoveryNode {
                     root_volume_gb,
                     root_volume_type,
                     root_volume_iops,
-                    count
+                    count,
+                    init_commands
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
             self.id,
             self.cluster_id,
@@ -58,6 +85,7 @@ impl RecoveryNode {
             self.root_volume_type,
             self.root_volume_iops,
             self.count,
+            self.init_commands,
         )
         .execute(&mut **tx)
         .await
@@ -89,7 +117,8 @@ impl RecoveryNode {
                     root_volume_gb,
                     root_volume_type,
                     root_volume_iops,
-                    count
+                    count,
+                    init_commands
                 FROM recovery_nodes
                 WHERE cluster_id = ?
             "#,

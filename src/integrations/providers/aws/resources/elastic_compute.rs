@@ -4,13 +4,25 @@ use crate::integrations::providers::aws::{AwsInterface, interface::AwsClusterCon
 use anyhow::Result;
 use tokio::time::{Duration, sleep};
 
+/// Result of a launch. `instance_type` is the type that AWS actually accepted,
+/// which differs from the node's preferred type whenever a capacity fallback
+/// applied, so callers can persist what really came up.
+pub struct InstanceLaunch {
+    pub instance_id: String,
+    pub instance_type: String,
+}
+
 impl AwsInterface {
+    /// `candidate_instance_types` is an ordered preference list. The first entry
+    /// that AWS has capacity for wins. Pass an empty slice to launch exactly
+    /// `node.instance_type` with no fallback.
     pub async fn request_elastic_compute_instance_creation(
         &self,
         context: &AwsClusterContext,
         node: &Node,
         node_index: usize,
-    ) -> Result<String> {
+        candidate_instance_types: &[String],
+    ) -> Result<InstanceLaunch> {
         let instance_name = context.ec2_instance_name(node_index);
         let describe_instances_response = match context
             .ec2_client
@@ -44,7 +56,15 @@ impl AwsInterface {
                                         instance_id,
                                         state_name
                                     );
-                                    return Ok(instance_id.to_string());
+                                    // Report the live type, not the node's preferred one: an
+                                    // earlier attempt may already have fallen back.
+                                    return Ok(InstanceLaunch {
+                                        instance_id: instance_id.to_string(),
+                                        instance_type: instance
+                                            .instance_type()
+                                            .map(|t| t.as_str().to_string())
+                                            .unwrap_or_else(|| node.instance_type.clone()),
+                                    });
                                 }
                                 aws_sdk_ec2::types::InstanceStateName::Terminated
                                 | aws_sdk_ec2::types::InstanceStateName::ShuttingDown => {
@@ -115,13 +135,13 @@ impl AwsInterface {
             .ebs(ebs_builder.build())
             .build();
 
+        // Instance type is deliberately NOT set here — it is applied per attempt
+        // below, so a capacity fallback can vary it without rebuilding everything
+        // else (ENI, EBS, tags) that is identical across candidates.
         let mut run_instances_request = context
             .ec2_client
             .run_instances()
             .image_id(&node.image_id)
-            .instance_type(aws_sdk_ec2::types::InstanceType::from(
-                node.instance_type.as_str(),
-            ))
             .min_count(1)
             .max_count(1)
             .key_name(context.ssh_key_name.clone())
@@ -163,22 +183,133 @@ impl AwsInterface {
                 .build(),
         );
 
-        let run_instances_response = match run_instances_request.send().await {
-            Ok(response) => response,
-            Err(e) => {
-                tracing::error!("{:?}", e);
-                anyhow::bail!("Failure creating EC2 Instance resource: {:?}", e);
+        // Retry loop just for the run_instances API call. Catches
+        // InsufficientInstanceCapacity (transient AWS capacity shortage) and
+        // retries only this single request — no need to tear down and rebuild
+        // the VPC / subnet / EFS / ENIs / EIPs which are already in place.
+        //
+        // Each round walks the candidate types in preference order and takes the
+        // first that AWS has capacity for. Restarting every round from the head of
+        // the list means a preferred type that frees up is still picked over a
+        // fallback that was available earlier. Only when every candidate is refused
+        // does the round sleep and repeat.
+        const MAX_CAPACITY_ROUNDS: u32 = 10;
+        const CAPACITY_RETRY_DELAY_SECS: u64 = 30;
+
+        let candidates: Vec<String> = if candidate_instance_types.is_empty() {
+            vec![node.instance_type.clone()]
+        } else {
+            candidate_instance_types.to_vec()
+        };
+
+        let mut round: u32 = 0;
+        // Kept so the give-up message names what actually blocked the launch,
+        // rather than assuming it was a capacity shortage.
+        let mut last_transient_error = String::from("none");
+        let (run_instances_response, launched_instance_type) = loop {
+            let mut accepted = None;
+            for candidate in &candidates {
+                let attempt = run_instances_request
+                    .clone()
+                    .instance_type(aws_sdk_ec2::types::InstanceType::from(candidate.as_str()));
+                match attempt.send().await {
+                    Ok(response) => {
+                        accepted = Some((response, candidate.clone()));
+                        break;
+                    }
+                    Err(e) => {
+                        let msg = format!("{:?}", e);
+                        // Two distinct transient conditions land here.
+                        //
+                        // InsufficientInstanceCapacity: the provider has no capacity
+                        // for this type right now. Another type may still work, so the
+                        // loop falls through to the next candidate.
+                        //
+                        // InvalidNetworkInterface.InUse: on a restore we reuse the
+                        // failed node's ENI, and the terminating instance has not
+                        // released it yet. AWS itself marks this retryable. Switching
+                        // instance type does not help, but waiting does, so this is
+                        // purely a matter of retrying until the detach completes.
+                        // A fixed pre-launch sleep cannot cover it because detach time
+                        // is not bounded.
+                        let no_capacity = msg.contains("InsufficientInstanceCapacity");
+                        let eni_busy = msg.contains("InvalidNetworkInterface.InUse");
+                        if no_capacity || eni_busy {
+                            last_transient_error = if eni_busy {
+                                "InvalidNetworkInterface.InUse".to_string()
+                            } else {
+                                format!("InsufficientInstanceCapacity ({})", candidate)
+                            };
+                            if eni_busy {
+                                tracing::warn!(
+                                    "Network interface for '{}' is still attached to the terminating instance — will retry",
+                                    instance_name
+                                );
+                            } else if candidates.len() > 1 {
+                                tracing::warn!(
+                                    "InsufficientInstanceCapacity for '{}' as '{}' — trying next preferred type",
+                                    instance_name,
+                                    candidate
+                                );
+                            }
+                            continue;
+                        }
+                        // Anything that is not a capacity shortage (bad AMI for the
+                        // type, quota, malformed request) will not improve by
+                        // retrying or by switching type, so fail immediately.
+                        tracing::error!("{:?}", e);
+                        anyhow::bail!("Failure creating EC2 Instance resource: {:?}", e);
+                    }
+                }
             }
+
+            if let Some(accepted) = accepted {
+                break accepted;
+            }
+
+            round += 1;
+            if round > MAX_CAPACITY_ROUNDS {
+                anyhow::bail!(
+                    "Could not launch '{}' as any of [{}] after {} rounds ({}s). Last transient error: {}",
+                    instance_name,
+                    candidates.join(", "),
+                    MAX_CAPACITY_ROUNDS,
+                    MAX_CAPACITY_ROUNDS as u64 * CAPACITY_RETRY_DELAY_SECS,
+                    last_transient_error
+                );
+            }
+            tracing::warn!(
+                "Could not launch '{}' as any of [{}] — retrying in {}s (round {}/{})",
+                instance_name,
+                candidates.join(", "),
+                CAPACITY_RETRY_DELAY_SECS,
+                round,
+                MAX_CAPACITY_ROUNDS
+            );
+            sleep(Duration::from_secs(CAPACITY_RETRY_DELAY_SECS)).await;
         };
 
         if let Some(instance) = run_instances_response.instances().first() {
             if let Some(instance_id) = instance.instance_id() {
+                if launched_instance_type != node.instance_type {
+                    tracing::warn!(
+                        "Capacity fallback: '{}' launched as '{}' instead of preferred '{}'",
+                        instance_name,
+                        launched_instance_type,
+                        node.instance_type
+                    );
+                }
                 tracing::info!(
-                    "Requested new instance '{}' with ID '{}' and 100GB root volume",
+                    "Requested new instance '{}' (type='{}') with ID '{}' and {}GB root volume",
                     instance_name,
-                    instance_id
+                    launched_instance_type,
+                    instance_id,
+                    node.root_volume_gb
                 );
-                return Ok(instance_id.to_string());
+                return Ok(InstanceLaunch {
+                    instance_id: instance_id.to_string(),
+                    instance_type: launched_instance_type,
+                });
             }
         }
 

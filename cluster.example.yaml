@@ -45,6 +45,25 @@ nodes:
     burstable_mode: Standard         # Standard | Unlimited. Only valid for burstable (t3, t4g, ...) types.
     image_id: ami-054a22e068102419a
 
+  # Node with init_commands — shell run on the node after SSH is up, in order.
+  # A non-zero exit fails the spawn, so keep each command idempotent: a spawn
+  # that is retried, or resumed after a partial failure, runs them all again.
+  #
+  # NOTE: init_commands is a NODE field. There is no equivalent under
+  # on_interruption.nodes, so a replacement node provisioned by `cluster watch`
+  # does NOT inherit these. Anything a replacement needs must be baked into the AMI.
+  - instance_type: g6e.2xlarge
+    allocation_mode: on-demand
+    image_id: ami-054a22e068102419a
+    init_commands:
+      # Format and mount the local NVMe instance store at /mnt/nvme.
+      # Select the disk by AWS model string, never by device name. NVMe
+      # enumeration order is not stable across instance types: on g7e the EBS
+      # root appears as nvme1n1 and the instance store as nvme0n1, so a
+      # hardcoded /dev/nvme1n1 aims mkfs at the mounted root disk. The
+      # MOUNTPOINT test is a second guard against formatting a live filesystem.
+      - 'D=$(lsblk -dn -o NAME,MODEL | grep "Amazon EC2 NVMe Instance Storage" | head -1 | cut -d" " -f1); DEV=/dev/$D; if [ -n "$D" ] && ! lsblk -no MOUNTPOINT "$DEV" | grep -q . && ! mountpoint -q /mnt/nvme; then sudo mkdir -p /mnt/nvme && sudo mkfs.ext4 -F "$DEV" && sudo mount "$DEV" /mnt/nvme && sudo chown ec2-user:ec2-user /mnt/nvme; fi'
+
 # ─────────────────────────────────────────────────────────────────────────────
 # on_interruption — optional recovery policy.
 #

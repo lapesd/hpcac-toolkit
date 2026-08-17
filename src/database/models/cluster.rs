@@ -442,9 +442,13 @@ impl Cluster {
             }
         };
 
+        // Every table with a FOREIGN KEY onto clusters(id) must be cleared before
+        // the cluster row itself, or SQLite rejects the delete with code 787.
+        // recovery_nodes was introduced by migration 15 and belongs here too.
         for query in [
             "DELETE FROM shell_commands WHERE node_id IN (SELECT id FROM nodes WHERE cluster_id = ?)",
             "DELETE FROM task_runs WHERE cluster_id = ?",
+            "DELETE FROM recovery_nodes WHERE cluster_id = ?",
             "DELETE FROM nodes WHERE cluster_id = ?",
         ] {
             match sqlx::query(query).bind(cluster_id).execute(&mut *tx).await {
@@ -502,6 +506,7 @@ impl Cluster {
                     was_ssh_configured
                 FROM nodes
                 WHERE cluster_id = ?
+                ORDER BY rowid
             "#,
             self.id
         )

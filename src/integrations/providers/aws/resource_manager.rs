@@ -1,6 +1,6 @@
 use super::interface::AwsInterface;
 
-use crate::database::models::{Cluster, ClusterState, Node};
+use crate::database::models::{Cluster, ClusterState, Node, RecoveryNode};
 use crate::integrations::CloudResourceManager;
 use crate::utils;
 use crate::utils::ssh::SshSession;
@@ -14,7 +14,7 @@ impl CloudResourceManager for AwsInterface {
         &self,
         pool: &SqlitePool,
         cluster: Cluster,
-        nodes: Vec<Node>,
+        mut nodes: Vec<Node>,
     ) -> Result<()> {
         let mut context = self.create_cluster_context(&cluster).await?;
         let mut steps = 7 + (6 * nodes.len());
@@ -36,6 +36,23 @@ impl CloudResourceManager for AwsInterface {
         } else {
             ClusterState::Spawning
         };
+
+        // A cluster that isn't mid-restore has no live instances, so every node
+        // below gets a brand-new EC2 instance with nothing mounted on it. Any
+        // `was_efs_configured` flag still set from an earlier spawn is therefore
+        // stale — an interrupted or failed spawn leaves it set on the nodes that
+        // did mount, and step 16 would then skip those nodes and leave '/shared'
+        // empty. Clear it up front so the mount always runs on fresh instances.
+        // On a restore the surviving nodes really are still mounted, so their
+        // flags must be preserved and only the replacement nodes (inserted with
+        // the flag unset) get mounted.
+        if !matches!(cluster.state, ClusterState::Running | ClusterState::Restoring) {
+            for node in nodes.iter_mut().filter(|node| node.was_efs_configured) {
+                node.set_efs_configuration_state(pool, false).await?;
+                node.was_efs_configured = false;
+            }
+        }
+
         cluster.update_state(pool, new_state).await?;
 
         let (multi, _guard) = utils::ProgressTracker::create_multi();
@@ -186,20 +203,63 @@ impl CloudResourceManager for AwsInterface {
             }
         }
 
+        // A recovery slot may list several acceptable instance types in priority
+        // order. Key each list by its primary type so any node carrying that type
+        // — the replaced slot itself, plus any scale-up nodes fanned out from it —
+        // can fall back when the preferred type has no capacity. Slots with a
+        // single type are omitted, leaving those launches exactly as before.
+        //
+        // Restore only: on a first spawn the YAML's declared topology is the
+        // contract, and silently substituting a type would violate it.
+        let mut capacity_fallbacks: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        if is_restore {
+            for recovery_node in RecoveryNode::fetch_all_by_cluster_id(pool, &cluster.id).await? {
+                let types = recovery_node.instance_types();
+                if types.len() > 1 {
+                    let primary = types[0].clone();
+                    capacity_fallbacks.entry(primary).or_insert(types);
+                }
+            }
+        }
+
         // 12. Request EC2 Instances
-        for (node_index, node) in nodes.iter().enumerate() {
+        let node_count = nodes.len();
+        for (node_index, node) in nodes.iter_mut().enumerate() {
             // 12.1. Request EC2 instance creation...
             // TODO: Add Spot support
             operation_spinner.update_message(&format!(
                 "Requesting {} of {} EC2 Instances (type='{}')",
                 node_index + 1,
-                nodes.len(),
+                node_count,
                 node.instance_type
             ));
-            let instance_id = self
-                .request_elastic_compute_instance_creation(&context, node, node_index)
+            let candidates = capacity_fallbacks
+                .get(&node.instance_type)
+                .cloned()
+                .unwrap_or_default();
+            let launch = self
+                .request_elastic_compute_instance_creation(&context, node, node_index, &candidates)
                 .await?;
-            context.ec2_instance_ids.insert(node_index, instance_id);
+            context.ec2_instance_ids.insert(node_index, launch.instance_id);
+            // Persist a fallback so the DB describes the cluster that actually
+            // exists. Downstream cost reporting and any later restore read this.
+            if launch.instance_type != node.instance_type {
+                // Only the type changed here; a capacity fallback keeps the image
+                // and storage the slot already declared.
+                node.update_instance_spec(
+                    pool,
+                    &launch.instance_type,
+                    &node.allocation_mode,
+                    &node.image_id,
+                    node.burstable_mode.as_deref(),
+                    node.root_volume_gb,
+                    &node.root_volume_type,
+                    node.root_volume_iops,
+                )
+                .await?;
+                node.instance_type = launch.instance_type;
+            }
             main_progress.inc(1);
         }
 
@@ -629,7 +689,7 @@ echo "EFS mount and setup complete!"
             }
         }
 
-        match Node::fetch_by_private_ip(pool, node_private_ip).await? {
+        match Node::fetch_by_private_ip(pool, &cluster.id, node_private_ip).await? {
             Some(failed_node) => {
                 failed_node.set_efs_configuration_state(pool, false).await?;
                 tracing::info!(

@@ -214,6 +214,83 @@ impl AwsInterface {
     /// Delete any detached ENI whose private IP matches `private_ip`.
     /// Used by the scale-down path to clean up the dead node's ENI before it
     /// blocks security-group and subnet deletion on cluster termination.
+    /// Blocks until the ENIs for `private_ips` have been released by the
+    /// instances that held them, or until `max_wait` elapses.
+    ///
+    /// A replacement instance reuses the failed node's ENI, so it cannot be
+    /// launched while the terminating instance still holds it. There is no way
+    /// to shorten that wait, since the address only frees when the provider
+    /// finishes reclaiming the instance, but there is no reason to guess at its
+    /// duration either. Polling replaces a fixed sleep that was simultaneously
+    /// too long on a fast detach and too short on a slow one, which is how a
+    /// restore came to fail outright with InvalidNetworkInterface.InUse.
+    ///
+    /// Returns true if every address was released within the deadline.
+    pub async fn wait_for_enis_released(
+        &self,
+        region: &str,
+        private_ips: &[String],
+        max_wait: std::time::Duration,
+    ) -> bool {
+        let ec2_client = match self.get_ec2_client(region).await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!("Could not create EC2 client to poll ENIs: {}", e);
+                return false;
+            }
+        };
+
+        let started = std::time::Instant::now();
+        loop {
+            let mut all_free = true;
+            for private_ip in private_ips {
+                let attached = match ec2_client
+                    .describe_network_interfaces()
+                    .filters(
+                        aws_sdk_ec2::types::Filter::builder()
+                            .name("addresses.private-ip-address")
+                            .values(private_ip)
+                            .build(),
+                    )
+                    .send()
+                    .await
+                {
+                    Ok(r) => r
+                        .network_interfaces()
+                        .iter()
+                        .any(|eni| eni.status().map(|s| s.as_str()) != Some("available")),
+                    // A failed describe is not evidence the ENI is free, so keep
+                    // waiting rather than launching into a likely conflict.
+                    Err(e) => {
+                        tracing::debug!("Could not describe ENI for '{}': {}", private_ip, e);
+                        true
+                    }
+                };
+                if attached {
+                    all_free = false;
+                    break;
+                }
+            }
+
+            if all_free {
+                tracing::info!(
+                    "Network interface(s) released after {:.0}s",
+                    started.elapsed().as_secs_f64()
+                );
+                return true;
+            }
+            if started.elapsed() >= max_wait {
+                tracing::warn!(
+                    "Network interface(s) still attached after {:.0}s; proceeding anyway \
+                     (the launch retry will absorb it if they are still busy)",
+                    started.elapsed().as_secs_f64()
+                );
+                return false;
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        }
+    }
+
     pub async fn delete_detached_eni_by_private_ip(
         &self,
         region: &str,

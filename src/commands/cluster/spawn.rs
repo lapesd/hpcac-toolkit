@@ -147,10 +147,27 @@ pub async fn spawn(pool: &SqlitePool, cluster_id: &str, skip_confirmation: bool,
             Ok(_) => return Ok(()),
             Err(e) => {
                 let msg = e.to_string();
-                if attempt < retry && (msg.contains("InsufficientInstanceCapacity") || msg.contains("InvalidNetworkInterface.InUse")) {
+                // Transient conditions worth another pass. Re-running spawn is cheap
+                // because every resource step is idempotent, so a retry skips
+                // straight back to whatever failed.
+                //
+                // The SSH cases matter as much as the capacity ones: sshd on a fresh
+                // instance is not ready the moment the API reports the instance as
+                // running, and a worker reached through the head node can time out
+                // during banner exchange while it is still coming up. Those are
+                // connection-level failures, deliberately distinguished from a
+                // command that ran and returned non-zero, which must not be retried.
+                let transient = msg.contains("InsufficientInstanceCapacity")
+                    || msg.contains("InvalidNetworkInterface.InUse")
+                    || msg.contains("banner exchange")
+                    || msg.contains("Connection timed out")
+                    || msg.contains("Connection refused")
+                    || msg.contains("Connection reset");
+                if attempt < retry && transient {
                     attempt += 1;
                     tracing::warn!(
-                        "InsufficientInstanceCapacity — retrying in 60s (attempt {}/{})...",
+                        "Transient spawn failure ({}) — retrying in 60s (attempt {}/{})...",
+                        msg.lines().next().unwrap_or("unknown"),
                         attempt,
                         retry
                     );

@@ -1,8 +1,9 @@
 use anyhow::Result;
 use chrono::Utc;
 use clap::{Parser, Subcommand};
-use sqlx::sqlite::SqlitePool;
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool};
 use std::fs::OpenOptions;
+use std::str::FromStr;
 use tracing_subscriber::{Layer, filter::LevelFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 /// Routes tracing stdout output through the active `MultiProgress` (if any),
@@ -112,6 +113,23 @@ enum ClusterCommands {
         cluster_id: String,
 
         /// Node private_ip to terminate
+        #[arg(long)]
+        node_private_ip: String,
+
+        /// Skip confirmation prompt
+        #[arg(short = 'y', long = "yes")]
+        yes: bool,
+    },
+
+    /// Inject a spot interruption notice for a node without terminating it.
+    /// Requires the Cluster to have at least one 'spot' node, since the
+    /// interruption queue is only created at spawn time in that case.
+    SimulateSpotNotice {
+        /// Cluster identifier
+        #[arg(long)]
+        cluster_id: String,
+
+        /// Node private_ip to issue the interruption notice for
         #[arg(long)]
         node_private_ip: String,
 
@@ -286,8 +304,30 @@ async fn main() -> Result<()> {
         "sqlite://db.sqlite".to_string()
     });
 
-    // Create a SQLite connection pool
-    let sqlite_pool = match SqlitePool::connect(&db_url).await {
+    // Create a SQLite connection pool.
+    //
+    // A V-B scenario runs several toolkit processes against this file at once
+    // (`cluster watch` polling, `cluster tasks` updating task_runs, and a
+    // `cluster spawn`/`terminate` alongside them), and running two scenarios in
+    // parallel doubles that. SQLite's default `delete` journal takes an exclusive
+    // whole-file lock per write, and the default busy timeout of 0 makes any
+    // process that meets that lock fail immediately with SQLITE_BUSY instead of
+    // waiting. The losers would be the longest write transactions — watch's
+    // restore path and `cluster terminate`, which is the one failure that leaves
+    // instances billing.
+    //
+    // WAL lets readers proceed concurrently with a single writer; the busy timeout
+    // makes a blocked writer wait its turn rather than error out.
+    let connect_options = match SqliteConnectOptions::from_str(&db_url) {
+        Ok(options) => options
+            .journal_mode(SqliteJournalMode::Wal)
+            .busy_timeout(std::time::Duration::from_secs(30)),
+        Err(e) => {
+            tracing::error!("{:?}", e);
+            anyhow::bail!("Invalid SQLite connection string: '{}'", db_url);
+        }
+    };
+    let sqlite_pool = match SqlitePool::connect_with(connect_options).await {
         Ok(result) => result,
         Err(e) => {
             tracing::error!("{:?}", e);
@@ -324,6 +364,19 @@ async fn main() -> Result<()> {
             } => {
                 commands::cluster::test_failure(&sqlite_pool, cluster_id, node_private_ip, *yes)
                     .await?;
+            }
+            ClusterCommands::SimulateSpotNotice {
+                cluster_id,
+                node_private_ip,
+                yes,
+            } => {
+                commands::cluster::simulate_spot_notice(
+                    &sqlite_pool,
+                    cluster_id,
+                    node_private_ip,
+                    *yes,
+                )
+                .await?;
             }
             ClusterCommands::Tasks { yaml_file_path } => {
                 commands::cluster::tasks(&sqlite_pool, yaml_file_path).await?;

@@ -1,3 +1,4 @@
+use crate::database::models::Cluster;
 use crate::integrations::providers::aws::AwsInterface;
 
 use anyhow::Result;
@@ -5,6 +6,75 @@ use aws_sdk_sqs::types::QueueAttributeName;
 use std::collections::HashMap;
 
 impl AwsInterface {
+    /// Publishes a synthetic spot interruption notice for one node onto this
+    /// cluster's own interruption queue, in the shape EventBridge delivers.
+    ///
+    /// `poll_spot_interruption_queue` reads only `detail.instance-id` from the
+    /// message and then validates the instance's `ClusterId` tag against EC2, so
+    /// a notice injected here drives exactly the same code path as a genuine one
+    /// from AWS: SIGUSR1 to the MPI job for a preemptive flush, and replacement
+    /// provisioning started at notice time rather than at node death.
+    ///
+    /// Used by V-B scenario (i), where the notice must arrive at a controlled
+    /// moment. Pair it with `cluster test-failure` on the same node roughly two
+    /// minutes later to reproduce AWS reclaiming the instance after its warning.
+    pub async fn send_simulated_spot_interruption(
+        &self,
+        cluster: &Cluster,
+        node_private_ip: &str,
+    ) -> Result<()> {
+        let context = self.create_cluster_context(cluster).await?;
+
+        let instance_id = match self
+            .find_elastic_compute_instance_by_private_ip(&context, node_private_ip)
+            .await?
+        {
+            Some(id) => id,
+            None => anyhow::bail!(
+                "No running instance with private IP '{}' in Cluster '{}'",
+                node_private_ip,
+                cluster.display_name
+            ),
+        };
+
+        let queue_url = match self
+            .get_spot_interruption_queue_url(&cluster.id, &cluster.region)
+            .await?
+        {
+            Some(url) => url,
+            None => anyhow::bail!(
+                "Cluster '{}' has no spot interruption queue. The queue is only created \
+                 at spawn time when at least one node uses 'allocation_mode: spot'.",
+                cluster.display_name
+            ),
+        };
+
+        let body = serde_json::json!({
+            "version": "0",
+            "source": "aws.ec2",
+            "detail-type": "EC2 Spot Instance Interruption Warning",
+            "detail": {
+                "instance-id": instance_id,
+                "instance-action": "terminate"
+            }
+        })
+        .to_string();
+
+        let sqs = self.get_sqs_client(&cluster.region).await?;
+        sqs.send_message()
+            .queue_url(&queue_url)
+            .message_body(body)
+            .send()
+            .await?;
+
+        tracing::info!(
+            "Injected spot interruption notice for Instance '{}' (private_ip='{}')",
+            instance_id,
+            node_private_ip
+        );
+        Ok(())
+    }
+
     /// Creates an SQS queue and an EventBridge rule that routes EC2 spot interruption
     /// warnings for this cluster into the queue. Returns the queue URL.
     /// Idempotent: safe to call again after a crash.

@@ -88,6 +88,12 @@ struct RecoveryNodeYaml {
     /// Number of nodes to provision for this slot on recovery. Default 1.
     /// Values > 1 enable scale-up: the failed slot is replaced by `count` nodes.
     count: Option<i64>,
+    /// Init commands for the replacement node(s). Omit to inherit: an in-place
+    /// replacement keeps the commands already on its node row, and scale-up nodes
+    /// copy the slot they fan out from. Provide a list to override, which is what
+    /// a cross-family replacement needs when its hardware differs from the
+    /// original (for example a GPU node with a local NVMe store to mount).
+    init_commands: Option<Vec<String>>,
 }
 
 pub async fn create(
@@ -738,6 +744,10 @@ pub async fn create(
                 root_volume_type,
                 root_volume_iops: rn.root_volume_iops,
                 count,
+                init_commands: match &rn.init_commands {
+                    Some(commands) => Some(serde_json::to_string(commands)?),
+                    None => None,
+                },
             });
         }
         tracing::info!(

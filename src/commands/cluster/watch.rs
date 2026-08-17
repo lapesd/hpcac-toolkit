@@ -1,5 +1,7 @@
 use crate::commands::cluster::tasks::tasks;
-use crate::database::models::{Cluster, ClusterState, Node, ProviderConfig, RecoveryNode};
+use crate::database::models::{
+    Cluster, ClusterState, Node, ProviderConfig, RecoveryNode, ShellCommand,
+};
 use crate::integrations::{cloud_interface::CloudResourceManager, providers::aws::AwsInterface};
 use crate::utils::{self, ssh::SshSession};
 
@@ -164,7 +166,7 @@ pub async fn watch(
                 }
 
                 for ip in &failed_ips {
-                    match Node::fetch_by_private_ip(&pool, ip).await? {
+                    match Node::fetch_by_private_ip(&pool, &cluster.id, ip).await? {
                         Some(node) => {
                             node.set_efs_configuration_state(&pool, false).await?;
                             tracing::info!(
@@ -181,13 +183,23 @@ pub async fn watch(
                     }
                 }
 
-                // Wait for terminated instances to fully release their ENIs before
-                // attempting to reuse them for the replacement node.
+                // A replacement reuses the failed node's network interface, so it
+                // cannot launch until the terminating instance releases it. Poll
+                // for that rather than sleeping a fixed interval: the detach is
+                // not bounded, so any constant is both wasteful when it completes
+                // quickly and insufficient when it does not.
+                //
+                // This is also the only part of recovery an interruption notice
+                // could plausibly shorten, and it cannot. The address is held
+                // until the provider finishes reclaiming the instance, which by
+                // definition has not happened while the warning window is open.
                 tracing::info!(
-                    "[{}] Waiting 30s for failed instance(s) to release network interfaces...",
+                    "[{}] Waiting for failed instance(s) to release network interfaces...",
                     Utc::now().format("%H:%M:%S")
                 );
-                sleep(Duration::from_secs(30)).await;
+                cloud_interface
+                    .wait_for_enis_released(&cluster.region, &failed_ips, Duration::from_secs(180))
+                    .await;
 
                 if no_replace {
                     // Scale-down: remove failed nodes from DB and relaunch on survivors.
@@ -201,7 +213,7 @@ pub async fn watch(
                         {
                             tracing::warn!("Could not delete ENI for node '{}': {}", ip, e);
                         }
-                        if let Err(e) = Node::delete_by_private_ip(&pool, ip).await {
+                        if let Err(e) = Node::delete_by_private_ip(&pool, &cluster.id, ip).await {
                             tracing::warn!("Could not remove node '{}' from DB: {}", ip, e);
                         } else {
                             tracing::info!("Removed failed node '{}' from cluster.", ip);
@@ -321,8 +333,13 @@ async fn apply_recovery_policy(
         extra: i64, // number of ADDITIONAL nodes beyond the 1:1 replacement
         recovery: &'a RecoveryNode,
         instance_type: String,
+        // Already resolved: either the slot's declared commands, or the ones
+        // inherited from the node this slot fans out from.
+        init_commands: Vec<String>,
     }
     let mut fanouts: Vec<FanOut> = Vec::new();
+    // (node_id, commands) for in-place replacements whose slot declares its own.
+    let mut init_overrides: Vec<(String, Vec<String>)> = Vec::new();
 
     for (slot_index, node) in node_slots.iter().enumerate() {
         let ip = match node.private_ip.as_deref() {
@@ -347,13 +364,22 @@ async fn apply_recovery_policy(
             );
             continue;
         };
+        // The spec written below is the preferred type. Any remaining entries are
+        // capacity fallbacks, applied by spawn_cluster at launch time if AWS has
+        // no capacity for the preferred one.
+        let fallbacks: Vec<String> = recovery.instance_types().into_iter().skip(1).collect();
         tracing::info!(
-            "Applying recovery policy to slot {} (ip='{}'): {} / {} (count={})",
+            "Applying recovery policy to slot {} (ip='{}'): {} / {} (count={}){}",
             slot_index,
             ip,
             instance_type,
             recovery.allocation_mode,
-            recovery.count
+            recovery.count,
+            if fallbacks.is_empty() {
+                ", no capacity fallback".to_string()
+            } else {
+                format!(", capacity fallbacks: {}", fallbacks.join(" -> "))
+            }
         );
 
         // In-place: update the failed slot's original Node row to the new spec.
@@ -363,18 +389,70 @@ async fn apply_recovery_policy(
             .find(|n| n.id == node.id)
             .expect("slot id present in nodes");
         target
-            .update_instance_spec(pool, &instance_type, &recovery.allocation_mode)
+            .update_instance_spec(
+                pool,
+                &instance_type,
+                &recovery.allocation_mode,
+                &recovery.image_id,
+                recovery.burstable_mode.as_deref(),
+                recovery.root_volume_gb,
+                &recovery.root_volume_type,
+                recovery.root_volume_iops,
+            )
             .await?;
+
+        // A replacement reuses the failed node's row, so it would otherwise inherit
+        // init commands written for the ORIGINAL hardware. That is right for an
+        // in-kind swap and wrong across families — a GPU stand-in has a local NVMe
+        // store to mount that the CPU node it replaces never had. A slot that
+        // declares its own commands overrides them; one that stays silent inherits,
+        // which is the pre-existing behaviour.
+        let declared = recovery.declared_init_commands();
+        if let Some(commands) = &declared {
+            tracing::info!(
+                "Slot {} declares {} init command(s) for its replacement",
+                slot_index,
+                commands.len()
+            );
+            init_overrides.push((node.id.clone(), commands.clone()));
+        }
 
         // Fan-out: queue (count - 1) additional Node rows for this slot.
         if recovery.count > 1 {
+            // Scale-up nodes are new rows with no commands of their own. Give them
+            // the slot's declared list, or failing that a copy of the sibling they
+            // fan out from, so an expanded cluster stays homogeneous.
+            let init_commands = match &declared {
+                Some(commands) => commands.clone(),
+                None => {
+                    let mut existing =
+                        ShellCommand::fetch_all_by_node_id(pool, node.id.clone()).await?;
+                    existing.sort_by_key(|c| c.ordering);
+                    existing.into_iter().map(|c| c.script).collect()
+                }
+            };
             fanouts.push(FanOut {
                 slot_index,
                 extra: recovery.count - 1,
                 recovery,
                 instance_type,
+                init_commands,
             });
         }
+    }
+
+    // Apply in-place overrides before the fan-out transaction so a slot's declared
+    // commands land on the replacement even when count == 1.
+    if !init_overrides.is_empty() {
+        let mut tx = pool.begin().await?;
+        for (node_id, commands) in &init_overrides {
+            ShellCommand::replace_all_for_node(&mut tx, node_id, commands).await?;
+        }
+        tx.commit().await?;
+        tracing::info!(
+            "Recovery: replaced init commands on {} node(s)",
+            init_overrides.len()
+        );
     }
 
     // Materialize scale-up rows in a single transaction so partial failures roll back.
@@ -399,6 +477,10 @@ async fn apply_recovery_policy(
                     was_ssh_configured: false,
                 };
                 new_node.insert(&mut tx).await?;
+                if !fo.init_commands.is_empty() {
+                    ShellCommand::replace_all_for_node(&mut tx, &new_node.id, &fo.init_commands)
+                        .await?;
+                }
                 total_added += 1;
             }
             tracing::info!(
@@ -440,16 +522,59 @@ async fn signal_mpi_checkpoint(pool: &SqlitePool, cluster: &Cluster, private_key
         }
     };
 
-    let ssh = SshSession::for_aws(&head_public_ip, private_key_path);
-    match ssh.run_command("pkill -USR1 -f mpirun || true").await {
-        Ok(_) => tracing::info!(
-            "SIGUSR1 sent to MPI job on head node '{}'",
-            head_public_ip
-        ),
-        Err(e) => tracing::warn!(
-            "Failed to send SIGUSR1 to head node '{}': {}",
-            head_public_ip,
-            e
-        ),
+    // Signal the application ranks directly on every node, rather than the
+    // launcher on the head node.
+    //
+    // The previous approach ran `pkill -USR1 -f mpirun` on the head and relied on
+    // the MPI launcher forwarding the signal to its ranks. Whether it does is
+    // implementation and version dependent (PRRTE exposes an explicit
+    // --forward-signals option, so forwarding is not something to count on), and
+    // the `|| true` meant a pkill that matched nothing still reported success.
+    // The result was a preemptive checkpoint path that logged "signal sent" on
+    // every interruption while the application never saw SIGUSR1 and never
+    // flushed.
+    //
+    // Signalling the ranks removes the launcher from the path entirely. The
+    // application's check is collective, so reaching any one rank is sufficient,
+    // but we signal all of them because a node may be reclaimed mid-sweep.
+    const SIGNAL_CMD: &str = "pkill -USR1 -x starfwi-fwi";
+
+    let mut signalled = 0usize;
+    let mut unreachable = 0usize;
+    for (index, node) in nodes.iter().enumerate() {
+        let Some(private_ip) = node.private_ip.as_deref() else {
+            continue;
+        };
+        let ssh = if index == 0 {
+            SshSession::for_aws(&head_public_ip, private_key_path)
+        } else {
+            SshSession::for_aws_worker(private_ip, &head_public_ip, private_key_path)
+        };
+        // pkill exits 1 when nothing matched, which is a real outcome worth
+        // distinguishing from a node we could not reach at all.
+        match ssh.run_command(SIGNAL_CMD).await {
+            Ok(_) => {
+                signalled += 1;
+                tracing::debug!("SIGUSR1 delivered to ranks on '{}'", private_ip);
+            }
+            Err(e) => {
+                unreachable += 1;
+                tracing::debug!("Could not signal ranks on '{}': {}", private_ip, e);
+            }
+        }
+    }
+
+    if signalled > 0 {
+        tracing::info!(
+            "SIGUSR1 delivered to application ranks on {} of {} node(s)",
+            signalled,
+            nodes.len()
+        );
+    } else {
+        tracing::warn!(
+            "Preemptive checkpoint signal reached no ranks ({} node(s) unreachable or no matching process). \
+             The job will not flush before reclamation and will resume from the last periodic checkpoint.",
+            unreachable
+        );
     }
 }

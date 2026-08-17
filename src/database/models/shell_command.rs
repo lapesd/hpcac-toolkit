@@ -51,6 +51,39 @@ impl ShellCommand {
         Ok(rows)
     }
 
+    /// Replaces every command attached to a node with `scripts`, in order.
+    /// An empty `scripts` just clears them. Used on recovery, where a replacement
+    /// node may need different preparation from the node whose row it reuses.
+    pub async fn replace_all_for_node(
+        tx: &mut Transaction<'_, sqlx::Sqlite>,
+        node_id: &str,
+        scripts: &[String],
+    ) -> Result<()> {
+        if let Err(e) = sqlx::query!("DELETE FROM shell_commands WHERE node_id = ?", node_id)
+            .execute(&mut **tx)
+            .await
+        {
+            tracing::error!("SQLx Error: {}", e.to_string());
+            anyhow::bail!("DB Operation Failure: {}", e);
+        }
+
+        for (i, script) in scripts.iter().enumerate() {
+            let command = ShellCommand {
+                id: 0, // placeholder, assigned by AUTOINCREMENT
+                node_id: node_id.to_string(),
+                ordering: (i + 1) as i64,
+                script: script.clone(),
+                status: "NOT_EXECUTED".to_string(),
+                result: None,
+                triggered_at: None,
+                execution_time: None,
+            };
+            command.insert(tx).await?;
+        }
+
+        Ok(())
+    }
+
     pub async fn insert(&self, tx: &mut Transaction<'_, sqlx::Sqlite>) -> Result<()> {
         match sqlx::query!(
             r#"

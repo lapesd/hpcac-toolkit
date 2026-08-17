@@ -36,3 +36,6 @@ db.sqlite-wal
 
 # Test files
 experiments/
+
+# V-B scenario driver output (run_vb_scenario.sh)
+vb_runs/

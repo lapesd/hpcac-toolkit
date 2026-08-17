@@ -49,6 +49,17 @@ tasks:
 
   # ── Baseline (no checkpointing) ────────────────────────────────────────────
   # Single run to establish the reference for overhead measurements.
+  #
+  # NOTE ON --wavefield-storage: starfwi-fwi requires it and refuses to start
+  # without it. The mode changes runtime by roughly a factor of three, so it must
+  # be stated rather than defaulted:
+  #   memory  auto-select — REVOLVE when a checkpoint budget fits (bounded RAM,
+  #           no wavefield I/O), else full in-RAM, else disk. Use on memory-rich
+  #           instances such as r8i.4xlarge, and on GPU instances.
+  #   disk    force every forward wavefield out to --wavefield-dir. Use on
+  #           memory-tight instances such as c8i.4xlarge (32 GiB), where REVOLVE
+  #           does not fit.
+  # starfwi-modeling does not take the flag; it never keeps snapshots.
   - name: baseline
     mpi_slots_per_host: 1
     repeat: 1
@@ -65,6 +76,7 @@ tasks:
           --shots 32 \
           --iterations 1 \
           --observed-dir /shared/observed \
+          --wavefield-storage memory \
           --wavefield-dir /home/ec2-user/wavefields \
           /shared/marmousi2/MODEL_P-WAVE_VELOCITY_1.25m.segy \
         2>&1 | tee "$RESULT_DIR/starfwi.log"
@@ -91,6 +103,7 @@ tasks:
           --observed-dir /shared/observed \
           --checkpoint-dir "$CP_DIR" \
           --checkpoint-interval 4 \
+          --wavefield-storage memory \
           --wavefield-dir /home/ec2-user/wavefields \
           /shared/marmousi2/MODEL_P-WAVE_VELOCITY_1.25m.segy \
         2>&1 | tee "$RESULT_DIR/starfwi.log"
@@ -119,6 +132,7 @@ tasks:
           --observed-dir /shared/observed \
           --checkpoint-dir "$CP_DIR" \
           --checkpoint-interval 4 \
+          --wavefield-storage memory \
           --wavefield-dir /home/ec2-user/wavefields \
           /shared/marmousi2/MODEL_P-WAVE_VELOCITY_1.25m.segy \
         2>&1 | tee "$RESULT_DIR/starfwi.log"
