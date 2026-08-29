@@ -1,5 +1,5 @@
 use crate::database::models::{Cluster, InstanceType, MachineImage, Node};
-use crate::integrations::providers::{aws::AwsInterface, vultr::VultrInterface};
+use crate::integrations::providers::{aws::AwsInterface, gcp::GcpInterface, vultr::VultrInterface};
 use crate::utils::ProgressTracker;
 
 use anyhow::{Error, Result};
@@ -64,6 +64,7 @@ pub trait CloudResourceManager {
 pub enum CloudProvider {
     Aws(AwsInterface),
     Vultr(VultrInterface),
+    Gcp(GcpInterface),
 }
 
 impl CloudInfoProvider for CloudProvider {
@@ -71,6 +72,7 @@ impl CloudInfoProvider for CloudProvider {
         match self {
             CloudProvider::Aws(aws) => aws.fetch_regions(tracker).await,
             CloudProvider::Vultr(vultr) => vultr.fetch_regions(tracker).await,
+            CloudProvider::Gcp(gcp) => gcp.fetch_regions(tracker).await,
         }
     }
 
@@ -82,6 +84,7 @@ impl CloudInfoProvider for CloudProvider {
         match self {
             CloudProvider::Aws(aws) => aws.fetch_zones(region, tracker).await,
             CloudProvider::Vultr(vultr) => vultr.fetch_zones(region, tracker).await,
+            CloudProvider::Gcp(gcp) => gcp.fetch_zones(region, tracker).await,
         }
     }
 
@@ -93,6 +96,7 @@ impl CloudInfoProvider for CloudProvider {
         match self {
             CloudProvider::Aws(aws) => aws.fetch_instance_types(region, tracker).await,
             CloudProvider::Vultr(vultr) => vultr.fetch_instance_types(region, tracker).await,
+            CloudProvider::Gcp(gcp) => gcp.fetch_instance_types(region, tracker).await,
         }
     }
 
@@ -107,6 +111,7 @@ impl CloudInfoProvider for CloudProvider {
             CloudProvider::Vultr(vultr) => {
                 vultr.fetch_prices(region, instance_types, tracker).await
             }
+            CloudProvider::Gcp(gcp) => gcp.fetch_prices(region, instance_types, tracker).await,
         }
     }
 
@@ -118,6 +123,7 @@ impl CloudInfoProvider for CloudProvider {
         match self {
             CloudProvider::Aws(aws) => aws.fetch_machine_image(region, image_id).await,
             CloudProvider::Vultr(vultr) => vultr.fetch_machine_image(region, image_id).await,
+            CloudProvider::Gcp(gcp) => gcp.fetch_machine_image(region, image_id).await,
         }
     }
 }
@@ -132,6 +138,7 @@ impl CloudResourceManager for CloudProvider {
         match self {
             CloudProvider::Aws(aws) => aws.spawn_cluster(pool, cluster, nodes).await,
             CloudProvider::Vultr(vultr) => vultr.spawn_cluster(pool, cluster, nodes).await,
+            CloudProvider::Gcp(gcp) => gcp.spawn_cluster(pool, cluster, nodes).await,
         }
     }
 
@@ -144,6 +151,7 @@ impl CloudResourceManager for CloudProvider {
         match self {
             CloudProvider::Aws(aws) => aws.terminate_cluster(pool, cluster, nodes).await,
             CloudProvider::Vultr(vultr) => vultr.terminate_cluster(pool, cluster, nodes).await,
+            CloudProvider::Gcp(gcp) => gcp.terminate_cluster(pool, cluster, nodes).await,
         }
     }
 
@@ -161,6 +169,10 @@ impl CloudResourceManager for CloudProvider {
             CloudProvider::Vultr(vultr) => {
                 vultr
                     .simulate_cluster_failure(pool, cluster, node_private_ip)
+                    .await
+            }
+            CloudProvider::Gcp(gcp) => {
+                gcp.simulate_cluster_failure(pool, cluster, node_private_ip)
                     .await
             }
         }
