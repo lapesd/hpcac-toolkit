@@ -1,10 +1,32 @@
 use crate::database::models::ShellCommand;
 
 use anyhow::Result;
+use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use sqlx::{Transaction, sqlite::SqlitePool};
 
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+/// A node slot in a cluster.
+///
+/// The fields fall into three categories, and confusing them is the source of
+/// most state-drift bugs in this toolkit. Keep new fields in the right group.
+///
+/// 1. DESIRED STATE (the spec). What the user asked for: `instance_type`,
+///    `allocation_mode`, `burstable_mode`, `image_id`, `root_volume_*`. Changed
+///    only by the user or by the recovery policy. Never drifts, because it is
+///    intent rather than a description of the world.
+///
+/// 2. OBSERVED STATE. What the provider last reported: `instance_id`,
+///    `private_ip`, `public_ip`. These CAN drift: the instance may be gone, the
+///    address reassigned. `observed_at` says when they were last confirmed;
+///    treat them as a snapshot, not as truth, and prefer `instance_id` as the
+///    identity of the machine, since the addresses are reused across slots and
+///    cleared by `reset()`.
+///
+/// 3. STEPS COMPLETED. What this toolkit did: `was_efs_configured`. Only the
+///    toolkit writes these, and they must be cleared whenever the underlying
+///    machine is replaced, or a later step will skip work it still needs to do.
+///    (`was_ssh_configured` is vestigial: never read, never set true.)
 pub struct Node {
     pub id: String,
     pub cluster_id: String,
@@ -15,8 +37,10 @@ pub struct Node {
     pub root_volume_gb: i64,
     pub root_volume_type: String,
     pub root_volume_iops: Option<i64>,
+    pub instance_id: Option<String>,
     pub private_ip: Option<String>,
     pub public_ip: Option<String>,
+    pub observed_at: Option<NaiveDateTime>,
     pub was_efs_configured: bool,
     pub was_ssh_configured: bool,
 }
@@ -95,6 +119,82 @@ impl Node {
             Err(e) => anyhow::bail!("DB Operation Failure: {}", e),
         }
         Ok(())
+    }
+
+    /// Look a node up by the provider's stable handle rather than by an address.
+    /// Prefer this over `fetch_by_private_ip`: `private_ip` is an observation and
+    /// may be empty (see `Node::reset`) or reassigned to a different machine.
+    pub async fn fetch_by_instance_id(
+        pool: &SqlitePool,
+        cluster_id: &str,
+        instance_id: &str,
+    ) -> Result<Option<Node>> {
+        match sqlx::query_as!(
+            Node,
+            r#"
+            SELECT
+                id as "id!",
+                cluster_id,
+                instance_type,
+                allocation_mode,
+                burstable_mode,
+                image_id,
+                root_volume_gb,
+                root_volume_type,
+                root_volume_iops,
+                instance_id,
+                private_ip,
+                public_ip,
+                observed_at,
+                was_efs_configured,
+                was_ssh_configured
+            FROM nodes
+            WHERE cluster_id = ? AND instance_id = ?
+        "#,
+            cluster_id,
+            instance_id
+        )
+        .fetch_optional(pool)
+        .await
+        {
+            Ok(node) => Ok(node),
+            Err(e) => {
+                tracing::error!("SQLx Error: {:?}", e);
+                anyhow::bail!("DB Operation Failure: {}", e);
+            }
+        }
+    }
+
+    /// Record what the provider last reported for this node, stamping the time so
+    /// readers can tell how stale the observation is. Only the observed-state
+    /// fields are touched; the spec and the step flags are left alone.
+    pub async fn record_observation(
+        pool: &SqlitePool,
+        node_id: &str,
+        instance_id: Option<&str>,
+        private_ip: Option<&str>,
+        public_ip: Option<&str>,
+    ) -> Result<()> {
+        let now = chrono::Utc::now().naive_utc();
+        match sqlx::query!(
+            r#"UPDATE nodes
+               SET instance_id = COALESCE(?, instance_id),
+                   private_ip  = COALESCE(?, private_ip),
+                   public_ip   = COALESCE(?, public_ip),
+                   observed_at = ?
+               WHERE id = ?"#,
+            instance_id,
+            private_ip,
+            public_ip,
+            now,
+            node_id
+        )
+        .execute(pool)
+        .await
+        {
+            Ok(_) => Ok(()),
+            Err(e) => anyhow::bail!("DB Operation Failure: {}", e),
+        }
     }
 
     pub async fn set_efs_configuration_state(
@@ -268,8 +368,10 @@ impl Node {
                 root_volume_gb,
                 root_volume_type,
                 root_volume_iops,
+                instance_id,
                 private_ip,
                 public_ip,
+                observed_at,
                 was_efs_configured,
                 was_ssh_configured
             FROM nodes

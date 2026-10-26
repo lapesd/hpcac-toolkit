@@ -85,6 +85,28 @@ impl InstanceType {
         })
     }
 
+    /// How many types are cached for a provider in a region. Used to tell an
+    /// unpopulated catalogue apart from a genuinely unknown instance type: the
+    /// first is fixed by loading, the second never will be.
+    pub async fn count_by_provider_and_region(
+        pool: &SqlitePool,
+        provider_id: &str,
+        region: &str,
+    ) -> Result<i64> {
+        match sqlx::query_scalar!(
+            r#"SELECT COUNT(*) as "count!: i64" FROM instance_types
+               WHERE provider_id = ? AND region = ?"#,
+            provider_id,
+            region
+        )
+        .fetch_one(pool)
+        .await
+        {
+            Ok(n) => Ok(n),
+            Err(e) => anyhow::bail!("DB Operation Failure: {}", e),
+        }
+    }
+
     pub async fn fetch_all(
         pool: &SqlitePool,
         filters: InstanceTypeFilters,

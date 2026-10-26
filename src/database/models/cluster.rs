@@ -500,8 +500,10 @@ impl Cluster {
                     root_volume_gb,
                     root_volume_type,
                     root_volume_iops,
+                    instance_id,
                     private_ip,
                     public_ip,
+                    observed_at,
                     was_efs_configured,
                     was_ssh_configured
                 FROM nodes

@@ -35,7 +35,19 @@ struct TaskYaml {
     script: String,
 }
 
-pub async fn tasks(pool: &SqlitePool, yaml_file_path: &str) -> Result<()> {
+/// Run the tasks described by `yaml_file_path` on the cluster.
+///
+/// `exclude_ips` drops nodes from the generated MPI hostfile without touching
+/// their database rows. Phased recovery uses this to relaunch on the surviving
+/// nodes while a replacement is still being provisioned: the failed node keeps
+/// its record, so `apply_recovery_policy` and `spawn_cluster` can still rewrite
+/// and re-provision it, but it takes no part in the job running meanwhile.
+/// Pass an empty slice for the ordinary case.
+pub async fn tasks(
+    pool: &SqlitePool,
+    yaml_file_path: &str,
+    exclude_ips: &[String],
+) -> Result<()> {
     let path = Path::new(yaml_file_path);
     let yaml_str = match fs::read_to_string(path) {
         Ok(s) => s,
@@ -60,6 +72,18 @@ pub async fn tasks(pool: &SqlitePool, yaml_file_path: &str) -> Result<()> {
     }
 
     let mut nodes = cluster.get_nodes(pool).await?;
+    if !exclude_ips.is_empty() {
+        let before = nodes.len();
+        nodes.retain(|n| match n.private_ip.as_deref() {
+            Some(ip) => !exclude_ips.iter().any(|e| e == ip),
+            None => true,
+        });
+        tracing::info!(
+            "Excluding {} node(s) from this run: {}",
+            before - nodes.len(),
+            exclude_ips.join(", ")
+        );
+    }
     if nodes.is_empty() {
         anyhow::bail!("Cluster '{}' has no nodes", cluster.id);
     }
@@ -110,6 +134,15 @@ pub async fn tasks(pool: &SqlitePool, yaml_file_path: &str) -> Result<()> {
         head_ip
     );
 
+    // A run still marked 'running' on this cluster cannot be live: we are about to
+    // start one, and two concurrent runs would contend for the same tmux session
+    // and host file. Whatever left it open is gone, and we cannot know when.
+    match TaskRun::close_open(pool, &cluster.id, "orphaned", None).await {
+        Ok(n) if n > 0 => tracing::info!("Closed {} stale task run(s) as orphaned.", n),
+        Ok(_) => {}
+        Err(e) => tracing::warn!("Could not reap stale task runs: {}", e),
+    }
+
     // Tracks the tmux session currently being waited on, so Ctrl+C can kill it.
     let active_session: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 
@@ -127,6 +160,19 @@ pub async fn tasks(pool: &SqlitePool, yaml_file_path: &str) -> Result<()> {
                 let _ = head_ssh
                     .run_command(&format!("tmux kill-session -t {} 2>/dev/null; true", session))
                     .await;
+            }
+            // The select! drops run_task_loop, so the in-flight TaskRun never
+            // reaches finish(). The tmux session is already being cleaned up
+            // above; close the database row for the same reason.
+            if let Err(e) = TaskRun::close_open(
+                pool,
+                &cluster.id,
+                "cancelled",
+                Some(chrono::Utc::now().naive_utc()),
+            )
+            .await
+            {
+                tracing::warn!("Could not close cancelled task run: {}", e);
             }
             anyhow::bail!("Interrupted by user");
         }
@@ -155,10 +201,14 @@ async fn run_task_loop(
             task.mpi_slots_per_host
         );
 
-        // Build MPI hostfile content for this task
+        // Build MPI hostfile content for this task.
+        // A node reset by Node::reset() keeps its row with private_ip set to the
+        // empty string rather than NULL, so filter_map alone would emit a hostfile
+        // line with a blank hostname. Drop those.
         let hostfile_content: String = nodes
             .iter()
             .filter_map(|n| n.private_ip.as_deref())
+            .filter(|ip| !ip.is_empty())
             .map(|ip| format!("{} slots={}\n", ip, task.mpi_slots_per_host))
             .collect();
 

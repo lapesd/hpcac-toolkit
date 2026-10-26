@@ -241,6 +241,14 @@ impl CloudResourceManager for AwsInterface {
             let launch = self
                 .request_elastic_compute_instance_creation(&context, node, node_index, &candidates)
                 .await?;
+            // Record the provider's stable handle for this slot as soon as it
+            // exists, so later lookups need not go through private_ip.
+            if let Err(e) =
+                Node::record_observation(pool, &node.id, Some(&launch.instance_id), None, None)
+                    .await
+            {
+                tracing::warn!("Could not record instance_id for node '{}': {}", node.id, e);
+            }
             context.ec2_instance_ids.insert(node_index, launch.instance_id);
             // Persist a fallback so the DB describes the cluster that actually
             // exists. Downstream cost reporting and any later restore read this.
@@ -708,9 +716,15 @@ echo "EFS mount and setup complete!"
         Ok(())
     }
 
+    /// Poll the provider for instance health.
+    ///
+    /// This is also the toolkit's only reconcile point: it already describes
+    /// every instance in the cluster, so it writes back what it saw (instance id,
+    /// addresses) with a timestamp. Readers can then tell how stale the observed
+    /// fields are instead of assuming they are current.
     async fn check_cluster_health(
         &self,
-        _pool: &SqlitePool,
+        pool: &SqlitePool,
         cluster: &Cluster,
     ) -> Result<Vec<String>> {
         let context = self.create_cluster_context(cluster).await?;
@@ -730,20 +744,58 @@ echo "EFS mount and setup complete!"
         for reservation in response.reservations() {
             for instance in reservation.instances() {
                 let state = instance.state().and_then(|s| s.name());
-                if let Some(
-                    aws_sdk_ec2::types::InstanceStateName::Terminated
-                    | aws_sdk_ec2::types::InstanceStateName::ShuttingDown
-                    | aws_sdk_ec2::types::InstanceStateName::Stopped
-                    | aws_sdk_ec2::types::InstanceStateName::Stopping,
-                ) = state
-                    && let Some(ip) = instance.private_ip_address()
+                let is_failed = matches!(
+                    state,
+                    Some(
+                        aws_sdk_ec2::types::InstanceStateName::Terminated
+                            | aws_sdk_ec2::types::InstanceStateName::ShuttingDown
+                            | aws_sdk_ec2::types::InstanceStateName::Stopped
+                            | aws_sdk_ec2::types::InstanceStateName::Stopping
+                    )
+                );
+
+                if is_failed {
+                    if let Some(ip) = instance.private_ip_address() {
+                        tracing::info!(
+                            "Instance (private_ip='{}') is in failed state '{:?}'",
+                            ip,
+                            state
+                        );
+                        failed_ips.push(ip.to_string());
+                    }
+                    continue;
+                }
+
+                // Healthy: reconcile what the provider reports into the node row.
+                // Prefer the stable handle; fall back to the address only for nodes
+                // provisioned before instance_id was recorded.
+                let instance_id = instance.instance_id();
+                let private_ip = instance.private_ip_address();
+                let public_ip = instance.public_ip_address();
+
+                let node = match instance_id {
+                    Some(iid) => Node::fetch_by_instance_id(pool, &cluster.id, iid).await?,
+                    None => None,
+                };
+                let node = match node {
+                    Some(n) => Some(n),
+                    None => match private_ip {
+                        Some(ip) => Node::fetch_by_private_ip(pool, &cluster.id, ip).await?,
+                        None => None,
+                    },
+                };
+
+                if let Some(node) = node
+                    && let Err(e) = Node::record_observation(
+                        pool,
+                        &node.id,
+                        instance_id,
+                        private_ip,
+                        public_ip,
+                    )
+                    .await
                 {
-                    tracing::info!(
-                        "Instance (private_ip='{}') is in failed state '{:?}'",
-                        ip,
-                        state
-                    );
-                    failed_ips.push(ip.to_string());
+                    tracing::warn!("Could not record observation for node '{}': {}", node.id, e);
                 }
             }
         }

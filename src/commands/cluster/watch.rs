@@ -1,6 +1,6 @@
-use crate::commands::cluster::tasks::tasks;
+use crate::commands::task::tasks;
 use crate::database::models::{
-    Cluster, ClusterState, Node, ProviderConfig, RecoveryNode, ShellCommand,
+    Cluster, ClusterState, Node, ProviderConfig, RecoveryNode, ShellCommand, TaskRun,
 };
 use crate::integrations::{cloud_interface::CloudResourceManager, providers::aws::AwsInterface};
 use crate::utils::{self, ssh::SshSession};
@@ -18,6 +18,7 @@ pub async fn watch(
     interval_secs: u64,
     tasks_yaml: Option<&str>,
     no_replace: bool,
+    phased: bool,
 ) -> Result<()> {
     let cluster = match Cluster::fetch_by_id(pool, cluster_id).await? {
         Some(c) => c,
@@ -63,6 +64,23 @@ pub async fn watch(
     }
     if no_replace {
         tracing::info!("Scale-down mode: failed nodes will be removed and job relaunched on remaining nodes.");
+    }
+    let phased = phased && !no_replace;
+    if phased {
+        tracing::info!(
+            "Phased recovery: job will be relaunched on surviving nodes immediately, \
+             then again on the full cluster once the replacement is ready."
+        );
+    }
+
+    // Any run still marked 'running' on this cluster belongs to a process that is
+    // no longer alive: a cluster cannot host two concurrent runs, since they would
+    // contend for the same tmux session and host file. Scoping the reap to this
+    // cluster is what makes it safe to run alongside another hpcac process.
+    match TaskRun::close_open(&pool, cluster_id, "orphaned", None).await {
+        Ok(n) if n > 0 => tracing::info!("Closed {} stale task run(s) as orphaned.", n),
+        Ok(_) => {}
+        Err(e) => tracing::warn!("Could not reap stale task runs: {}", e),
     }
 
     tracing::info!(
@@ -163,6 +181,24 @@ pub async fn watch(
                 if let Some(handle) = tasks_handle.take() {
                     handle.abort();
                     tracing::info!("Aborted previous tasks run.");
+                    // Aborting drops the task loop's future, so TaskRun::finish
+                    // never runs and the row would stay 'running' for ever. Close
+                    // it here, where we still know why it ended: a node was lost
+                    // under it, which for this thesis is data rather than an error.
+                    match TaskRun::close_open(
+                        &pool,
+                        &cluster.id,
+                        "interrupted",
+                        Some(Utc::now().naive_utc()),
+                    )
+                    .await
+                    {
+                        Ok(n) if n > 0 => {
+                            tracing::info!("Marked {} task run(s) as interrupted.", n)
+                        }
+                        Ok(_) => {}
+                        Err(e) => tracing::warn!("Could not close interrupted task run: {}", e),
+                    }
                 }
 
                 for ip in &failed_ips {
@@ -180,6 +216,35 @@ pub async fn watch(
                                 ip
                             );
                         }
+                    }
+                }
+
+                // PHASE 1 of phased recovery. The surviving nodes are healthy and
+                // idle from this moment until the replacement is configured, which
+                // is dominated by provisioning and costs several minutes of billed
+                // nothing. Relaunch the job on them now, excluding the failed
+                // addresses from the hostfile only — the node rows are left intact
+                // so apply_recovery_policy and spawn_cluster can still rewrite and
+                // re-provision them below.
+                //
+                // This deliberately runs before the ENI wait: the hostfile comes
+                // from the database, so a dead node's lingering interface does not
+                // affect a job that no longer lists it. Only the replacement needs
+                // the address back.
+                if phased {
+                    if let Some(yaml_path) = tasks_yaml.clone() {
+                        let pool_clone = Arc::clone(&pool);
+                        let excluded = failed_ips.clone();
+                        tracing::info!(
+                            "[{}] Phase 1: relaunching job on {} surviving node(s)...",
+                            Utc::now().format("%H:%M:%S"),
+                            cluster.get_nodes(&pool).await?.len() - failed_ips.len()
+                        );
+                        tasks_handle = Some(tokio::spawn(async move {
+                            if let Err(e) = tasks(&pool_clone, &yaml_path, &excluded).await {
+                                tracing::warn!("Phase 1 tasks run ended: {}", e);
+                            }
+                        }));
                     }
                 }
 
@@ -229,7 +294,7 @@ pub async fn watch(
                         let pool_clone = Arc::clone(&pool);
                         tasks_handle = Some(tokio::spawn(async move {
                             tracing::info!("Relaunching MPI job from '{}'...", yaml_path);
-                            if let Err(e) = tasks(&pool_clone, &yaml_path).await {
+                            if let Err(e) = tasks(&pool_clone, &yaml_path, &[]).await {
                                 tracing::warn!("Tasks relaunch ended: {}", e);
                             }
                         }));
@@ -249,11 +314,48 @@ pub async fn watch(
                                 "[{}] Restore completed successfully.",
                                 Utc::now().format("%H:%M:%S")
                             );
+                            // PHASE 2. A job launched in phase 1 is still running on
+                            // the survivors. Ask it to flush and exit through the same
+                            // path a spot notice uses, then wait for it to actually
+                            // stop before relaunching on the full cluster.
+                            //
+                            // The wait is bounded by the application's commit
+                            // granularity, since it can only flush at a point where
+                            // its state is coherent. Log it: that interval is the
+                            // quantisation cost of phased recovery and the quantity
+                            // finer checkpointing would reduce.
+                            if phased {
+                                if let Some(handle) = tasks_handle.take() {
+                                    let signalled_at = Utc::now();
+                                    tracing::info!(
+                                        "[{}] Phase 2: replacement ready, signalling phase 1 job to checkpoint and exit...",
+                                        signalled_at.format("%H:%M:%S")
+                                    );
+                                    // `cluster` was moved into spawn_cluster above, and
+                                    // spawn_cluster updates the row anyway, so re-read it.
+                                    match Cluster::fetch_by_id(&pool, cluster_id).await {
+                                        Ok(Some(c)) => {
+                                            signal_mpi_checkpoint(&pool, &c, &private_key_path).await
+                                        }
+                                        _ => tracing::warn!(
+                                            "Could not re-fetch cluster to signal phase 1 job."
+                                        ),
+                                    }
+                                    match handle.await {
+                                        Ok(()) => tracing::info!(
+                                            "[{}] Phase 1 job exited after {}s (commit-boundary wait).",
+                                            Utc::now().format("%H:%M:%S"),
+                                            (Utc::now() - signalled_at).num_seconds()
+                                        ),
+                                        Err(e) => tracing::warn!("Phase 1 job did not exit cleanly: {}", e),
+                                    }
+                                }
+                            }
                             if let Some(yaml_path) = tasks_yaml.clone() {
                                 let pool_clone = Arc::clone(&pool);
                                 tasks_handle = Some(tokio::spawn(async move {
                                     tracing::info!("Relaunching MPI job from '{}'...", yaml_path);
-                                    if let Err(e) = tasks(&pool_clone, &yaml_path).await {
+                                    if let Err(e) = tasks(&pool_clone, &yaml_path, &[]).await {
                                         tracing::warn!("Tasks relaunch ended: {}", e);
                                     }
                                 }));
@@ -310,18 +412,18 @@ async fn apply_recovery_policy(
     nodes.sort_by(|a, b| a.private_ip.cmp(&b.private_ip));
 
     // Snapshot node identity we need across the loop (avoids borrow issues when we
-    // later start a transaction to insert additional Node rows).
+    // later start a transaction to insert additional Node rows). The cluster id is
+    // not captured: it is identical for every node and already available as
+    // `cluster.id`.
     #[derive(Clone)]
     struct NodeSlot {
         id: String,
-        cluster_id: String,
         private_ip: Option<String>,
     }
     let node_slots: Vec<NodeSlot> = nodes
         .iter()
         .map(|n| NodeSlot {
             id: n.id.clone(),
-            cluster_id: n.cluster_id.clone(),
             private_ip: n.private_ip.clone(),
         })
         .collect();
@@ -471,8 +573,10 @@ async fn apply_recovery_policy(
                     root_volume_gb: fo.recovery.root_volume_gb,
                     root_volume_type: fo.recovery.root_volume_type.clone(),
                     root_volume_iops: fo.recovery.root_volume_iops,
+                    instance_id: None,
                     private_ip: None,
                     public_ip: None,
+                    observed_at: None,
                     was_efs_configured: false,
                     was_ssh_configured: false,
                 };

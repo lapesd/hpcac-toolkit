@@ -347,6 +347,28 @@ pub async fn create(
         anyhow::bail!("efs_provisioned_throughput_mbs can only be set when efs_throughput_mode is 'provisioned'");
     }
 
+    // The instance-type catalogue backs the validation below. It is populated per
+    // (provider, region), and the region is only knowable here, from the cluster
+    // spec -- which is why this cannot be done when the provider is configured.
+    // Load it on first use so the catalogue is never a manual setup step; an
+    // explicit `instance-type load` remains available to force a refresh.
+    let cached_types =
+        InstanceType::count_by_provider_and_region(pool, &provider_id, &region).await?;
+    if cached_types == 0 {
+        tracing::info!(
+            "No instance types cached for provider '{}' in region '{}'. Loading them now...",
+            provider_id,
+            region
+        );
+        crate::commands::instance_type::load(
+            pool,
+            Some(provider_id.clone()),
+            Some(provider_config.id.to_string()),
+            Some(region.clone()),
+        )
+        .await?;
+    }
+
     // Validate node data
     let mut nodes_to_insert: Vec<Node> = vec![];
     let mut commands_to_insert: Vec<ShellCommand> = vec![];
@@ -367,9 +389,17 @@ pub async fn create(
             Ok(Some(details)) => details,
             Ok(None) => {
                 anyhow::bail!(
-                    "Instance type '{}' is unavailable in provider '{}' at region '{}'.\n\
-                    Are the instance_types loaded? Use 'instance_type list' to check loaded data",
+                    "Instance type '{}' is not offered by provider '{}' in region '{}'.\n\
+                    {} types are cached for that region, so the catalogue is populated \
+                    and this name is either misspelled or unavailable there.\n\
+                    Run 'instance-type list --provider {} --region {}' to see what is offered, \
+                    or 'instance-type load --provider {} --region {}' to refresh the catalogue.",
                     &instance_type_name,
+                    &provider_id,
+                    &region,
+                    cached_types.max(1),
+                    &provider_id,
+                    &region,
                     &provider_id,
                     &region
                 )
@@ -539,8 +569,10 @@ pub async fn create(
             root_volume_gb,
             root_volume_type,
             root_volume_iops,
+            instance_id: None,
             private_ip: None,
             public_ip: None,
+            observed_at: None,
             was_efs_configured: false,
             was_ssh_configured: false,
         });

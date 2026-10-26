@@ -51,6 +51,33 @@ enum Commands {
         #[command(subcommand)]
         command: ProviderConfigCommands,
     },
+
+    /// Task execution commands
+    Task {
+        #[command(subcommand)]
+        command: TaskCommands,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum TaskCommands {
+    /// Run tasks on a running Cluster using a tasks YAML file
+    Run {
+        /// Path to the tasks YAML file
+        #[arg(short = 'f', long = "file")]
+        yaml_file_path: String,
+    },
+
+    /// List past and in-flight task runs, most recent first
+    List {
+        /// Only show runs for this Cluster
+        #[arg(long)]
+        cluster_id: Option<String>,
+
+        /// Maximum number of runs to show
+        #[arg(long, default_value = "20")]
+        limit: i64,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -138,7 +165,12 @@ enum ClusterCommands {
         yes: bool,
     },
 
-    /// Run tasks on a running Cluster using a tasks YAML file
+    /// Deprecated alias for `task run`, kept so already-published experiment
+    /// scripts and the IC2E 2026 companion artifact keep working against
+    /// current versions of the toolkit. Hidden from help so `task run` is the
+    /// only documented entry point. Do not remove without checking
+    /// papers/ic2e-2026/ and the companion repo.
+    #[command(hide = true)]
     Tasks {
         /// Path to the tasks YAML file
         #[arg(short = 'f', long = "file")]
@@ -163,6 +195,13 @@ enum ClusterCommands {
         /// remaining nodes instead of provisioning a replacement
         #[arg(long, default_value_t = false)]
         no_replace: bool,
+
+        /// Phased recovery: relaunch the job on the surviving nodes immediately,
+        /// then provision the replacement and relaunch on the full cluster once
+        /// it is ready. Saves the idle cost of survivors waiting out provisioning.
+        /// Ignored when --no-replace is set.
+        #[arg(long, default_value_t = false)]
+        phased: bool,
     },
 }
 
@@ -379,15 +418,19 @@ async fn main() -> Result<()> {
                 .await?;
             }
             ClusterCommands::Tasks { yaml_file_path } => {
-                commands::cluster::tasks(&sqlite_pool, yaml_file_path).await?;
+                tracing::warn!(
+                    "`cluster tasks` is deprecated and will be removed; use `task run` instead."
+                );
+                commands::task::tasks(&sqlite_pool, yaml_file_path, &[]).await?;
             }
             ClusterCommands::Watch {
                 cluster_id,
                 interval,
                 tasks_yaml,
                 no_replace,
+                phased,
             } => {
-                commands::cluster::watch(&sqlite_pool, cluster_id, *interval, tasks_yaml.as_deref(), *no_replace).await?;
+                commands::cluster::watch(&sqlite_pool, cluster_id, *interval, tasks_yaml.as_deref(), *no_replace, *phased).await?;
             }
         },
         Commands::InstanceType { command } => match command {
@@ -445,6 +488,14 @@ async fn main() -> Result<()> {
             }
             ProviderConfigCommands::List {} => {
                 commands::provider_config::list(&sqlite_pool).await?;
+            }
+        },
+        Commands::Task { command } => match command {
+            TaskCommands::Run { yaml_file_path } => {
+                commands::task::tasks(&sqlite_pool, yaml_file_path, &[]).await?;
+            }
+            TaskCommands::List { cluster_id, limit } => {
+                commands::task::list(&sqlite_pool, cluster_id.as_deref(), *limit).await?;
             }
         },
     }
