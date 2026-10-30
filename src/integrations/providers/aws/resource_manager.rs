@@ -23,6 +23,8 @@ impl CloudResourceManager for AwsInterface {
         }
         if cluster.use_elastic_file_system {
             steps += 4 + (2 * nodes.len()) + nodes.len();
+        } else if cluster.use_fsx_lustre {
+            steps += 3 + (2 * nodes.len()) + nodes.len();
         } else {
             steps += nodes.len();
         }
@@ -46,7 +48,10 @@ impl CloudResourceManager for AwsInterface {
         // On a restore the surviving nodes really are still mounted, so their
         // flags must be preserved and only the replacement nodes (inserted with
         // the flag unset) get mounted.
-        if !matches!(cluster.state, ClusterState::Running | ClusterState::Restoring) {
+        if !matches!(
+            cluster.state,
+            ClusterState::Running | ClusterState::Restoring
+        ) {
             for node in nodes.iter_mut().filter(|node| node.was_efs_configured) {
                 node.set_efs_configuration_state(pool, false).await?;
                 node.was_efs_configured = false;
@@ -143,6 +148,20 @@ impl CloudResourceManager for AwsInterface {
             main_progress.inc(1);
         }
 
+        // FSx needs the subnet and security group to exist, unlike an EFS device.
+        if cluster.use_fsx_lustre {
+            operation_spinner.update_message("Reserving the node IP range in the Subnet...");
+            self.ensure_fsx_lustre_ip_reservation(&context).await?;
+            main_progress.inc(1);
+
+            operation_spinner.update_message("Requesting FSx for Lustre file system creation...");
+            context.fsx_file_system_id = Some(
+                self.request_fsx_lustre_file_system_creation(&context)
+                    .await?,
+            );
+            main_progress.inc(1);
+        }
+
         // 9. Create SSH Key Pair
         operation_spinner.update_message("Importing the SSH key pair...");
         context.ssh_key_id = Some(self.ensure_ssh_key(&context).await?);
@@ -188,8 +207,11 @@ impl CloudResourceManager for AwsInterface {
                 let node_public_ip = self
                     .associate_elastic_ip_with_network_interface(&context, &eip_id, &eni_id)
                     .await?;
-                context.elastic_ips.insert(node_index, node_public_ip.clone());
-                node.set_ips(pool, &node_private_ip, &node_public_ip).await?;
+                context
+                    .elastic_ips
+                    .insert(node_index, node_public_ip.clone());
+                node.set_ips(pool, &node_private_ip, &node_public_ip)
+                    .await?;
                 main_progress.inc(1);
             } else {
                 // Worker nodes: private IP only, accessed via head node jump host.
@@ -249,7 +271,9 @@ impl CloudResourceManager for AwsInterface {
             {
                 tracing::warn!("Could not record instance_id for node '{}': {}", node.id, e);
             }
-            context.ec2_instance_ids.insert(node_index, launch.instance_id);
+            context
+                .ec2_instance_ids
+                .insert(node_index, launch.instance_id);
             // Persist a fallback so the DB describes the cluster that actually
             // exists. Downstream cost reporting and any later restore read this.
             if launch.instance_type != node.instance_type {
@@ -286,6 +310,17 @@ impl CloudResourceManager for AwsInterface {
             main_progress.inc(1);
         }
 
+        let fsx_mount_names = if cluster.use_fsx_lustre {
+            operation_spinner.update_message("Waiting for the FSx for Lustre file system...");
+            let names = self
+                .wait_for_fsx_lustre_file_system_to_be_ready(&context)
+                .await?;
+            main_progress.inc(1);
+            Some(names)
+        } else {
+            None
+        };
+
         let private_key_content =
             std::fs::read_to_string(&cluster.private_ssh_key_path).map_err(|e| {
                 anyhow::anyhow!(
@@ -295,11 +330,7 @@ impl CloudResourceManager for AwsInterface {
                 )
             })?;
 
-        let head_public_ip = context
-            .elastic_ips
-            .get(&0)
-            .cloned()
-            .unwrap_or_default();
+        let head_public_ip = context.elastic_ips.get(&0).cloned().unwrap_or_default();
 
         // 17. Wait for SSH to be ready on all instances.
         // Head node is polled directly; workers are reached via the head as a jump host.
@@ -314,8 +345,7 @@ impl CloudResourceManager for AwsInterface {
                 let worker_private_ip = context.network_interface_private_ip(node_index);
                 operation_spinner.update_message(&format!(
                     "Waiting for SSH on worker node {} ({})...",
-                    node_index,
-                    worker_private_ip
+                    node_index, worker_private_ip
                 ));
                 SshSession::for_aws_worker(
                     &worker_private_ip,
@@ -398,6 +428,66 @@ echo "EFS mount and setup complete!"
 "#
                     );
                     ssh.run_command(&efs_attach_script).await?;
+                    nodes[node_index]
+                        .set_efs_configuration_state(pool, true)
+                        .await?;
+                }
+                main_progress.inc(1);
+            }
+        }
+
+        // 18b. (conditional) Mount the FSx for Lustre file system via SSH
+        if let Some((fsx_dns_name, fsx_mount_name)) = &fsx_mount_names {
+            let fsx_attach_script = format!(
+                r#"
+rpm -q lustre-client &>/dev/null || sudo dnf install -y lustre-client
+sudo mkdir -p /shared
+MAX_RETRIES=12
+i=1
+while [ $i -le $MAX_RETRIES ]; do
+    echo "FSx mount attempt $i/$MAX_RETRIES..."
+    if sudo mount -t lustre -o relatime,flock {fsx_dns_name}@tcp:/{fsx_mount_name} /shared; then
+        echo "FSx mount successful!"
+        break
+    fi
+    if [ $i -eq $MAX_RETRIES ]; then
+        echo "FSx mount failed, giving up (kernel $(uname -r))."
+        exit 1
+    fi
+    # A name looked up before the file system was ready can stay cached as missing.
+    sudo systemctl restart systemd-resolved 2>/dev/null || true
+    sleep 10
+    i=$((i + 1))
+done
+sudo chown ec2-user:ec2-user /shared
+echo "FSx mount and setup complete!"
+"#
+            );
+            for node_index in 0..nodes.len() {
+                operation_spinner.update_message(&format!(
+                    "Attaching Node {} of {} to FSx for Lustre...",
+                    node_index + 1,
+                    nodes.len()
+                ));
+                if nodes[node_index].was_efs_configured {
+                    tracing::info!(
+                        "Skipping Node {} of {} (already mounted)...",
+                        node_index + 1,
+                        nodes.len()
+                    );
+                } else {
+                    let ssh = if node_index == 0 {
+                        SshSession::for_aws(&head_public_ip, &cluster.private_ssh_key_path)
+                    } else {
+                        let worker_private_ip = context.network_interface_private_ip(node_index);
+                        SshSession::for_aws_worker(
+                            &worker_private_ip,
+                            &head_public_ip,
+                            &cluster.private_ssh_key_path,
+                        )
+                    };
+                    ssh.run_command(&fsx_attach_script).await?;
+                    // This flag tracks the '/shared' mount, whichever file system it is.
                     nodes[node_index]
                         .set_efs_configuration_state(pool, true)
                         .await?;
@@ -490,6 +580,8 @@ echo "EFS mount and setup complete!"
         }
         if cluster.use_elastic_file_system {
             steps += 4;
+        } else if cluster.use_fsx_lustre {
+            steps += 2;
         }
 
         let terminating_message = format!("Terminating Cluster '{}'...", cluster.display_name);
@@ -587,6 +679,20 @@ echo "EFS mount and setup complete!"
         self.wait_for_all_elastic_compute_instances_to_be_terminated(&context)
             .await?;
         main_progress.inc(nodes.len() as u64);
+
+        // Its network interfaces hold the subnet and security group, so they can only
+        // be destroyed below once this is gone. Deleting also stops its hourly charge.
+        if cluster.use_fsx_lustre {
+            operation_spinner.update_message("Requesting FSx for Lustre file system deletion...");
+            self.request_fsx_lustre_file_system_deletion(&context)
+                .await?;
+            main_progress.inc(1);
+
+            operation_spinner.update_message("Waiting for FSx for Lustre file system deletion...");
+            self.wait_for_fsx_lustre_file_system_to_be_deleted(&context)
+                .await?;
+            main_progress.inc(1);
+        }
 
         for (node_index, _node) in nodes.iter().enumerate() {
             // 6.1. Dissociate from ENI device and deallocate Elastic IP
@@ -786,14 +892,9 @@ echo "EFS mount and setup complete!"
                 };
 
                 if let Some(node) = node
-                    && let Err(e) = Node::record_observation(
-                        pool,
-                        &node.id,
-                        instance_id,
-                        private_ip,
-                        public_ip,
-                    )
-                    .await
+                    && let Err(e) =
+                        Node::record_observation(pool, &node.id, instance_id, private_ip, public_ip)
+                            .await
                 {
                     tracing::warn!("Could not record observation for node '{}': {}", node.id, e);
                 }

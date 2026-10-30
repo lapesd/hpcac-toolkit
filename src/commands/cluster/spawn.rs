@@ -8,7 +8,12 @@ use crate::utils;
 use anyhow::Result;
 use sqlx::sqlite::SqlitePool;
 
-pub async fn spawn(pool: &SqlitePool, cluster_id: &str, skip_confirmation: bool, retry: u32) -> Result<()> {
+pub async fn spawn(
+    pool: &SqlitePool,
+    cluster_id: &str,
+    skip_confirmation: bool,
+    retry: u32,
+) -> Result<()> {
     let cluster = match Cluster::fetch_by_id(pool, cluster_id).await? {
         Some(cluster) => cluster,
         None => {
@@ -61,10 +66,8 @@ pub async fn spawn(pool: &SqlitePool, cluster_id: &str, skip_confirmation: bool,
         .collect::<std::collections::HashSet<_>>()
         .into_iter()
         .collect();
-    let pricing_tracker = utils::ProgressTracker::new(
-        unique_instance_types.len() as u64,
-        Some("instance pricing"),
-    );
+    let pricing_tracker =
+        utils::ProgressTracker::new(unique_instance_types.len() as u64, Some("instance pricing"));
     let live_instance_prices = cloud_interface
         .fetch_prices(&cluster.region, &unique_instance_types, &pricing_tracker)
         .await?;
@@ -79,7 +82,11 @@ pub async fn spawn(pool: &SqlitePool, cluster_id: &str, skip_confirmation: bool,
         .collect();
     let live_spot_prices = if !spot_instance_types.is_empty() {
         cloud_interface
-            .fetch_spot_prices(&cluster.region, &spot_instance_types, &cluster.availability_zone)
+            .fetch_spot_prices(
+                &cluster.region,
+                &spot_instance_types,
+                &cluster.availability_zone,
+            )
             .await?
     } else {
         std::collections::HashMap::new()
@@ -91,7 +98,9 @@ pub async fn spawn(pool: &SqlitePool, cluster_id: &str, skip_confirmation: bool,
     for vt in &unique_volume_types {
         ebs_price_cache.insert(
             vt.clone(),
-            cloud_interface.fetch_ebs_pricing(&cluster.region, vt).await?,
+            cloud_interface
+                .fetch_ebs_pricing(&cluster.region, vt)
+                .await?,
         );
     }
 
@@ -103,31 +112,78 @@ pub async fn spawn(pool: &SqlitePool, cluster_id: &str, skip_confirmation: bool,
     const PUBLIC_IPV4_PER_HOUR: f64 = 0.005;
     const HOURS_PER_MONTH: f64 = 730.0;
 
-    let live_cost_per_hour: f64 = nodes.iter().map(|node| {
-        let instance_cost = if node.allocation_mode == "spot" {
-            *live_spot_prices.get(&node.instance_type).unwrap_or(
-                live_instance_prices.get(&node.instance_type).unwrap_or(&0.0),
-            )
-        } else {
-            *live_instance_prices.get(&node.instance_type).unwrap_or(&0.0)
-        };
-        let ebs = ebs_price_cache.get(&node.root_volume_type).unwrap();
-        let storage_cost = node.root_volume_gb as f64 * ebs.storage_per_gb_month / HOURS_PER_MONTH;
-        let extra_throughput = (GP3_PROVISIONED_THROUGHPUT_MBS - GP3_THROUGHPUT_BASELINE_MBS).max(0.0);
-        let throughput_cost = extra_throughput * ebs.throughput_per_mbs_month / HOURS_PER_MONTH;
-        let iops_cost = match (node.root_volume_iops, node.root_volume_type.as_str()) {
-            (Some(iops), "gp3") => (iops as f64 - GP3_IOPS_BASELINE).max(0.0) * GP3_IOPS_PER_MONTH / HOURS_PER_MONTH,
-            (Some(iops), "io1") | (Some(iops), "io2") => iops as f64 * IO1_IO2_IOPS_PER_MONTH / HOURS_PER_MONTH,
-            _ => 0.0,
-        };
-        instance_cost + storage_cost + throughput_cost + iops_cost + PUBLIC_IPV4_PER_HOUR
-    }).sum();
+    let shared_storage_cost = if cluster.use_fsx_lustre {
+        Some(
+            cloud_interface
+                .fetch_fsx_lustre_cost(
+                    &cluster.region,
+                    &cluster.fsx_deployment_type,
+                    cluster.fsx_storage_capacity_gib,
+                    cluster.fsx_per_unit_storage_throughput,
+                )
+                .await?,
+        )
+    } else if cluster.use_elastic_file_system {
+        Some(
+            cloud_interface
+                .fetch_efs_cost(
+                    &cluster.region,
+                    &cluster.efs_throughput_mode,
+                    cluster.efs_provisioned_throughput_mbs,
+                )
+                .await?,
+        )
+    } else {
+        None
+    };
+    let shared_storage_cost_per_hour = shared_storage_cost
+        .as_ref()
+        .map_or(0.0, |cost| cost.fixed_per_hour);
+
+    let nodes_cost_per_hour: f64 = nodes
+        .iter()
+        .map(|node| {
+            let instance_cost = if node.allocation_mode == "spot" {
+                *live_spot_prices.get(&node.instance_type).unwrap_or(
+                    live_instance_prices
+                        .get(&node.instance_type)
+                        .unwrap_or(&0.0),
+                )
+            } else {
+                *live_instance_prices
+                    .get(&node.instance_type)
+                    .unwrap_or(&0.0)
+            };
+            let ebs = ebs_price_cache.get(&node.root_volume_type).unwrap();
+            let storage_cost =
+                node.root_volume_gb as f64 * ebs.storage_per_gb_month / HOURS_PER_MONTH;
+            let extra_throughput =
+                (GP3_PROVISIONED_THROUGHPUT_MBS - GP3_THROUGHPUT_BASELINE_MBS).max(0.0);
+            let throughput_cost = extra_throughput * ebs.throughput_per_mbs_month / HOURS_PER_MONTH;
+            let iops_cost = match (node.root_volume_iops, node.root_volume_type.as_str()) {
+                (Some(iops), "gp3") => {
+                    (iops as f64 - GP3_IOPS_BASELINE).max(0.0) * GP3_IOPS_PER_MONTH
+                        / HOURS_PER_MONTH
+                }
+                (Some(iops), "io1") | (Some(iops), "io2") => {
+                    iops as f64 * IO1_IO2_IOPS_PER_MONTH / HOURS_PER_MONTH
+                }
+                _ => 0.0,
+            };
+            instance_cost + storage_cost + throughput_cost + iops_cost + PUBLIC_IPV4_PER_HOUR
+        })
+        .sum();
+    let live_cost_per_hour = nodes_cost_per_hour + shared_storage_cost_per_hour;
 
     tracing::info!(
-        "Estimated cost: ${:.4}/hour (${:.2}/day)",
+        "Estimated cost: ${:.4}/hour (${:.2}/day), of which shared file system: ${:.4}/hour",
         live_cost_per_hour,
-        live_cost_per_hour * 24.0
+        live_cost_per_hour * 24.0,
+        shared_storage_cost_per_hour
     );
+    if let Some(rates) = shared_storage_cost.and_then(|cost| cost.usage_rates) {
+        tracing::info!("The shared file system also bills for usage: {}", rates);
+    }
 
     if !utils::user_confirmation(
         skip_confirmation,

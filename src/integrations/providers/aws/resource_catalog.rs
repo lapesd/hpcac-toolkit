@@ -7,9 +7,111 @@ use std::collections::HashMap;
 
 use super::interface::AwsInterface;
 
+const HOURS_PER_MONTH: f64 = 730.0;
+
 pub struct EbsPricing {
     pub storage_per_gb_month: f64,
     pub throughput_per_mbs_month: f64,
+}
+
+/// What the cluster's shared file system costs, on top of its nodes.
+pub struct SharedStorageCost {
+    /// Charged whether or not the file system is used.
+    pub fixed_per_hour: f64,
+    /// Charges that depend on usage, so a cluster's hourly cost can't include them.
+    pub usage_rates: Option<String>,
+}
+
+/// A product of the AWS Pricing API: its attributes and USD on-demand price.
+type StorageProduct = (serde_json::Value, f64);
+
+fn fsx_lustre_price_per_gb_month(
+    products: &[StorageProduct],
+    deployment_type: &str,
+    per_unit_storage_throughput: Option<i64>,
+) -> f64 {
+    let throughput = per_unit_storage_throughput.unwrap_or_default();
+    let (deployment_option, throughput_capacity, fallback) = match (deployment_type, throughput) {
+        ("persistent_2", 125) => ("Persistent", "125", 0.145),
+        ("persistent_2", 250) => ("Persistent", "250", 0.21),
+        ("persistent_2", 500) => ("Persistent", "500", 0.34),
+        ("persistent_2", _) => ("Persistent", "1000", 0.60),
+        _ => ("Single-AZ", "N/A", 0.14),
+    };
+    products
+        .iter()
+        .find(|(attributes, _)| {
+            attributes["fileSystemType"] == "Lustre"
+                && attributes["storageType"] == "SSD"
+                && attributes["deploymentOption"] == deployment_option
+                && attributes["throughputCapacity"] == throughput_capacity
+        })
+        .map(|(_, price)| *price)
+        .unwrap_or_else(|| {
+            tracing::warn!(
+                "FSx for Lustre price not found for {} at {} MB/s/TiB, using {}",
+                deployment_type,
+                throughput_capacity,
+                fallback
+            );
+            fallback
+        })
+}
+
+fn efs_price(
+    products: &[StorageProduct],
+    usage_type_suffix: &str,
+    operation: &str,
+    fallback: f64,
+) -> f64 {
+    products
+        .iter()
+        .find(|(attributes, _)| {
+            attributes["usagetype"]
+                .as_str()
+                .is_some_and(|usage_type| usage_type.ends_with(usage_type_suffix))
+                && attributes["operation"].as_str().unwrap_or_default() == operation
+        })
+        .map(|(_, price)| *price)
+        .unwrap_or_else(|| {
+            tracing::warn!(
+                "EFS price not found for {}, using {}",
+                usage_type_suffix,
+                fallback
+            );
+            fallback
+        })
+}
+
+fn efs_cost(
+    products: &[StorageProduct],
+    throughput_mode: &str,
+    provisioned_throughput_mbs: Option<f64>,
+) -> SharedStorageCost {
+    let mut usage_rates = format!(
+        "${:.3}/GB-month stored",
+        efs_price(products, "-TimedStorage-ByteHrs", "", 0.30)
+    );
+    let mut fixed_per_hour = 0.0;
+    match throughput_mode {
+        "elastic" => {
+            usage_rates += &format!(
+                ", ${:.3}/GB written, ${:.3}/GB read",
+                efs_price(products, "-ETDataAccess-Bytes", "Write", 0.06),
+                efs_price(products, "-ETDataAccess-Bytes", "Read", 0.03),
+            );
+        }
+        "provisioned" => {
+            fixed_per_hour = provisioned_throughput_mbs.unwrap_or_default()
+                * efs_price(products, "-ProvisionedTP-MiBpsHrs", "", 6.0)
+                / HOURS_PER_MONTH;
+        }
+        _ => {}
+    }
+    SharedStorageCost {
+        fixed_per_hour,
+        usage_rates: Some(usage_rates),
+    }
 }
 
 impl CloudInfoProvider for AwsInterface {
@@ -575,7 +677,11 @@ impl AwsInterface {
                 extract_price(&json)
             })
             .unwrap_or_else(|| {
-                tracing::warn!("EBS storage price not found for {} in {}, using 0.08", volume_type, region);
+                tracing::warn!(
+                    "EBS storage price not found for {} in {}, using 0.08",
+                    volume_type,
+                    region
+                );
                 0.08
             });
 
@@ -601,7 +707,10 @@ impl AwsInterface {
                     extract_price(&json)
                 })
                 .unwrap_or_else(|| {
-                    tracing::warn!("EBS throughput price not found for gp3 in {}, using 40.96", region);
+                    tracing::warn!(
+                        "EBS throughput price not found for gp3 in {}, using 40.96",
+                        region
+                    );
                     40.96
                 });
             gbps_per_month / 1000.0
@@ -613,6 +722,108 @@ impl AwsInterface {
             storage_per_gb_month,
             throughput_per_mbs_month,
         })
+    }
+
+    /// Fetch the product list of a storage service in a region from the AWS Pricing API, as
+    /// (attributes, USD on-demand price) pairs.
+    async fn fetch_storage_products(
+        &self,
+        service_code: &str,
+        region: &str,
+    ) -> Result<Vec<StorageProduct>> {
+        let client = self.get_pricing_client().await?;
+        let mut products = vec![];
+        let mut next_token = None;
+        loop {
+            let response = client
+                .get_products()
+                .service_code(service_code)
+                .format_version("aws_v1")
+                .filters(
+                    aws_sdk_pricing::types::Filter::builder()
+                        .r#type(aws_sdk_pricing::types::FilterType::TermMatch)
+                        .field("regionCode")
+                        .value(region)
+                        .build()?,
+                )
+                .set_next_token(next_token)
+                .send()
+                .await?;
+            for item in response.price_list() {
+                let json: serde_json::Value = serde_json::from_str(item)?;
+                let price = json["terms"]["OnDemand"]
+                    .as_object()
+                    .and_then(|terms| terms.values().next())
+                    .and_then(|term| term["priceDimensions"].as_object())
+                    .and_then(|dimensions| dimensions.values().next())
+                    .and_then(|dimension| dimension["pricePerUnit"]["USD"].as_str())
+                    .and_then(|usd| usd.parse::<f64>().ok());
+                if let Some(price) = price {
+                    products.push((json["product"]["attributes"].clone(), price));
+                }
+            }
+            next_token = response.next_token().map(str::to_string);
+            if next_token.is_none() {
+                return Ok(products);
+            }
+        }
+    }
+
+    /// A pricing lookup that fails shouldn't stop a cluster, since the price only informs
+    /// the estimate: the callers fall back to published prices, as for EBS.
+    async fn fetch_storage_products_or_warn(
+        &self,
+        service_code: &str,
+        region: &str,
+    ) -> Vec<StorageProduct> {
+        self.fetch_storage_products(service_code, region)
+            .await
+            .unwrap_or_else(|e| {
+                tracing::warn!(
+                    "Could not fetch {} prices in {}: {}",
+                    service_code,
+                    region,
+                    e
+                );
+                vec![]
+            })
+    }
+
+    /// FSx for Lustre bills for its whole provisioned capacity, used or not.
+    pub async fn fetch_fsx_lustre_cost(
+        &self,
+        region: &str,
+        deployment_type: &str,
+        storage_capacity_gib: i64,
+        per_unit_storage_throughput: Option<i64>,
+    ) -> Result<SharedStorageCost> {
+        let products = self
+            .fetch_storage_products_or_warn("AmazonFSx", region)
+            .await;
+        let per_gb_month =
+            fsx_lustre_price_per_gb_month(&products, deployment_type, per_unit_storage_throughput);
+        Ok(SharedStorageCost {
+            fixed_per_hour: storage_capacity_gib as f64 * per_gb_month / HOURS_PER_MONTH,
+            usage_rates: None,
+        })
+    }
+
+    /// EFS bills for what is stored and, in elastic mode, for what is transferred. Only
+    /// provisioned throughput is a fixed charge.
+    pub async fn fetch_efs_cost(
+        &self,
+        region: &str,
+        throughput_mode: &str,
+        provisioned_throughput_mbs: Option<f64>,
+    ) -> Result<SharedStorageCost> {
+        let products = self
+            .fetch_storage_products_or_warn("AmazonEFS", region)
+            .await;
+        Ok(efs_cost(
+            &products,
+            throughput_mode,
+            provisioned_throughput_mbs,
+        ))
     }
 
     /// Fetch current spot prices for the given instance types via EC2 describe_spot_price_history.
@@ -665,5 +876,26 @@ impl AwsInterface {
         }
 
         Ok(price_map)
+    }
+}
+
+#[cfg(test)]
+mod shared_storage_cost_tests {
+    use super::*;
+
+    #[test]
+    fn missing_prices_fall_back_instead_of_failing() {
+        let fsx = fsx_lustre_price_per_gb_month(&[], "persistent_2", Some(1000));
+        assert_eq!(fsx, 0.60);
+        assert_eq!(fsx_lustre_price_per_gb_month(&[], "scratch_2", None), 0.14);
+
+        let provisioned = efs_cost(&[], "provisioned", Some(730.0));
+        assert_eq!(provisioned.fixed_per_hour, 6.0);
+        let elastic = efs_cost(&[], "elastic", None);
+        assert_eq!(elastic.fixed_per_hour, 0.0);
+        assert_eq!(
+            elastic.usage_rates.as_deref(),
+            Some("$0.300/GB-month stored, $0.060/GB written, $0.030/GB read")
+        );
     }
 }

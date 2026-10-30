@@ -54,7 +54,10 @@ pub async fn watch(
             None
         }
         Err(e) => {
-            tracing::warn!("Could not resolve spot interruption queue (alerts disabled): {}", e);
+            tracing::warn!(
+                "Could not resolve spot interruption queue (alerts disabled): {}",
+                e
+            );
             None
         }
     };
@@ -63,7 +66,9 @@ pub async fn watch(
         tracing::info!("Automatic relaunch enabled after restore.");
     }
     if no_replace {
-        tracing::info!("Scale-down mode: failed nodes will be removed and job relaunched on remaining nodes.");
+        tracing::info!(
+            "Scale-down mode: failed nodes will be removed and job relaunched on remaining nodes."
+        );
     }
     let phased = phased && !no_replace;
     if phased {
@@ -335,7 +340,8 @@ pub async fn watch(
                                     // spawn_cluster updates the row anyway, so re-read it.
                                     match Cluster::fetch_by_id(&pool, cluster_id).await {
                                         Ok(Some(c)) => {
-                                            signal_mpi_checkpoint(&pool, &c, &private_key_path).await
+                                            signal_mpi_checkpoint(&pool, &c, &private_key_path)
+                                                .await
                                         }
                                         _ => tracing::warn!(
                                             "Could not re-fetch cluster to signal phase 1 job."
@@ -347,7 +353,10 @@ pub async fn watch(
                                             Utc::now().format("%H:%M:%S"),
                                             (Utc::now() - signalled_at).num_seconds()
                                         ),
-                                        Err(e) => tracing::warn!("Phase 1 job did not exit cleanly: {}", e),
+                                        Err(e) => tracing::warn!(
+                                            "Phase 1 job did not exit cleanly: {}",
+                                            e
+                                        ),
                                     }
                                 }
                             }

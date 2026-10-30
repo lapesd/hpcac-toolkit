@@ -20,6 +20,11 @@ use_elastic_file_system: false     # Mount a shared NFS filesystem at /shared on
 #                                        # provisioned: fixed MB/s regardless of storage size (billed extra).
 #                                        # elastic:     AWS auto-scales throughput on demand (pay-per-use).
 # efs_provisioned_throughput_mbs: 256    # Required when efs_throughput_mode is 'provisioned'.
+use_fsx_lustre: false              # Mount FSx for Lustre at /shared instead of EFS (cannot be combined with it).
+                                   # Much faster for large checkpoints, but in one zone only and billed hourly.
+# fsx_deployment_type: scratch_2     # Optional. scratch_2 (default) | persistent_2
+# fsx_storage_capacity_gib: 1200     # Optional. 1200 (default), or a multiple of 2400
+# fsx_per_unit_storage_throughput: 1000  # Required for persistent_2: 125 | 250 | 500 | 1000 (MB/s per TiB)
 
 nodes:
   # Minimal node — all optional fields use defaults.

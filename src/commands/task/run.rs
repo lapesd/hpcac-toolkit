@@ -43,11 +43,7 @@ struct TaskYaml {
 /// its record, so `apply_recovery_policy` and `spawn_cluster` can still rewrite
 /// and re-provision it, but it takes no part in the job running meanwhile.
 /// Pass an empty slice for the ordinary case.
-pub async fn tasks(
-    pool: &SqlitePool,
-    yaml_file_path: &str,
-    exclude_ips: &[String],
-) -> Result<()> {
+pub async fn tasks(pool: &SqlitePool, yaml_file_path: &str, exclude_ips: &[String]) -> Result<()> {
     let path = Path::new(yaml_file_path);
     let yaml_str = match fs::read_to_string(path) {
         Ok(s) => s,
@@ -251,7 +247,10 @@ async fn run_task_loop(
                 task_run.finish(pool, "failed").await?;
                 anyhow::bail!(
                     "Task '{}' run {}/{} failed (SSH error): {}",
-                    task.name, run, task.repeat, e
+                    task.name,
+                    run,
+                    task.repeat,
+                    e
                 );
             }
 
@@ -260,7 +259,11 @@ async fn run_task_loop(
                 task_run.finish(pool, "failed").await?;
                 anyhow::bail!(
                     "Task '{}' run {}/{} failed with exit code {}. Check log: /tmp/hpcac_{}.log",
-                    task.name, run, task.repeat, exit_code, session_name
+                    task.name,
+                    run,
+                    task.repeat,
+                    exit_code,
+                    session_name
                 );
             }
 

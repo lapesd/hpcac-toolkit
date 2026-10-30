@@ -8,10 +8,10 @@ use anyhow::Result;
 use chrono::Utc;
 use inquire::Select;
 use serde::{Deserialize, Serialize};
+use serde_json;
 use sqlx::sqlite::SqlitePool;
 use std::fs;
 use std::path::Path;
-use serde_json;
 
 const GP3_THROUGHPUT_BASELINE_MBS: f64 = 125.0;
 const GP3_PROVISIONED_THROUGHPUT_MBS: f64 = 500.0;
@@ -36,6 +36,8 @@ struct NodeCostBreakdown {
 #[derive(Serialize, Deserialize)]
 struct CostBreakdown {
     nodes: Vec<NodeCostBreakdown>,
+    #[serde(default)]
+    shared_storage_cost_per_hour: f64,
     total_per_hour: f64,
 }
 
@@ -55,6 +57,11 @@ struct ClusterYaml {
     efs_performance_mode: Option<String>,
     efs_throughput_mode: Option<String>,
     efs_provisioned_throughput_mbs: Option<f64>,
+    #[serde(default)]
+    use_fsx_lustre: bool,
+    fsx_deployment_type: Option<String>,
+    fsx_storage_capacity_gib: Option<i64>,
+    fsx_per_unit_storage_throughput: Option<i64>,
     nodes: Vec<NodeYaml>,
     on_interruption: Option<InterruptionPolicyYaml>,
 }
@@ -341,10 +348,52 @@ pub async fn create(
     };
     let efs_provisioned_throughput_mbs = cluster_yaml.efs_provisioned_throughput_mbs;
     if efs_throughput_mode == "provisioned" && efs_provisioned_throughput_mbs.is_none() {
-        anyhow::bail!("efs_provisioned_throughput_mbs is required when efs_throughput_mode is 'provisioned'");
+        anyhow::bail!(
+            "efs_provisioned_throughput_mbs is required when efs_throughput_mode is 'provisioned'"
+        );
     }
     if efs_throughput_mode != "provisioned" && efs_provisioned_throughput_mbs.is_some() {
-        anyhow::bail!("efs_provisioned_throughput_mbs can only be set when efs_throughput_mode is 'provisioned'");
+        anyhow::bail!(
+            "efs_provisioned_throughput_mbs can only be set when efs_throughput_mode is 'provisioned'"
+        );
+    }
+
+    // Validate FSx for Lustre configuration
+    if cluster_yaml.use_fsx_lustre && cluster_yaml.use_elastic_file_system {
+        anyhow::bail!(
+            "use_fsx_lustre and use_elastic_file_system cannot both be set: both mount at '/shared'"
+        );
+    }
+    let fsx_deployment_type = match cluster_yaml.fsx_deployment_type.as_deref() {
+        None => "scratch_2".to_string(),
+        Some(mode) => match mode.to_lowercase().as_str() {
+            "scratch_2" => "scratch_2".to_string(),
+            "persistent_2" => "persistent_2".to_string(),
+            invalid => anyhow::bail!(
+                "Invalid fsx_deployment_type '{}'. Valid options: scratch_2, persistent_2",
+                invalid
+            ),
+        },
+    };
+    let fsx_storage_capacity_gib = cluster_yaml.fsx_storage_capacity_gib.unwrap_or(1200);
+    if fsx_storage_capacity_gib != 1200
+        && (fsx_storage_capacity_gib <= 0 || fsx_storage_capacity_gib % 2400 != 0)
+    {
+        anyhow::bail!(
+            "Invalid fsx_storage_capacity_gib '{}'. Valid options: 1200, or a multiple of 2400",
+            fsx_storage_capacity_gib
+        );
+    }
+    let fsx_per_unit_storage_throughput = cluster_yaml.fsx_per_unit_storage_throughput;
+    match (
+        fsx_deployment_type.as_str(),
+        fsx_per_unit_storage_throughput,
+    ) {
+        ("persistent_2", Some(125 | 250 | 500 | 1000)) | ("scratch_2", None) => {}
+        ("persistent_2", _) => anyhow::bail!(
+            "persistent_2 requires fsx_per_unit_storage_throughput: 125, 250, 500 or 1000"
+        ),
+        _ => anyhow::bail!("fsx_per_unit_storage_throughput can only be set for persistent_2"),
     }
 
     // The instance-type catalogue backs the validation below. It is populated per
@@ -525,16 +574,28 @@ pub async fn create(
         // Validate root_volume_iops
         let root_volume_iops = match (node_definition.root_volume_iops, root_volume_type.as_str()) {
             (Some(iops), "gp3") if iops > 16000 => {
-                anyhow::bail!("root_volume_iops for node {} exceeds gp3 maximum of 16000", i + 1)
+                anyhow::bail!(
+                    "root_volume_iops for node {} exceeds gp3 maximum of 16000",
+                    i + 1
+                )
             }
             (Some(iops), "io1") if iops > 64000 => {
-                anyhow::bail!("root_volume_iops for node {} exceeds io1 maximum of 64000", i + 1)
+                anyhow::bail!(
+                    "root_volume_iops for node {} exceeds io1 maximum of 64000",
+                    i + 1
+                )
             }
             (Some(iops), "io2") if iops > 256000 => {
-                anyhow::bail!("root_volume_iops for node {} exceeds io2 maximum of 256000", i + 1)
+                anyhow::bail!(
+                    "root_volume_iops for node {} exceeds io2 maximum of 256000",
+                    i + 1
+                )
             }
             (Some(_), "gp2") => {
-                anyhow::bail!("root_volume_iops cannot be set for gp2 volumes (node {})", i + 1)
+                anyhow::bail!(
+                    "root_volume_iops cannot be set for gp2 volumes (node {})",
+                    i + 1
+                )
             }
             (Some(iops), _) if iops < 100 => {
                 anyhow::bail!("root_volume_iops for node {} must be at least 100", i + 1)
@@ -587,10 +648,8 @@ pub async fn create(
         .collect::<std::collections::HashSet<_>>()
         .into_iter()
         .collect();
-    let instance_pricing_tracker = utils::ProgressTracker::new(
-        unique_instance_types.len() as u64,
-        Some("instance pricing"),
-    );
+    let instance_pricing_tracker =
+        utils::ProgressTracker::new(unique_instance_types.len() as u64, Some("instance pricing"));
     let live_instance_prices = cloud_interface
         .fetch_prices(&region, &unique_instance_types, &instance_pricing_tracker)
         .await?;
@@ -604,33 +663,49 @@ pub async fn create(
         .into_iter()
         .collect();
     let live_spot_prices = if !spot_instance_types.is_empty() {
-        cloud_interface.fetch_spot_prices(&region, &spot_instance_types, &zone).await?
+        cloud_interface
+            .fetch_spot_prices(&region, &spot_instance_types, &zone)
+            .await?
     } else {
         std::collections::HashMap::new()
     };
 
-    let unique_volume_types: std::collections::HashSet<String> =
-        nodes_to_insert.iter().map(|n| n.root_volume_type.clone()).collect();
-    let mut ebs_price_cache: std::collections::HashMap<String, crate::integrations::providers::aws::EbsPricing> =
-        std::collections::HashMap::new();
+    let unique_volume_types: std::collections::HashSet<String> = nodes_to_insert
+        .iter()
+        .map(|n| n.root_volume_type.clone())
+        .collect();
+    let mut ebs_price_cache: std::collections::HashMap<
+        String,
+        crate::integrations::providers::aws::EbsPricing,
+    > = std::collections::HashMap::new();
     for vt in &unique_volume_types {
-        ebs_price_cache.insert(vt.clone(), cloud_interface.fetch_ebs_pricing(&region, vt).await?);
+        ebs_price_cache.insert(
+            vt.clone(),
+            cloud_interface.fetch_ebs_pricing(&region, vt).await?,
+        );
     }
 
     let mut cost_nodes: Vec<NodeCostBreakdown> = vec![];
     for node in &nodes_to_insert {
         let instance_cost_per_hour = if node.allocation_mode == "spot" {
             *live_spot_prices.get(&node.instance_type).unwrap_or(
-                live_instance_prices.get(&node.instance_type).unwrap_or(&0.0),
+                live_instance_prices
+                    .get(&node.instance_type)
+                    .unwrap_or(&0.0),
             )
         } else {
-            *live_instance_prices.get(&node.instance_type).unwrap_or(&0.0)
+            *live_instance_prices
+                .get(&node.instance_type)
+                .unwrap_or(&0.0)
         };
 
         let ebs_pricing = ebs_price_cache.get(&node.root_volume_type).unwrap();
-        let storage_cost = node.root_volume_gb as f64 * ebs_pricing.storage_per_gb_month / HOURS_PER_MONTH;
-        let extra_throughput = (GP3_PROVISIONED_THROUGHPUT_MBS - GP3_THROUGHPUT_BASELINE_MBS).max(0.0);
-        let throughput_cost = extra_throughput * ebs_pricing.throughput_per_mbs_month / HOURS_PER_MONTH;
+        let storage_cost =
+            node.root_volume_gb as f64 * ebs_pricing.storage_per_gb_month / HOURS_PER_MONTH;
+        let extra_throughput =
+            (GP3_PROVISIONED_THROUGHPUT_MBS - GP3_THROUGHPUT_BASELINE_MBS).max(0.0);
+        let throughput_cost =
+            extra_throughput * ebs_pricing.throughput_per_mbs_month / HOURS_PER_MONTH;
         let ebs_cost_per_hour = storage_cost + throughput_cost;
 
         let iops_cost_per_hour = match (node.root_volume_iops, node.root_volume_type.as_str()) {
@@ -644,7 +719,8 @@ pub async fn create(
             _ => 0.0,
         };
 
-        let node_total_per_hour = instance_cost_per_hour + ebs_cost_per_hour + iops_cost_per_hour + PUBLIC_IPV4_PER_HOUR;
+        let node_total_per_hour =
+            instance_cost_per_hour + ebs_cost_per_hour + iops_cost_per_hour + PUBLIC_IPV4_PER_HOUR;
 
         cost_nodes.push(NodeCostBreakdown {
             node_id: node.id.clone(),
@@ -657,9 +733,44 @@ pub async fn create(
             node_total_per_hour,
         });
     }
-    let total_per_hour = cost_nodes.iter().map(|n| n.node_total_per_hour).sum();
+    let shared_storage_cost = if cluster_yaml.use_fsx_lustre {
+        Some(
+            cloud_interface
+                .fetch_fsx_lustre_cost(
+                    &region,
+                    &fsx_deployment_type,
+                    fsx_storage_capacity_gib,
+                    fsx_per_unit_storage_throughput,
+                )
+                .await?,
+        )
+    } else if cluster_yaml.use_elastic_file_system {
+        Some(
+            cloud_interface
+                .fetch_efs_cost(
+                    &region,
+                    &efs_throughput_mode,
+                    efs_provisioned_throughput_mbs,
+                )
+                .await?,
+        )
+    } else {
+        None
+    };
+    let shared_storage_cost_per_hour = shared_storage_cost
+        .as_ref()
+        .map_or(0.0, |cost| cost.fixed_per_hour);
+    if let Some(rates) = shared_storage_cost.and_then(|cost| cost.usage_rates) {
+        tracing::info!("The shared file system also bills for usage: {}", rates);
+    }
+    let total_per_hour = cost_nodes
+        .iter()
+        .map(|n| n.node_total_per_hour)
+        .sum::<f64>()
+        + shared_storage_cost_per_hour;
     let cost_breakdown = serde_json::to_string(&CostBreakdown {
         nodes: cost_nodes,
+        shared_storage_cost_per_hour,
         total_per_hour,
     })?;
 
@@ -678,8 +789,14 @@ pub async fn create(
         cluster_yaml.use_node_affinity,
         "Use Elastic Fabric Adapters (EFAs)",
         cluster_yaml.use_elastic_fabric_adapters,
-        "Use Elastic File System (EFS)",
-        cluster_yaml.use_elastic_file_system,
+        "Use Shared File System",
+        if cluster_yaml.use_fsx_lustre {
+            "FSx for Lustre"
+        } else if cluster_yaml.use_elastic_file_system {
+            "Elastic File System (EFS)"
+        } else {
+            "None"
+        },
         "Provider Config",
         provider_config.display_name,
         "Node Count",
@@ -736,7 +853,9 @@ pub async fn create(
                     Some(_) => {}
                     None => anyhow::bail!(
                         "on_interruption.nodes[{}]: instance type '{}' is unavailable in region '{}'",
-                        i, type_name, region
+                        i,
+                        type_name,
+                        region
                     ),
                 }
             }
@@ -745,14 +864,11 @@ pub async fn create(
                 Some("on-demand") | Some("on_demand") | None => "on-demand".to_string(),
                 Some(invalid) => anyhow::bail!(
                     "on_interruption.nodes[{}]: invalid allocation_mode '{}'",
-                    i, invalid
+                    i,
+                    invalid
                 ),
             };
-            let root_volume_type = rn
-                .root_volume_type
-                .as_deref()
-                .unwrap_or("gp3")
-                .to_string();
+            let root_volume_type = rn.root_volume_type.as_deref().unwrap_or("gp3").to_string();
             let root_volume_gb = rn.root_volume_gb.unwrap_or(100);
             cloud_interface
                 .fetch_machine_image(&region, &rn.image_id)
@@ -810,13 +926,22 @@ pub async fn create(
         efs_performance_mode,
         efs_throughput_mode,
         efs_provisioned_throughput_mbs,
+        use_fsx_lustre: cluster_yaml.use_fsx_lustre,
+        fsx_deployment_type,
+        fsx_storage_capacity_gib,
+        fsx_per_unit_storage_throughput,
         created_at: Utc::now().naive_utc(),
         state: ClusterState::Pending,
         cost_per_hour: total_per_hour,
         cost_breakdown,
     };
     cluster
-        .insert(pool, nodes_to_insert, commands_to_insert, recovery_nodes_to_insert)
+        .insert(
+            pool,
+            nodes_to_insert,
+            commands_to_insert,
+            recovery_nodes_to_insert,
+        )
         .await?;
 
     tracing::info!(

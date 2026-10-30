@@ -109,7 +109,10 @@ impl SshSession {
                     return Ok(());
                 }
                 Ok(Err(_)) | Err(_) => {
-                    tracing::info!("SSH not yet ready on '{}', retrying in 5s...", self.display());
+                    tracing::info!(
+                        "SSH not yet ready on '{}', retrying in 5s...",
+                        self.display()
+                    );
                     sleep(Duration::from_secs(5)).await;
                 }
             }
@@ -133,7 +136,10 @@ impl SshSession {
                     return Ok(());
                 }
                 Err(_) => {
-                    tracing::info!("SSH not yet ready on '{}', retrying in 5s...", self.display());
+                    tracing::info!(
+                        "SSH not yet ready on '{}', retrying in 5s...",
+                        self.display()
+                    );
                     sleep(Duration::from_secs(5)).await;
                 }
             }
@@ -374,7 +380,8 @@ impl SshSession {
             .args([
                 "-az",
                 "--no-relative",
-                "-e", &ssh_opts,
+                "-e",
+                &ssh_opts,
                 &remote_src,
                 local_path,
             ])

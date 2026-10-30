@@ -6,6 +6,7 @@ use aws_credential_types::{Credentials, provider::SharedCredentialsProvider};
 use aws_sdk_ec2::Client as Ec2Client;
 use aws_sdk_efs::Client as EfsClient;
 use aws_sdk_eventbridge::Client as EventBridgeClient;
+use aws_sdk_fsx::Client as FsxClient;
 use aws_sdk_pricing::Client as PricingClient;
 use aws_sdk_servicequotas::Client as ServiceQuotasClient;
 use aws_sdk_sqs::Client as SqsClient;
@@ -17,6 +18,7 @@ pub struct AwsClusterContext {
     // AWS SDK Clients
     pub ec2_client: Ec2Client,
     pub efs_client: EfsClient,
+    pub fsx_client: FsxClient,
 
     // Core cluster information for tagging and filtering
     pub cluster_id: String,
@@ -32,6 +34,7 @@ pub struct AwsClusterContext {
     pub placement_group_name: String,
     pub ssh_key_name: String,
     pub efs_device_name: String,
+    pub fsx_file_system_name: String,
 
     // Resource identifiers (populated during creation/discovery)
     pub vpc_id: Option<String>,
@@ -47,6 +50,7 @@ pub struct AwsClusterContext {
     pub ec2_instance_ids: HashMap<usize, String>,
     pub efs_device_id: Option<String>,
     pub efs_mount_target_id: Option<String>,
+    pub fsx_file_system_id: Option<String>,
 
     // Cluster and network configuration
     pub availability_zone: String,
@@ -60,11 +64,21 @@ pub struct AwsClusterContext {
     pub efs_performance_mode: String,
     pub efs_throughput_mode: String,
     pub efs_provisioned_throughput_mbs: Option<f64>,
+
+    // FSx for Lustre configuration
+    pub fsx_deployment_type: String,
+    pub fsx_storage_capacity_gib: i64,
+    pub fsx_per_unit_storage_throughput: Option<i64>,
 }
 
 impl AwsClusterContext {
     /// Create a new ClusterContext from a Cluster and AWS clients
-    pub fn new(cluster: &Cluster, ec2_client: Ec2Client, efs_client: EfsClient) -> Self {
+    pub fn new(
+        cluster: &Cluster,
+        ec2_client: Ec2Client,
+        efs_client: EfsClient,
+        fsx_client: FsxClient,
+    ) -> Self {
         let cluster_id = cluster.id.to_string();
         let cluster_id_tag = aws_sdk_ec2::types::Tag::builder()
             .key("ClusterId")
@@ -81,6 +95,7 @@ impl AwsClusterContext {
             cluster_id_filter,
             ec2_client,
             efs_client,
+            fsx_client,
 
             // Generate resource names
             vpc_name: format!("{}-VPC", cluster_id),
@@ -91,6 +106,7 @@ impl AwsClusterContext {
             placement_group_name: format!("{}-PG", cluster_id),
             ssh_key_name: format!("{}-KEY", cluster_id),
             efs_device_name: format!("{}-EFS", cluster_id),
+            fsx_file_system_name: format!("{}-FSX", cluster_id),
 
             // Initialize resource IDs as None/empty
             vpc_id: None,
@@ -106,6 +122,7 @@ impl AwsClusterContext {
             ec2_instance_ids: HashMap::new(),
             efs_device_id: None,
             efs_mount_target_id: None,
+            fsx_file_system_id: None,
 
             // Copy some cluster configuration for convenience
             availability_zone: cluster.availability_zone.clone(),
@@ -119,6 +136,9 @@ impl AwsClusterContext {
             efs_performance_mode: cluster.efs_performance_mode.clone(),
             efs_throughput_mode: cluster.efs_throughput_mode.clone(),
             efs_provisioned_throughput_mbs: cluster.efs_provisioned_throughput_mbs,
+            fsx_deployment_type: cluster.fsx_deployment_type.clone(),
+            fsx_storage_capacity_gib: cluster.fsx_storage_capacity_gib,
+            fsx_per_unit_storage_throughput: cluster.fsx_per_unit_storage_throughput,
         }
     }
 
@@ -189,6 +209,12 @@ impl AwsInterface {
         Ok(Ec2Client::new(&config))
     }
 
+    /// Get an FSx client configured with the provided credentials and region.
+    pub async fn get_fsx_client(&self, region: &str) -> Result<FsxClient> {
+        let config = self.get_config(region).await?;
+        Ok(FsxClient::new(&config))
+    }
+
     /// Get an EFS client configured with the provided credentials and region.
     pub async fn get_efs_client(&self, region: &str) -> Result<EfsClient> {
         let config = self.get_config(region).await?;
@@ -223,6 +249,9 @@ impl AwsInterface {
     pub async fn create_cluster_context(&self, cluster: &Cluster) -> Result<AwsClusterContext> {
         let ec2_client = self.get_ec2_client(&cluster.region).await?;
         let efs_client = self.get_efs_client(&cluster.region).await?;
-        Ok(AwsClusterContext::new(cluster, ec2_client, efs_client))
+        let fsx_client = self.get_fsx_client(&cluster.region).await?;
+        Ok(AwsClusterContext::new(
+            cluster, ec2_client, efs_client, fsx_client,
+        ))
     }
 }

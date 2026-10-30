@@ -4,7 +4,9 @@ use clap::{Parser, Subcommand};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool};
 use std::fs::OpenOptions;
 use std::str::FromStr;
-use tracing_subscriber::{Layer, filter::LevelFilter, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{
+    Layer, filter::LevelFilter, layer::SubscriberExt, util::SubscriberInitExt,
+};
 
 /// Routes tracing stdout output through the active `MultiProgress` (if any),
 /// so progress bars and log lines don't corrupt each other.
@@ -390,7 +392,11 @@ async fn main() -> Result<()> {
             ClusterCommands::List {} => {
                 commands::cluster::list(&sqlite_pool).await?;
             }
-            ClusterCommands::Spawn { cluster_id, yes, retry } => {
+            ClusterCommands::Spawn {
+                cluster_id,
+                yes,
+                retry,
+            } => {
                 commands::cluster::spawn(&sqlite_pool, cluster_id, *yes, *retry).await?;
             }
             ClusterCommands::Terminate { cluster_id, yes } => {
@@ -430,7 +436,15 @@ async fn main() -> Result<()> {
                 no_replace,
                 phased,
             } => {
-                commands::cluster::watch(&sqlite_pool, cluster_id, *interval, tasks_yaml.as_deref(), *no_replace, *phased).await?;
+                commands::cluster::watch(
+                    &sqlite_pool,
+                    cluster_id,
+                    *interval,
+                    tasks_yaml.as_deref(),
+                    *no_replace,
+                    *phased,
+                )
+                .await?;
             }
         },
         Commands::InstanceType { command } => match command {
